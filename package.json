@@ -50,6 +50,7 @@
     "productName": "LunarSpace Launcher",
     "copyright": "Copyright © 2026 LunarSpace",
     "asar": true,
+    "afterPack": "scripts/after-pack.cjs",
     "directories": {
       "output": "dist-electron",
       "buildResources": "build-resources"
