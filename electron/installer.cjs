@@ -324,6 +324,15 @@ async function waitTargetFree(dir) {
   return !targetLocked(dir)
 }
 
+function closeRunningApp(dir) {
+  if (process.platform !== 'win32') return Promise.resolve()
+  const exe = path.join(dir, APP_EXE)
+  const script = `Get-CimInstance Win32_Process -Filter "Name='${APP_EXE}'" | Where-Object { $_.ExecutablePath -ieq '${exe}' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`
+  return new Promise((resolve) => {
+    execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true }, () => resolve())
+  })
+}
+
 async function runInstall(dir) {
   if (running) return { ok: false, error: 'busy' }
   running = true
@@ -338,7 +347,11 @@ async function runInstall(dir) {
     const free = await freeSpace(dir)
     if (free && free < total * 1.1) throw new Error('no space')
 
-    if (!(await waitTargetFree(dir))) throw new Error('running')
+    if (targetLocked(dir)) {
+      setState({ phase: 'copy', installDir: dir, percent: 0, bytesDone: 0, totalBytes: total, file: '', step: 'closing', error: '' })
+      await closeRunningApp(dir)
+      if (!(await waitTargetFree(dir))) throw new Error('running')
+    }
 
     setState({ phase: 'copy', installDir: dir, percent: 0, bytesDone: 0, totalBytes: total, file: '', step: 'files', error: '' })
 
@@ -372,8 +385,12 @@ function launchInstalled() {
     setState({ phase: 'error', error: 'missing exe' })
     return { ok: false }
   }
+  const env = { ...process.env }
+  delete env.PORTABLE_EXECUTABLE_DIR
+  delete env.PORTABLE_EXECUTABLE_FILE
+  delete env.PORTABLE_EXECUTABLE_APP_FILENAME
   try {
-    spawn(exe, [], { detached: true, stdio: 'ignore' }).unref()
+    spawn(exe, [], { detached: true, stdio: 'ignore', env }).unref()
   } catch (err) {
     setState({ phase: 'error', error: err?.message || 'launch failed' })
     return { ok: false }

@@ -221,6 +221,7 @@ const vi = {
   'installer.open': 'Mở LunarSpace Launcher',
   'installer.working': 'Đang cài đặt…',
   'installer.step.files': 'Đang sao chép tệp',
+  'installer.step.closing': 'Đang đóng LunarSpace Launcher đang chạy',
   'installer.step.shortcuts': 'Đang tạo lối tắt',
   'installer.step.registry': 'Đang đăng ký với Windows',
   'installer.step.done': 'Hoàn tất',

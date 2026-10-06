@@ -92,6 +92,7 @@ export default function InstallerApp() {
   const accentBar = phase === 'error' ? FILL.failed : phase === 'done' ? FILL.done : FILL.run
 
   const stepLabel = {
+    closing: tr('installer.step.closing'),
     files: tr('installer.step.files'),
     shortcuts: tr('installer.step.shortcuts'),
     registry: tr('installer.step.registry'),
@@ -196,7 +197,7 @@ export default function InstallerApp() {
               </span>
             </div>
             <div className="flex flex-col gap-2 mt-1">
-              <Step c={c} active={state?.step === 'files'} done={state?.step !== 'files'} label={tr('installer.step.files')} />
+              <Step c={c} active={state?.step === 'files' || state?.step === 'closing'} done={state?.step !== 'files' && state?.step !== 'closing'} label={tr('installer.step.files')} />
               <Step c={c} active={state?.step === 'shortcuts'} done={state?.step === 'registry' || state?.step === 'done'} label={tr('installer.step.shortcuts')} />
               <Step c={c} active={state?.step === 'registry'} done={state?.step === 'done'} label={tr('installer.step.registry')} />
             </div>

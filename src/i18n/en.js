@@ -221,6 +221,7 @@ const en = {
   'installer.open': 'Open LunarSpace Launcher',
   'installer.working': 'Installing…',
   'installer.step.files': 'Copying files',
+  'installer.step.closing': 'Closing the running LunarSpace Launcher',
   'installer.step.shortcuts': 'Creating shortcuts',
   'installer.step.registry': 'Registering with Windows',
   'installer.step.done': 'Finished',
