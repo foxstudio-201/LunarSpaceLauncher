@@ -1,5 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
-import { ArrowsClockwise, Globe, Check, MagnifyingGlass, FolderOpen, WarningCircle, SpinnerGap, PlayCircle } from '@phosphor-icons/react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  ArrowsClockwise, Globe, Check, MagnifyingGlass, FolderOpen, WarningCircle, SpinnerGap, PlayCircle,
+  FileArrowUp, X, CheckCircle,
+} from '@phosphor-icons/react'
 import { t } from '../../i18n/translations'
 import { palette } from '../../lib/palette'
 import { formatDate } from '../../lib/status'
@@ -11,6 +14,8 @@ import * as api from '../../api/client.js'
 
 const MEMORY_STEPS = [1024, 2048, 3072, 4096, 6144, 8192, 12288, 16384]
 const DRAFT_KEY = 'luns.version-draft'
+const PACK_EXT = /\.(mrpack|zip)$/i
+const IMPORT_MEMORY = 4096
 
 function readDraft() {
   try {
@@ -22,7 +27,8 @@ function readDraft() {
 
 export default function VersionsPage({
   theme, lang, versions, latest, source, loading, error, snapshots, defaultInstanceDir,
-  progress, activeAccount, onToggleSnapshots, onRefresh, onOpenAccounts, onCreate,
+  progress, packProgress, activeAccount, onToggleSnapshots, onRefresh, onOpenAccounts, onCreate,
+  onRefreshInstances, onSelectInstance,
 }) {
   const c = palette(theme)
   const draft = readDraft()
@@ -43,6 +49,116 @@ export default function VersionsPage({
   const [supported, setSupported] = useState(null)
   const [gamesLoading, setGamesLoading] = useState(false)
   const [noBuilds, setNoBuilds] = useState(false)
+
+  const [importOpen, setImportOpen] = useState(false)
+  const [dropActive, setDropActive] = useState(false)
+  const [importPath, setImportPath] = useState('')
+  const [importName, setImportName] = useState('')
+  const [importMemory, setImportMemory] = useState(IMPORT_MEMORY)
+  const [importDir, setImportDir] = useState('')
+  const [importBusy, setImportBusy] = useState(false)
+  const [importError, setImportError] = useState('')
+  const [importToken, setImportToken] = useState('')
+  const [importDone, setImportDone] = useState(null)
+
+  const importLive = importToken ? packProgress?.[importToken] : null
+  const importFile = importPath ? String(importPath).split(/[\\/]/).pop() : ''
+
+  const closeImport = useCallback(() => {
+    if (importBusy) return
+    setImportOpen(false)
+    setDropActive(false)
+    setImportError('')
+    setImportDone(null)
+  }, [importBusy])
+
+  useEffect(() => {
+    if (!importOpen) return undefined
+    const onKey = (e) => {
+      if (e.key === 'Escape' && !importBusy) closeImport()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [importOpen, importBusy, closeImport])
+
+  const acceptImportFile = useCallback((filePath) => {
+    const filename = String(filePath || '').split(/[\\/]/).pop()
+    if (!PACK_EXT.test(filename)) {
+      setImportError(lang === 'vi'
+        ? 'Chỉ nhận tệp .mrpack hoặc .zip (CurseForge hay bản xuất profile của LunarSpace).'
+        : 'Only .mrpack, CurseForge .zip or a LunarSpace profile export.')
+      return
+    }
+    setImportError('')
+    setImportDone(null)
+    setImportPath(filePath)
+    setImportName(filename.replace(PACK_EXT, ''))
+  }, [lang])
+
+  const pickImportFile = useCallback(async () => {
+    setImportError('')
+    try {
+      const res = await api.chooseModpack()
+      if (!res?.ok) {
+        if (res?.error) setImportError(res.error)
+        return
+      }
+      acceptImportFile(res.path)
+    } catch (err) {
+      setImportError(err.message)
+    }
+  }, [acceptImportFile])
+
+  const onImportDrop = useCallback((e) => {
+    e.preventDefault()
+    setDropActive(false)
+    const file = e.dataTransfer?.files?.[0]
+    if (!file) return
+    const dropped = api.pathForFile(file)
+    if (!dropped) {
+      setImportError(lang === 'vi' ? 'Không đọc được đường dẫn tệp.' : 'Could not read the file path.')
+      return
+    }
+    acceptImportFile(dropped)
+  }, [acceptImportFile, lang])
+
+  const chooseImportDir = useCallback(async () => {
+    const res = await api.chooseDirectory({ defaultPath: importDir || defaultInstanceDir }).catch(() => null)
+    if (res?.ok) setImportDir(res.path)
+  }, [importDir, defaultInstanceDir])
+
+  const runImport = useCallback(async () => {
+    if (!importPath) {
+      setImportError(lang === 'vi' ? 'Chưa chọn tệp để nhập.' : 'Pick a file to import.')
+      return
+    }
+    setImportError('')
+    setImportDone(null)
+    setImportBusy(true)
+    try {
+      const res = await api.modpackImport({ filePath: importPath })
+      if (!res?.ok) {
+        setImportBusy(false)
+        return setImportError(res?.error || 'error')
+      }
+      setImportToken(res.plan.token)
+      const out = await api.modpackInstall({
+        token: res.plan.token,
+        name: importName.trim() || res.plan.name,
+        dir: importDir || undefined,
+        memoryMb: importMemory,
+      })
+      setImportToken('')
+      setImportBusy(false)
+      if (!out?.ok) return setImportError(out?.error || 'error')
+      setImportDone(out.instance)
+      onRefreshInstances?.()
+    } catch (err) {
+      setImportToken('')
+      setImportBusy(false)
+      setImportError(err?.message || 'error')
+    }
+  }, [importPath, importName, importDir, importMemory, lang, onRefreshInstances])
 
   useEffect(() => {
     if (loader === 'vanilla') {
@@ -172,6 +288,14 @@ export default function VersionsPage({
           <Globe size={12} weight="duotone" />
           {source === 'mojang' ? t(lang, 'versions.sourceMojang') : source}
         </span>
+        <button
+          onClick={() => { setImportError(''); setImportDone(null); setImportOpen(true) }}
+          className="h-9 px-3 rounded-lg text-[11px] font-bold flex items-center gap-2 transition-all hover:opacity-90 active:scale-[0.98]"
+          style={{ background: c.accent, color: '#0a0a0a' }}
+        >
+          <FileArrowUp size={14} weight="bold" />
+          {lang === 'vi' ? 'Nhập profile' : 'Import profile'}
+        </button>
         <button
           onClick={() => onToggleSnapshots(!snapshots)}
           className="h-9 px-3 rounded-lg text-[11px] font-semibold transition-colors"
@@ -523,6 +647,177 @@ export default function VersionsPage({
         </div>
       </aside>
       </div>
+
+      {importOpen && (
+        <div
+          className="modal-backdrop fixed inset-0 z-[210] flex items-center justify-center p-6"
+          onClick={closeImport}
+        >
+          <div
+            className="modal-content w-full max-w-[520px] rounded-2xl flex flex-col overflow-hidden"
+            style={{ background: c.surface, border: `1px solid ${c.border}` }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2 px-4 py-3" style={{ borderBottom: `1px solid ${c.border}` }}>
+              <FileArrowUp size={15} weight="duotone" style={{ color: c.accent }} />
+              <p className="text-[12px] font-bold flex-1" style={{ color: c.text }}>
+                {lang === 'vi' ? 'Nhập profile / modpack từ tệp' : 'Import profile / modpack from file'}
+              </p>
+              <button
+                onClick={closeImport}
+                className="w-6 h-6 rounded-md flex items-center justify-center"
+                style={{ color: c.faint }}
+              >
+                <X size={13} weight="bold" />
+              </button>
+            </div>
+
+            <div className="p-4 flex flex-col gap-3">
+              <div
+                onClick={pickImportFile}
+                onDragOver={(e) => { e.preventDefault(); setDropActive(true) }}
+                onDragEnter={(e) => { e.preventDefault(); setDropActive(true) }}
+                onDragLeave={() => setDropActive(false)}
+                onDrop={onImportDrop}
+                className="rounded-xl flex flex-col items-center justify-center gap-2 py-7 px-6 text-center cursor-pointer transition-colors"
+                style={{
+                  border: `2px dashed ${dropActive ? c.accent : c.border}`,
+                  background: dropActive ? 'rgba(167,139,250,0.07)' : c.input,
+                }}
+              >
+                <span className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: c.surface, border: `1px solid ${c.border}` }}>
+                  <FileArrowUp size={20} weight="duotone" style={{ color: c.accent }} />
+                </span>
+                {importFile ? (
+                  <>
+                    <p className="text-[12px] font-bold break-all" style={{ color: c.text }}>{importFile}</p>
+                    <p className="text-[10px]" style={{ color: c.faint }}>
+                      {lang === 'vi' ? 'bấm để chọn tệp khác' : 'click to choose another file'}
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-[12px] font-bold" style={{ color: c.text }}>
+                      {lang === 'vi' ? 'Kéo thả tệp vào đây' : 'Drop the file here'}
+                    </p>
+                    <p className="text-[10px]" style={{ color: c.faint }}>
+                      {lang === 'vi'
+                        ? 'hoặc bấm để chọn — .mrpack, .zip CurseForge, hoặc bản xuất profile của LunarSpace'
+                        : 'or click to browse — .mrpack, CurseForge .zip, or a LunarSpace profile export'}
+                    </p>
+                  </>
+                )}
+              </div>
+
+              <div className="flex items-end gap-2">
+                <label className="flex flex-col gap-1 min-w-0 flex-1">
+                  <span className="text-[9px] font-semibold uppercase tracking-[0.12em]" style={{ color: c.faint }}>
+                    {lang === 'vi' ? 'Tên phiên bản' : 'Instance name'}
+                  </span>
+                  <input
+                    value={importName}
+                    onChange={(e) => setImportName(e.target.value)}
+                    placeholder="my-instance"
+                    className="w-full h-9 px-2.5 rounded-lg text-[11px] outline-none"
+                    style={{ background: c.input, border: `1px solid ${c.border}`, color: c.text }}
+                  />
+                </label>
+                <label className="flex flex-col gap-1 w-[104px] shrink-0">
+                  <span className="text-[9px] font-semibold uppercase tracking-[0.12em]" style={{ color: c.faint }}>RAM (MB)</span>
+                  <input
+                    type="number"
+                    min={1024}
+                    max={32768}
+                    step={512}
+                    value={importMemory}
+                    onChange={(e) => setImportMemory(Number(e.target.value) || 0)}
+                    className="w-full h-9 px-2.5 rounded-lg text-[11px] font-mono outline-none"
+                    style={{ background: c.input, border: `1px solid ${c.border}`, color: c.text }}
+                  />
+                </label>
+              </div>
+
+              <label className="flex flex-col gap-1 min-w-0">
+                <span className="text-[9px] font-semibold uppercase tracking-[0.12em]" style={{ color: c.faint }}>
+                  {lang === 'vi' ? 'Thư mục' : 'Folder'}
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <input
+                    value={importDir}
+                    onChange={(e) => setImportDir(e.target.value)}
+                    placeholder={defaultInstanceDir ? `${defaultInstanceDir}\\…` : (lang === 'vi' ? 'Tự động' : 'Automatic')}
+                    className="min-w-0 flex-1 h-9 px-2.5 rounded-lg text-[10px] font-mono outline-none"
+                    style={{ background: c.input, border: `1px solid ${c.border}`, color: c.text }}
+                  />
+                  <button
+                    onClick={chooseImportDir}
+                    data-tip={t(lang, 'settings.openFolder')}
+                    className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
+                    style={{ background: c.input, border: `1px solid ${c.border}`, color: c.label }}
+                  >
+                    <FolderOpen size={14} weight="duotone" />
+                  </button>
+                </span>
+              </label>
+
+              <p className="text-[10px] leading-relaxed" style={{ color: c.faint }}>
+                {lang === 'vi'
+                  ? 'Profile sẽ được giải nén vào phiên bản mới (mod, config, resourcepack, shader… — không có saves/logs).'
+                  : 'The profile is unpacked into a new instance (mods, configs, resource packs, shaders… — no saves or logs).'}
+              </p>
+
+              {importError && (
+                <div className="flex items-start gap-2 rounded-lg px-2.5 py-2" style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.28)' }}>
+                  <WarningCircle size={13} weight="duotone" className="shrink-0 mt-0.5" style={{ color: '#f87171' }} />
+                  <span className="text-[10px] leading-relaxed" style={{ color: '#f87171' }}>{importError}</span>
+                </div>
+              )}
+
+              {importLive && <ProgressBar theme={theme} lang={lang} progress={importLive} />}
+
+              {importDone && (
+                <div className="rounded-lg px-2.5 py-2 flex items-center gap-2" style={{ background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.3)' }}>
+                  <CheckCircle size={13} weight="fill" style={{ color: '#22c55e' }} />
+                  <span className="text-[10px] font-semibold flex-1 min-w-0 truncate" style={{ color: '#22c55e' }}>
+                    {lang === 'vi' ? 'Đã tạo' : 'Created'} {importDone.name}
+                  </span>
+                  {onSelectInstance && (
+                    <button
+                      onClick={() => { onSelectInstance(importDone); closeImport() }}
+                      className="text-[10px] font-bold shrink-0"
+                      style={{ color: c.accent }}
+                    >
+                      {lang === 'vi' ? 'Mở' : 'Open'}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="px-4 py-3 flex items-center gap-2" style={{ borderTop: `1px solid ${c.border}` }}>
+              <button
+                onClick={closeImport}
+                className="h-9 px-3 rounded-lg text-[11px] font-semibold"
+                style={{ background: c.input, border: `1px solid ${c.border}`, color: c.label }}
+              >
+                {lang === 'vi' ? 'Đóng' : 'Close'}
+              </button>
+              <span className="flex-1" />
+              <button
+                onClick={runImport}
+                disabled={importBusy || !importPath}
+                className="h-9 px-4 rounded-lg text-[11px] font-bold flex items-center gap-2 transition-all hover:opacity-90 active:scale-[0.99] disabled:opacity-50"
+                style={{ background: c.accent, color: '#0a0a0a' }}
+              >
+                {importBusy ? <SpinnerGap size={13} className="animate-spin" /> : <FileArrowUp size={13} weight="bold" />}
+                {importBusy
+                  ? (lang === 'vi' ? 'Đang nhập…' : 'Importing…')
+                  : (lang === 'vi' ? 'Nhập vào phiên bản mới' : 'Import as new instance')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

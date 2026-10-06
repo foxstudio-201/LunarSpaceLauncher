@@ -1343,6 +1343,7 @@ function packView(plan, token) {
     extras: plan.extras || 0,
     missing: (plan.missing || []).length,
     overrides: (plan.overrides || []).length,
+    profileFiles: plan.profileFiles || 0,
   }
 }
 
@@ -1411,12 +1412,15 @@ async function modpackImport({ filePath } = {}) {
   if (!filePath) return { ok: false, error: 'Thiếu tệp modpack.' }
   const { notes, onLog } = packNotes()
   try {
-    const plan = path.extname(filePath).toLowerCase() === '.mrpack'
-      ? await modpack.planFromMrpack({ zipPath: filePath, onLog })
-      : await modpack.planFromCurseforgeZip({ zipPath: filePath, onLog })
+    let plan
+    if (path.extname(filePath).toLowerCase() === '.mrpack') {
+      plan = await modpack.planFromMrpack({ zipPath: filePath, onLog })
+    } else {
+      plan = await modpack.planFromCurseforgeZip({ zipPath: filePath, onLog })
+    }
     normalizePackPlan(plan)
     plan.notes = notes
-    if (!plan.files.length) throw new Error('Modpack này không có tệp mod nào để tải.')
+    if (!plan.files.length && !(plan.overrides || []).length) throw new Error('Gói này không có tệp nào để cài.')
     return { ok: true, plan: packView(plan, rememberPack(plan)) }
   } catch (err) {
     return { ok: false, error: err.message }
@@ -1492,6 +1496,7 @@ async function modpackInstall({ token, name, dir, icon = '', memoryMb = 4096, se
       planned: plan.files.length,
       downloaded: res.downloaded,
       overrides: res.overrides,
+      profileFiles: plan.profileFiles || 0,
       failed: res.failed.length,
       failedNames: res.failed.slice(0, 8),
       missing: (plan.missing || []).length,

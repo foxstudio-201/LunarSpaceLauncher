@@ -251,7 +251,7 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
   const acceptFile = useCallback((path) => {
     const filename = String(path || '').split(/[\\/]/).pop()
     if (!MODPACK_EXT.test(filename)) {
-      setDropError(vn(lang, 'Chỉ nhận tệp .mrpack hoặc .zip của CurseForge.', 'Only .mrpack or CurseForge .zip files.'))
+      setDropError(vn(lang, 'Chỉ nhận tệp .mrpack hoặc .zip (CurseForge hay bản xuất profile của LunarSpace).', 'Only .mrpack, CurseForge .zip or a LunarSpace profile export.'))
       return
     }
     reset()
@@ -317,6 +317,10 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
     if (imported) {
       setStage('import')
       res = await api.modpackImport({ filePath: imported.path })
+      if (res?.ok) {
+        const info = { profile: res.plan?.source === 'profile', files: res.plan?.profileFiles || 0 }
+        setImported((prev) => (prev ? { ...prev, ...info } : prev))
+      }
     } else {
       if (!selected) return
       setStage('resolve')
@@ -593,7 +597,11 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
                   )}
                   {imported && (
                     <p className="mt-1.5 text-[11px] leading-relaxed" style={{ color: c.label }}>
-                      {vn(lang, '.mrpack hoặc .zip CurseForge — sẽ tự tách manifest, mod và overrides.', '.mrpack or CurseForge .zip — manifest, mods and overrides are applied for you.')}
+                      {vn(
+                        lang,
+                        '.mrpack, .zip CurseForge, hoặc bản xuất profile của LunarSpace — mod, config và overrides được đưa vào phiên bản mới.',
+                        '.mrpack, CurseForge .zip, or a LunarSpace profile export — mods, configs and overrides go into the new instance.',
+                      )}
                     </p>
                   )}
                 </div>
@@ -644,14 +652,30 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
                     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
                       <Stat c={c} label={vn(lang, 'Nguồn', 'Source')} value={vn(lang, 'Tệp', 'File')} />
                       <Stat c={c} label={vn(lang, 'Định dạng', 'Format')} value={/\.mrpack$/i.test(imported.name) ? 'mrpack' : 'zip'} />
-                      <Stat c={c} label={vn(lang, 'Kiểu', 'Type')} value={/\.mrpack$/i.test(imported.name) ? 'Modrinth' : 'CurseForge'} />
+                      <Stat
+                        c={c}
+                        label={vn(lang, 'Kiểu', 'Type')}
+                        value={
+                          /\.mrpack$/i.test(imported.name)
+                            ? 'Modrinth'
+                            : imported.profile
+                              ? vn(lang, 'Profile LunarSpace', 'LunarSpace profile')
+                              : 'CurseForge'
+                        }
+                      />
                       <Stat c={c} label={vn(lang, 'Tên', 'Name')} value={name || '—'} />
                       <Stat c={c} label="RAM" value={`${memory} MB`} />
                     </div>
                     <Box c={c} title={vn(lang, 'Tệp đã chọn', 'Selected file')} icon={FileArrowUp}>
                       <p className="text-[11px] font-mono break-all" style={{ color: c.text }}>{imported.path}</p>
                       <p className="mt-2 text-[10px] leading-relaxed" style={{ color: c.label }}>
-                        {vn(lang, 'Bấm "Cài đặt modpack" ở dưới để tạo phiên bản từ tệp này.', 'Hit “Install modpack” below to create an instance from this file.')}
+                        {imported.profile
+                          ? vn(
+                              lang,
+                              `Profile này có ${imported.files} tệp (mod, config, resourcepack…) — sẽ được giải nén vào phiên bản mới.`,
+                              `This profile holds ${imported.files} files (mods, configs, resource packs…) — they are unpacked into the new instance.`,
+                            )
+                          : vn(lang, 'Bấm "Cài đặt modpack" ở dưới để tạo phiên bản từ tệp này.', 'Hit “Install modpack” below to create an instance from this file.')}
                       </p>
                     </Box>
                   </div>
@@ -1068,9 +1092,14 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
                     </div>
                     {result && (
                       <p className="text-[10px] font-mono tabular-nums" style={{ color: '#22c55e' }}>
-                        {result.downloaded}/{result.planned} mod
-                        {result.extras ? ` · +${result.extras} modlist.html` : ''}
-                        {result.overrides ? ` · ${result.overrides} overrides` : ''}
+                        {[
+                          result.planned ? `${result.downloaded}/${result.planned} mod` : '',
+                          result.profileFiles ? `${result.profileFiles} ${vn(lang, 'tệp profile', 'profile files')}` : '',
+                          result.extras ? `+${result.extras} modlist.html` : '',
+                          result.overrides ? `${result.overrides} overrides` : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
                       </p>
                     )}
                     {result && result.failed + result.missing > 0 && (

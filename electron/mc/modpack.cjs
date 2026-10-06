@@ -342,17 +342,23 @@ function overridePrefixes(list) {
   return set
 }
 
-async function extractOverrides({ entries, prefixes, targetDir }) {
-  if (!prefixes.length) return 0
+async function extractOverrides({ entries, prefixes, targetDir, tree = false }) {
+  if (!tree && !prefixes.length) return 0
   const needles = prefixes.map((p) => `${p}/`)
   let count = 0
   for (const entry of entries) {
     if (entry.isDirectory) continue
     const name = entry.entryName.replace(/\\/g, '/')
     const low = name.toLowerCase()
-    const hit = needles.find((p) => low.startsWith(p))
-    if (!hit) continue
-    const rel = name.slice(hit.length)
+    let rel = null
+    if (tree) {
+      if (low === PROFILE_FILE) continue
+      rel = name
+    } else {
+      const hit = needles.find((p) => low.startsWith(p))
+      if (!hit) continue
+      rel = name.slice(hit.length)
+    }
     if (!rel || rel.split('/').includes('..')) continue
     const dest = path.join(targetDir, rel)
     await fsp.mkdir(path.dirname(dest), { recursive: true })
@@ -589,7 +595,10 @@ async function planFromCurseforgeZip({ zipPath, onLog, onPlan }) {
   const zip = new AdmZip(zipPath)
   const entries = zip.getEntries()
   const raw = readEntryText(entries, 'manifest.json')
-  if (!raw) throw new Error('Tệp zip không có manifest.json của CurseForge')
+  if (!raw) {
+    if (readEntryText(entries, PROFILE_FILE)) return profilePlan({ zipPath, entries, onLog })
+    throw new Error('Tệp zip không có manifest.json của CurseForge')
+  }
   const manifest = JSON.parse(raw)
   const { loader, loaderVersion } = loaderFromCurseforge(manifest)
   const mc = manifest.minecraft?.version || ''
@@ -671,6 +680,52 @@ async function planFromCurseforgeZip({ zipPath, onLog, onPlan }) {
     zipPath,
     overrides,
     source: 'curseforge',
+  }
+}
+
+const PROFILE_FILE = 'lunarspace-profile.json'
+
+function profilePlan({ zipPath, entries, onLog }) {
+  const raw = readEntryText(entries, PROFILE_FILE)
+  if (!raw) throw new Error('Tệp zip không có lunarspace-profile.json (không phải bản xuất profile của LunarSpace).')
+  let profile = {}
+  try {
+    profile = JSON.parse(raw) || {}
+  } catch {
+    throw new Error('lunarspace-profile.json trong tệp bị hỏng.')
+  }
+  const mc = String(profile.minecraft || '')
+  if (!mc) throw new Error('Profile này không ghi phiên bản Minecraft.')
+  const loader = LOADER_IDS.includes(String(profile.loader || '').toLowerCase()) ? String(profile.loader).toLowerCase() : 'vanilla'
+  const overrides = []
+  let count = 0
+  for (const entry of entries) {
+    if (entry.isDirectory) continue
+    const name = entry.entryName.replace(/\\/g, '/')
+    if (name.toLowerCase() === PROFILE_FILE) continue
+    count += 1
+    const top = (name.includes('/') ? name.split('/')[0] : name).toLowerCase()
+    if (top && !overrides.includes(top)) overrides.push(top)
+  }
+  onLog?.(`[LunarSpace] Profile: ${count} tệp, ${overrides.length} mục gốc.`)
+  return {
+    name: String(profile.name || 'Profile'),
+    summary: 'Xuất từ LunarSpace Launcher',
+    version: '',
+    mc,
+    loader,
+    loaderVersion: profile.loaderVersion ? String(profile.loaderVersion) : null,
+    files: [],
+    missing: [],
+    listed: 0,
+    extras: 0,
+    optional: 0,
+    unresolvedManifest: 0,
+    zipPath,
+    overrides,
+    tree: true,
+    source: 'profile',
+    profileFiles: count,
   }
 }
 
@@ -759,7 +814,12 @@ async function applyPlan({ plan, instanceDir, onProgress, onLog }) {
     }
   }
   const zip = new AdmZip(plan.zipPath)
-  const overrides = await extractOverrides({ entries: zip.getEntries(), prefixes: plan.overrides || [], targetDir: instanceDir })
+  const overrides = await extractOverrides({
+    entries: zip.getEntries(),
+    prefixes: plan.overrides || [],
+    targetDir: instanceDir,
+    tree: !!plan.tree,
+  })
   const failed = [...new Set(errors.map((e) => path.basename(e.file)))]
   if (failed.length) onLog?.(`[LunarSpace] Tải lỗi ${failed.length} tệp: ${failed.slice(0, 6).join(', ')}`)
   return { files: tasks.length, downloaded: tasks.length - failed.length, overrides, errors, failed }
