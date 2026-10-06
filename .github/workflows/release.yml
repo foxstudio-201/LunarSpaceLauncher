@@ -72,8 +72,17 @@ jobs:
       - name: List files
         run: ls -lhR artifacts
 
+      - name: Resolve latest flag
+        id: latest
+        shell: bash
+        run: |
+          highest=$(git ls-remote --tags https://github.com/${{ github.repository }}.git 'refs/tags/v*' | sed 's#.*refs/tags/##' | grep -v '\^{}' | sort -V | tail -1)
+          echo "highest tag: $highest, this tag: $GITHUB_REF_NAME"
+          if [ "$highest" = "$GITHUB_REF_NAME" ]; then echo "make_latest=true" >> "$GITHUB_OUTPUT"; else echo "make_latest=false" >> "$GITHUB_OUTPUT"; fi
+
       - uses: softprops/action-gh-release@v2
         with:
           files: artifacts/**
           draft: false
+          make_latest: ${{ steps.latest.outputs.make_latest }}
           generate_release_notes: true
