@@ -1,20 +1,24 @@
 import { useCallback, useEffect, useState } from 'react'
-import { User, Plus, Check, Trash, Copy, Warning, Info } from '@phosphor-icons/react'
+import { User, Plus, Check, Trash, Copy, Warning, Info, ArrowsClockwise } from '@phosphor-icons/react'
 import { t } from '../../i18n/translations'
 import { palette } from '../../lib/palette'
 import PageHeader from '../ui/PageHeader'
 import HeadSkin from '../ui/HeadSkin'
+import AddAccountModal from '../accounts/AddAccountModal.jsx'
 import * as api from '../../api/client.js'
 
-const MC_NAME = /^[A-Za-z0-9_]{3,16}$/
+const TYPE_LABELS = {
+  offline: 'accounts.kind.offline',
+  microsoft: 'accounts.kind.microsoft',
+  ely: 'accounts.kind.ely',
+}
 
 export default function AccountsPage({ theme, lang, accounts, activeAccountId, onAccountsChanged }) {
   const c = palette(theme)
-  const [draft, setDraft] = useState('')
   const [adding, setAdding] = useState(false)
   const [error, setError] = useState('')
   const [flash, setFlash] = useState(null)
-  const [busy, setBusy] = useState(false)
+  const [refreshing, setRefreshing] = useState('')
 
   useEffect(() => {
     if (!flash) return undefined
@@ -35,22 +39,6 @@ export default function AccountsPage({ theme, lang, accounts, activeAccountId, o
     return true
   }, [onAccountsChanged])
 
-  const add = async () => {
-    const name = draft.trim()
-    if (!MC_NAME.test(name)) {
-      setError(t(lang, 'accounts.nameRule'))
-      return
-    }
-    setBusy(true)
-    const res = await api.addAccount({ name })
-    setBusy(false)
-    const ok = await apply(res, res?.duplicate ? t(lang, 'accounts.duplicate') : t(lang, 'accounts.added'))
-    if (ok) {
-      setDraft('')
-      setAdding(false)
-    }
-  }
-
   const setActive = async (id) => {
     const res = await api.setActiveAccount({ id })
     await apply(res)
@@ -59,6 +47,18 @@ export default function AccountsPage({ theme, lang, accounts, activeAccountId, o
   const remove = async (account) => {
     const res = await api.removeAccount({ id: account.id })
     await apply(res, t(lang, 'accounts.removed'))
+  }
+
+  const refresh = async (account) => {
+    setRefreshing(account.id)
+    const res = await api.refreshAccount({ id: account.id })
+    setRefreshing('')
+    if (!res?.ok) {
+      notify(res?.error || 'error', 'bad')
+      return
+    }
+    if (res.offline) notify(t(lang, 'accounts.refresh.offline'), 'bad')
+    else notify(t(lang, 'accounts.refresh.done'))
   }
 
   const copyUuid = (uuid) => {
@@ -85,7 +85,7 @@ export default function AccountsPage({ theme, lang, accounts, activeAccountId, o
           {list.length} {t(lang, 'files.items')}
         </span>
         <button
-          onClick={() => { setAdding((v) => !v); setError('') }}
+          onClick={() => { setAdding(true); setError('') }}
           className="h-9 px-3 rounded-lg text-xs font-semibold flex items-center gap-2"
           style={{ background: c.accent, color: '#12081f' }}
         >
@@ -98,49 +98,10 @@ export default function AccountsPage({ theme, lang, accounts, activeAccountId, o
         <div className="max-w-3xl mx-auto flex flex-col gap-3">
           <div className="flex items-start gap-2 px-3 py-2 rounded-lg text-[11px]" style={{ background: c.input, border: `1px solid ${c.border}`, color: c.label }}>
             <Info size={13} weight="duotone" style={{ color: c.accent, marginTop: 1 }} />
-            <span>{t(lang, 'accounts.offlineHint')}</span>
+            <span>{t(lang, 'accounts.hint')}</span>
           </div>
 
-          {adding && (
-            <div className="flex flex-col gap-2 rounded-xl p-3" style={{ background: c.surface, border: `1px solid ${c.accent}` }}>
-              <div className="flex items-center gap-2">
-                <HeadSkin name={draft.trim() || 'steve'} size={36} radius={8} theme={theme} />
-                <input
-                  autoFocus
-                  value={draft}
-                  maxLength={16}
-                  onChange={(e) => { setDraft(e.target.value); setError('') }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') add()
-                    if (e.key === 'Escape') { setAdding(false); setDraft(''); setError('') }
-                  }}
-                  placeholder={t(lang, 'accounts.namePlaceholder')}
-                  className="flex-1 h-9 px-3 rounded-lg text-xs outline-none"
-                  style={{ background: c.input, border: `1px solid ${c.border}`, color: c.text }}
-                />
-                <button
-                  disabled={busy || !MC_NAME.test(draft.trim())}
-                  onClick={add}
-                  className="h-9 px-3 rounded-lg text-xs font-bold disabled:opacity-40"
-                  style={{ background: c.accent, color: '#12081f' }}
-                >
-                  {t(lang, 'files.create')}
-                </button>
-                <button
-                  onClick={() => { setAdding(false); setDraft(''); setError('') }}
-                  className="h-9 px-2 rounded-lg text-xs font-semibold"
-                  style={{ color: c.label }}
-                >
-                  {t(lang, 'files.cancel')}
-                </button>
-              </div>
-              <p className="text-[10px]" style={{ color: error ? '#f87171' : c.faint }}>
-                {error || t(lang, 'accounts.nameRule')}
-              </p>
-            </div>
-          )}
-
-          {!adding && error && (
+          {error && (
             <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-[11px]" style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: '#f87171' }}>
               <Warning size={13} weight="duotone" />
               {error}
@@ -157,18 +118,22 @@ export default function AccountsPage({ theme, lang, accounts, activeAccountId, o
             <div className="rounded-xl overflow-hidden" style={{ background: c.surface, border: `1px solid ${c.border}` }}>
               {list.map((account, i) => {
                 const active = account.id === activeAccountId
+                const online = ['microsoft', 'ely'].includes(account.type)
                 return (
                   <div
                     key={account.id}
                     className="flex items-center gap-3 px-3.5 py-3"
                     style={{ borderTop: i === 0 ? 'none' : `1px solid ${c.border}` }}
                   >
-                    <HeadSkin name={account.name} uuid={account.uuid} size={40} radius={9} theme={theme} />
+                    <HeadSkin name={account.name} uuid={account.uuid} type={account.type} size={40} radius={9} theme={theme} />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <p className="text-xs font-bold truncate" style={{ color: c.text }}>{account.name}</p>
-                        <span className="text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded shrink-0" style={{ background: c.input, color: c.label }}>
-                          {t(lang, 'accounts.offline')}
+                        <span
+                          className="text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded shrink-0"
+                          style={{ background: online ? 'rgba(167,139,250,0.14)' : c.input, color: online ? c.accent : c.label }}
+                        >
+                          {t(lang, TYPE_LABELS[account.type] || 'accounts.kind.offline')}
                         </span>
                       </div>
                       <button
@@ -180,6 +145,17 @@ export default function AccountsPage({ theme, lang, accounts, activeAccountId, o
                         <Copy size={11} style={{ color: c.faint }} />
                       </button>
                     </div>
+                    {online && (
+                      <button
+                        onClick={() => refresh(account)}
+                        disabled={refreshing === account.id}
+                        data-tip={t(lang, 'accounts.refresh')}
+                        className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 disabled:opacity-40"
+                        style={{ background: c.input, border: `1px solid ${c.border}`, color: c.label }}
+                      >
+                        <ArrowsClockwise size={13} weight="bold" className={refreshing === account.id ? 'animate-spin' : ''} />
+                      </button>
+                    )}
                     {active ? (
                       <span className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold shrink-0" style={{ background: 'rgba(167,139,250,0.15)', color: c.accent }}>
                         <Check size={11} weight="bold" />
@@ -209,6 +185,20 @@ export default function AccountsPage({ theme, lang, accounts, activeAccountId, o
           )}
         </div>
       </div>
+
+      {adding && (
+        <AddAccountModal
+          theme={theme}
+          lang={lang}
+          notify={notify}
+          onClose={() => setAdding(false)}
+          onAdded={async (nextAccounts, nextActive) => {
+            setError('')
+            onAccountsChanged?.(nextAccounts, nextActive)
+          }}
+        />
+      )}
     </div>
   )
 }
+

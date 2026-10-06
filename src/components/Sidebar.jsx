@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   House, Gear, List, Terminal, Files, Archive, User, Trash,
-  Cube, PuzzlePiece, Stack, GearSix, ArrowLeft, ChartLineUp, SidebarSimple, Image, PaintBrush,
+  Cube, PuzzlePiece, Stack, GearSix, ArrowLeft, ChartLineUp, SidebarSimple, Image, PaintBrush, Plus,
 } from '@phosphor-icons/react'
 import { t } from '../i18n/translations'
 import { statusColor } from '../lib/status'
@@ -14,6 +14,7 @@ export const RAIL_W_COLLAPSED = 64
 
 const ACCENT = '#a78bfa'
 const ICON = 20
+const HEAD = 28
 const LABEL_W = 124
 const FILLET = 14
 const EDGE = 8
@@ -44,7 +45,7 @@ const INSTANCE_PAGES = [
 
 export default function Sidebar({
   theme, lang, version, account,
-  instances, selectedInstance, dropdownOpen, onToggleDropdown, onSelectInstance,
+  instances, selectedInstance, onSelectInstance,
   isInInstance, displayPage, activePage, onNavigate, onBack,
   collapsed, onToggleCollapsed,
 }) {
@@ -87,7 +88,7 @@ export default function Sidebar({
 
   useLayoutEffect(() => {
     measure()
-  }, [measure, collapsed, lang, instances.length, isInInstance, version, dropdownOpen])
+  }, [measure, collapsed, lang, instances.length, isInInstance, version])
 
   useEffect(() => {
     const list = listRef.current
@@ -223,6 +224,11 @@ export default function Sidebar({
     />
   )
 
+  const rowPad = (iconW) =>
+    iconW === ICON || !collapsed
+      ? undefined
+      : { paddingLeft: Math.max(0, (RAIL_W_COLLAPSED - iconW) / 2), transition: `padding-left ${SWEEP}` }
+
   const label = (text, active) => (
     <span
       className="relative z-20 overflow-hidden whitespace-nowrap"
@@ -242,7 +248,7 @@ export default function Sidebar({
 
   const list = (
     <div ref={listRef} className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col gap-0.5">
-      {isInInstance ? (
+      {(
         INSTANCE_PAGES.map((p) => {
           const Icon = p.icon
           const text = lang === 'vi' ? p.labelVi : p.label
@@ -255,27 +261,6 @@ export default function Sidebar({
               {...navKeyProps(p.key, text)}
               data-nav-row
               className={rowClass(false)}
-              style={{ color: isActive ? accent : labelColor }}
-            >
-              {!isActive && hoverBar()}
-              <Icon size={ICON} weight="duotone" className="relative z-20 shrink-0" />
-              {label(text, isActive)}
-            </button>
-          )
-        })
-      ) : (
-        MAIN_PAGES.map((p) => {
-          const Icon = p.icon
-          const text = lang === 'vi' ? p.labelVi : p.label
-          const isActive = activeKey === p.key
-          return (
-            <button
-              type="button"
-              key={p.key}
-              onClick={() => onNavigate(p.key)}
-              {...navKeyProps(p.key, text)}
-              data-nav-row
-              className={rowClass(true)}
               style={{ color: isActive ? accent : labelColor }}
             >
               {!isActive && hoverBar()}
@@ -321,7 +306,7 @@ export default function Sidebar({
               width: 4,
               top: pill.flareTop ? -FILLET : 0,
               bottom: pill.flareBottom ? -FILLET : 0,
-              background: sidebarBg,
+              backgroundColor: sidebarBg,
               backgroundImage: px ? 'var(--px-dither)' : undefined,
               backgroundSize: px ? '4px 4px' : undefined,
             }}
@@ -362,90 +347,26 @@ export default function Sidebar({
           style={{ borderColor }}
         />
 
-        <div className="shrink-0">
-          <button
-            type="button"
-            onClick={onToggleDropdown}
-            aria-expanded={dropdownOpen}
-            data-tip={collapsed ? (selectedInstance?.name || t(lang, 'sidebar.selectVersion')) : undefined}
-            data-nav-row
-            className={rowClass(true)}
-            style={{ color: dropdownOpen ? accent : labelColor }}
-          >
-            {dropdownOpen ? rowTint() : hoverBar()}
-            {selectedInstance ? (
-              <>
-                <img
-                  src={slotIcon(selectedInstance)}
-                  alt=""
-                  className="relative z-20 w-5 h-5 rounded object-cover shrink-0"
-                />
-                {label(selectedInstance.name, false)}
-              </>
-            ) : (
-              <>
-                <List size={ICON} weight="duotone" className="relative z-20 shrink-0" />
-                {label(t(lang, 'sidebar.selectVersion'), false)}
-              </>
-            )}
-            {!collapsed && (
-              <svg
-                className={`relative z-20 w-3 h-3 ml-auto shrink-0 transition-transform ${dropdownOpen ? 'rotate-180' : ''}`}
-                fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
-                style={{ color: labelColor }}
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-              </svg>
-            )}
-          </button>
-
-          <div
-            className="grid transition-[grid-template-rows] duration-300"
-            style={{
-              gridTemplateRows: dropdownOpen ? '1fr' : '0fr',
-              transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
-            }}
-          >
-            <div className="overflow-hidden">
-              <div className="mt-1 rounded-[10px] border p-1" style={{ borderColor }}>
-                <div className="max-h-[188px] overflow-y-auto overflow-x-hidden flex flex-col gap-0.5">
-                  {instances.length === 0 ? (
-                    <p className="px-2 py-3 text-[11px] leading-relaxed" style={{ color: labelColor }}>
-                      {t(lang, 'sidebar.noInstances')}
-                    </p>
-                  ) : (
-                    instances.map((inst) => {
-                      const isSelected = selectedInstance?.id === inst.id
-                      return (
-                        <button
-                          type="button"
-                          key={inst.id}
-                          onClick={() => onSelectInstance(inst)}
-                          data-tip={collapsed ? inst.name : undefined}
-                          data-nav-row
-                          className="group relative w-full shrink-0 flex items-center h-9 pl-2 pr-2 rounded-lg text-left cursor-pointer"
-                          style={{ color: isSelected ? accent : labelColor, background: isSelected ? pillBg : undefined }}
-                        >
-                          {!isSelected && hoverBar(4)}
-                          <img
-                            src={slotIcon(inst)}
-                            alt=""
-                            className="relative z-20 w-5 h-5 rounded object-cover shrink-0"
-                          />
-                          {label(inst.name, isSelected)}
-                          <span
-                            className="relative z-20 ml-auto w-2 h-2 rounded-full shrink-0"
-                            style={{ background: statusColor(inst.status) }}
-                          />
-                        </button>
-                      )
-                    })
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+        {!isInInstance && MAIN_PAGES.filter((p) => p.key !== 'versions').map((p) => {
+          const Icon = p.icon
+          const text = lang === 'vi' ? p.labelVi : p.label
+          const isActive = activeKey === p.key
+          return (
+            <button
+              type="button"
+              key={p.key}
+              onClick={() => onNavigate(p.key)}
+              {...navKeyProps(p.key, text)}
+              data-nav-row
+              className={rowClass(true)}
+              style={{ color: isActive ? accent : labelColor }}
+            >
+              {!isActive && hoverBar()}
+              <Icon size={ICON} weight="duotone" className="relative z-20 shrink-0" />
+              {label(text, isActive)}
+            </button>
+          )
+        })}
 
         {isInInstance && (
           <button
@@ -482,7 +403,47 @@ export default function Sidebar({
           className="absolute left-0 right-0 bottom-0 h-3.5 border-b border-r rounded-br-[14px] pointer-events-none"
           style={{ borderColor }}
         />
-        {list}
+        {isInInstance ? list : (
+          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col gap-0.5">
+            <button
+              type="button"
+              onClick={() => onNavigate('versions')}
+              data-tip={collapsed ? t(lang, 'sidebar.newInstance') : undefined}
+              data-nav-row
+              className={rowClass(false)}
+              style={{ color: labelColor }}
+            >
+              {hoverBar()}
+              <Plus size={ICON} weight="duotone" className="relative z-20 shrink-0" />
+              {label(t(lang, 'sidebar.newInstance'), false)}
+            </button>
+            {instances.length === 0 ? (
+              <p className="px-3 py-3 text-[11px] leading-relaxed" style={{ color: labelColor }}>
+                {t(lang, 'sidebar.noInstances')}
+              </p>
+            ) : (
+              instances.map((inst) => {
+                const isSelected = selectedInstance?.id === inst.id
+                return (
+                  <button
+                    type="button"
+                    key={inst.id}
+                    onClick={() => onSelectInstance(inst)}
+                    data-tip={collapsed ? inst.name : undefined}
+                    data-nav-row
+                    className={rowClass(false)}
+                    style={{ color: isSelected ? accent : labelColor, background: isSelected ? pillBg : undefined, borderRadius: RADIUS }}
+                  >
+                    {!isSelected && hoverBar()}
+                    <img src={slotIcon(inst)} alt="" className="relative z-20 w-5 h-5 rounded object-cover shrink-0" />
+                    {label(inst.name, isSelected)}
+                    <span className="relative z-20 ml-auto w-2 h-2 rounded-full shrink-0" style={{ background: statusColor(inst.status) }} />
+                  </button>
+                )
+              })
+            )}
+          </div>
+        )}
       </div>
 
       <div data-nav-group className="relative shrink-0 flex flex-col gap-1 pt-2">
@@ -505,15 +466,16 @@ export default function Sidebar({
           {...navKeyProps('accounts', account ? account.name : t(lang, 'accounts.title'))}
           data-nav-row
           className={rowClass(true)}
-          style={{ color: activeKey === 'accounts' ? accent : labelColor }}
+          style={{ ...rowPad(HEAD), color: activeKey === 'accounts' ? accent : labelColor }}
         >
           {activeKey !== 'accounts' && hoverBar()}
           {account ? (
             <HeadSkin
               name={account.name}
               uuid={account.uuid}
-              size={ICON}
-              radius={6}
+              type={account.type}
+              size={HEAD}
+              radius={8}
               theme={theme}
               style={{ position: 'relative', zIndex: 20 }}
             />

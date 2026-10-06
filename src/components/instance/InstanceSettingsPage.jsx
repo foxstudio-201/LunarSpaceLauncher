@@ -24,8 +24,8 @@ const EXPORT_FORMATS = [
     id: 'zip',
     vi: 'Zip cơ bản',
     en: 'Basic zip',
-    hintVi: 'Nén toàn bộ thư mục phiên bản (kèm saves, bỏ logs) + lunarspace-profile.json để nhận diện khi nhập lại.',
-    hintEn: 'Zips the whole instance folder (saves included, logs excluded) plus lunarspace-profile.json for re-import.',
+    hintVi: 'Nén mod, config, gói tài nguyên, shader… của phiên bản (bỏ saves và logs) + lunarspace-profile.json để nhận diện khi nhập lại.',
+    hintEn: 'Zips the instance mods, configs, resource packs and shader packs (saves and logs excluded) plus lunarspace-profile.json for re-import.',
   },
 ]
 
@@ -213,7 +213,7 @@ export default function InstanceSettingsPage({ instance, theme, lang, account, o
 
             <div className="flex items-center gap-4 px-4 py-3.5" style={rowStyle}>
               {account ? (
-                <HeadSkin name={account.name} uuid={account.uuid} size={16} radius={5} theme={theme} />
+                <HeadSkin name={account.name} uuid={account.uuid} type={account.type} size={16} radius={5} theme={theme} />
               ) : (
                 <UserCircle size={16} weight="duotone" style={{ color: c.accent }} />
               )}

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   Translate, MoonStars, Sun, Coffee, DownloadSimple, Trash, ArrowsClockwise,
   SpinnerGap, CheckCircle, FloppyDisk, HardDrive, WarningCircle, DiscordLogo,
-  SquaresFour,
+  SquaresFour, Tray,
 } from '@phosphor-icons/react'
 import { useApp } from '../../i18n/AppContext'
 import { t } from '../../i18n/translations'
@@ -75,6 +75,7 @@ export default function SettingsPage({ theme, lang, version, system, storage, on
   const [busy, setBusy] = useState('')
   const [confirming, setConfirming] = useState('')
   const [richPresence, setRichPresence] = useState(true)
+  const [hideOnLaunch, setHideOnLaunch] = useState(true)
   const [discord, setDiscord] = useState({ enabled: true, connected: false, user: null })
   const [upd, setUpd] = useState({ enabled: true, phase: 'idle', current: version || '', version: '', percent: 0, error: '' })
 
@@ -88,6 +89,10 @@ export default function SettingsPage({ theme, lang, version, system, storage, on
 
   const updateState = upd.phase || 'idle'
   const updateBusy = updateState === 'checking' || updateState === 'downloading'
+  const toggleHideOnLaunch = async (next) => {
+    setHideOnLaunch(next)
+    await onSave({ hideOnLaunch: next })
+  }
   const toggleAutoUpdate = async (next) => {
     setUpd((u) => ({ ...u, enabled: next }))
     await onSave({ autoUpdate: next })
@@ -118,6 +123,7 @@ export default function SettingsPage({ theme, lang, version, system, storage, on
     const s = await window.electronAPI.getSettings().catch(() => null)
     if (s) {
       setRichPresence(s.discordRpc !== false)
+      setHideOnLaunch(s.hideOnLaunch !== false)
     }
   }, [])
 
@@ -293,6 +299,21 @@ export default function SettingsPage({ theme, lang, version, system, storage, on
                       { value: 'pixel', label: t(lang, 'settings.skin.pixel') },
                     ]}
                   />
+                </Row>
+              </div>
+            </Card>
+          </Section>
+
+          <Section c={c} title={vn(lang, 'Trò chơi', 'Game')} hint={hideOnLaunch ? vn(lang, 'đang bật', 'on') : vn(lang, 'đang tắt', 'off')}>
+            <Card c={c}>
+              <div style={{ marginTop: -1 }}>
+                <Row
+                  c={c}
+                  icon={<Tray size={15} weight="duotone" />}
+                  title={t(lang, 'settings.hideOnLaunch')}
+                  desc={t(lang, 'settings.hideOnLaunchHint')}
+                >
+                  <Switch c={c} checked={hideOnLaunch} onChange={toggleHideOnLaunch} />
                 </Row>
               </div>
             </Card>

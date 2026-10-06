@@ -16,6 +16,9 @@ const presence = require('./presence.cjs')
 const modpack = require('./mc/modpack.cjs')
 const content = require('./mc/content.cjs')
 const profileExport = require('./mc/export.cjs')
+const tokenStore = require('./auth.cjs')
+const msAuth = require('./msAuth.cjs')
+const elyAuth = require('./elyAuth.cjs')
 
 const running = new Map()
 const stoppingIds = new Set()
@@ -176,6 +179,11 @@ function loaderModule(loader) {
   }
 }
 
+function clearLog(id, emit) {
+  logs.set(id, [])
+  emit?.({ type: 'log-clear', id })
+}
+
 async function installForge({ entry, paths, settings, emit }) {
   const mod = loaderModule(entry.loader)
   const game = entry.version
@@ -227,6 +235,7 @@ async function installForge({ entry, paths, settings, emit }) {
       onLog: log,
     })
     emit?.({ type: 'progress', id: entry.id, phase: 'clear' })
+    clearLog(entry.id, emit)
     log(`[LunarSpace] Forge đã cài: ${created}`)
     return created
   }
@@ -252,6 +261,7 @@ async function installForge({ entry, paths, settings, emit }) {
     (await mod.findInstalled({ versionsDir: paths.versions, game, idOrVersion: forgeId })) ||
     (await forgeMod.detectInstalledId({ versionsDir: paths.versions, before, game }))
   if (!created) throw new Error(`Không tìm thấy phiên bản ${name} sau khi cài`)
+  clearLog(entry.id, emit)
   log(`[LunarSpace] ${name} đã cài: ${created}`)
   return created
 }
@@ -694,12 +704,25 @@ function accountsList({ accounts, activeAccountId } = {}) {
   return { ok: true, accounts: list, activeAccountId: active }
 }
 
-function accountAdd({ name, accounts, activeAccountId } = {}) {
+function accountAdd({ name, type, uuid: profileUuid, xuid, accounts, activeAccountId } = {}) {
+  const kind = ['microsoft', 'ely'].includes(type) ? type : 'offline'
+  const list = Array.isArray(accounts) ? accounts.slice() : []
+
+  if (kind !== 'offline') {
+    const clean = String(name || '').trim()
+    if (!clean || !profileUuid) return { ok: false, error: 'Hồ sơ tài khoản không hợp lệ.' }
+    const existing = list.find((a) => a.type === kind && a.uuid === profileUuid)
+    const entry = { ...(existing || {}), id: existing?.id || `${kind}-${String(profileUuid).slice(0, 8)}`, type: kind, name: clean, uuid: profileUuid }
+    if (xuid) entry.xuid = xuid
+    if (!existing) list.push(entry)
+    else list[list.indexOf(existing)] = entry
+    return { ok: true, accounts: list, activeAccountId: activeAccountId || entry.id, added: entry, duplicate: !!existing }
+  }
+
   const clean = String(name || '').trim()
   if (!MC_NAME.test(clean)) {
     return { ok: false, error: 'Tên chỉ gồm chữ, số, gạch dưới và dài 3–16 ký tự.' }
   }
-  const list = Array.isArray(accounts) ? accounts.slice() : []
   const uuid = offlineUuid(clean)
   const existing = list.find((a) => a.uuid === uuid)
   if (existing) {
@@ -725,6 +748,90 @@ function accountSetActive({ id, accounts, activeAccountId } = {}) {
 function resolveAccount(settings) {
   const { accounts, activeAccountId } = accountsList(settings || {})
   return accounts.find((a) => a.id === activeAccountId) || null
+}
+
+async function accountAuth(account) {
+  if (!account || !['microsoft', 'ely'].includes(account.type)) {
+    return { ok: true, name: account?.name, uuid: account?.uuid, accessToken: '0', userType: 'legacy' }
+  }
+
+  const stored = tokenStore.getToken(account.id)
+
+  if (account.type === 'microsoft') {
+    const left = stored?.expiresAt ? stored.expiresAt - Date.now() : 0
+    if (stored?.accessToken && left > 5 * 60 * 1000) {
+      return {
+        ok: true,
+        name: stored.name || account.name,
+        uuid: stored.uuid || account.uuid,
+        accessToken: stored.accessToken,
+        userType: 'msa',
+        xuid: stored.xuid || '0',
+      }
+    }
+    if (!stored?.refreshToken) return { ok: false, error: 'Phiên Microsoft đã hết hạn. Hãy đăng nhập lại tài khoản này.' }
+    const res = await msAuth.refresh(stored.refreshToken)
+    if (!res.ok) return { ok: false, error: res.error }
+    tokenStore.setToken(account.id, res.session)
+    return {
+      ok: true,
+      name: res.session.name,
+      uuid: res.session.uuid,
+      accessToken: res.session.accessToken,
+      userType: 'msa',
+      xuid: res.session.xuid || '0',
+    }
+  }
+
+  let session = stored
+  const alive = await elyAuth.validate({ accessToken: session?.accessToken, clientToken: session?.clientToken })
+  if (!alive) {
+    const res = await elyAuth.refresh({ accessToken: session?.accessToken, clientToken: session?.clientToken })
+    if (!res.ok) return { ok: false, error: res.error }
+    session = res.session
+    tokenStore.setToken(account.id, session)
+  }
+  const injector = await elyAuth.ensureInjector()
+  if (!injector.ok) return { ok: false, error: injector.error }
+  return {
+    ok: true,
+    name: session.name || account.name,
+    uuid: session.uuid || account.uuid,
+    accessToken: session.accessToken,
+    userType: 'mojang',
+    javaAgent: `-javaagent:${injector.jar}=${elyAuth.AUTHLIB_API}`,
+  }
+}
+
+async function accountRefresh({ id, accounts } = {}) {
+  const account = (Array.isArray(accounts) ? accounts : []).find((a) => a.id === id)
+  if (!account) return { ok: false, error: 'Không tìm thấy tài khoản.' }
+  if (!['microsoft', 'ely'].includes(account.type)) return { ok: true, offline: true }
+  const res = await accountAuth(account)
+  return res.ok ? { ok: true, session: { name: res.name, uuid: res.uuid } } : res
+}
+
+function finishSignIn(type, session, accounts, activeAccountId) {
+  const out = accountAdd({ type, name: session.name, uuid: session.uuid, xuid: session.xuid, accounts, activeAccountId })
+  if (!out.ok) return out
+  tokenStore.setToken(out.added.id, session)
+  return { ...out, session: { name: session.name, uuid: session.uuid } }
+}
+
+async function accountSignIn({ type, parent, username, password, accounts, activeAccountId } = {}) {
+  if (type === 'microsoft') {
+    const res = await msAuth.login(parent)
+    if (!res.ok) return res
+    return finishSignIn('microsoft', res.session, accounts, activeAccountId)
+  }
+  if (type === 'ely') {
+    const res = await elyAuth.login({ username, password })
+    if (!res.ok) return res
+    const injector = await elyAuth.ensureInjector()
+    if (!injector.ok) return { ok: false, error: injector.error }
+    return finishSignIn('ely', res.session, accounts, activeAccountId)
+  }
+  return { ok: false, error: 'Loại tài khoản không hợp lệ.' }
 }
 
 async function readTextFile({ id, rel } = {}) {
@@ -1024,8 +1131,10 @@ async function runLaunch({ id, username, demo: demoOverride, settings }, emit) {
   const found = { java: resolved.java }
 
   const account = resolveAccount(settings)
+  const auth = await accountAuth(account)
+  if (!auth.ok) return { ok: false, error: auth.error }
   const nativesDir = path.join(paths.natives, chain._id)
-  const player = String(account?.name || username || entry.username || 'Player')
+  const player = String(auth.name || username || entry.username || 'Player')
   const demo = !!(entry.demo || demoOverride)
   const emitLog = (line) => {
     pushLog(entry.id, line)
@@ -1039,7 +1148,8 @@ async function runLaunch({ id, username, demo: demoOverride, settings }, emit) {
     instanceDir: entry.dir,
     username: player,
     memoryMb: entry.memoryMb || 2048,
-    extraJvm: entry.boost ? [...boost.jvmFlags(entry.memoryMb || 2048), ...userJvm] : userJvm,
+    extraJvm: [...(auth.javaAgent ? [auth.javaAgent] : []), ...(entry.boost ? [...boost.jvmFlags(entry.memoryMb || 2048), ...userJvm] : userJvm)],
+    auth,
     demo,
   })
 
@@ -1540,6 +1650,9 @@ module.exports = {
   accountAdd,
   accountRemove,
   accountSetActive,
+  accountAuth,
+  accountRefresh,
+  accountSignIn,
   resolveAccount,
   readTextFile,
   writeTextFile,

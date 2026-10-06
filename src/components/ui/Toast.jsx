@@ -235,8 +235,7 @@ function ToastCard({ item, c, theme, lang, onClose }) {
       <div
         className="relative flex flex-col gap-2 rounded-xl px-3 py-2.5 overflow-hidden"
         style={{
-          background: c.surface,
-          backgroundImage: `linear-gradient(${alpha(base, light ? 0.07 : 0.06)}, ${alpha(base, light ? 0.07 : 0.06)})`,
+          background: `linear-gradient(${alpha(base, light ? 0.07 : 0.06)}, ${alpha(base, light ? 0.07 : 0.06)}), ${c.surface}`,
           border: `1px solid ${alpha(base, light ? 0.5 : 0.42)}`,
           boxShadow: c.pixel
             ? c.shadow

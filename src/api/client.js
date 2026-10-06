@@ -231,6 +231,21 @@ export async function addAccount({ name } = {}) {
   throw new Error(NEEDS_APP)
 }
 
+export async function signInAccount({ type, username, password } = {}) {
+  if (bridge?.signInAccount) return bridge.signInAccount({ type, username, password })
+  throw new Error(NEEDS_APP)
+}
+
+export async function refreshAccount({ id } = {}) {
+  if (bridge?.refreshAccount) return bridge.refreshAccount({ id })
+  throw new Error(NEEDS_APP)
+}
+
+export async function resolveSkin({ uuid, name, provider } = {}) {
+  if (bridge?.resolveSkin) return bridge.resolveSkin({ uuid, name, provider })
+  return { ok: true, data: '' }
+}
+
 export async function removeAccount({ id } = {}) {
   if (bridge?.removeAccount) return bridge.removeAccount({ id })
   throw new Error(NEEDS_APP)

@@ -6,7 +6,7 @@ const { ZipWriter, cfFileIdFromUrl } = require('./zip.cjs')
 const { MODRINTH, CF, cfJson, normName } = require('./modpack.cjs')
 const { UA } = require('./net.cjs')
 
-const SKIP_TOP = new Set(['logs', 'crash-reports', 'screenshots', 'instance.json', 'launcher_profiles.json'])
+const SKIP_TOP = new Set(['logs', 'crash-reports', 'screenshots', 'saves', 'instance.json', 'launcher_profiles.json'])
 
 const PLAN_FILES = ['.lunaspace-modpack.json']
 
@@ -36,7 +36,7 @@ function loaderKey(loader) {
   return ['forge', 'fabric', 'quilt', 'neoforge'].includes(value) ? value : null
 }
 
-async function walk(root, rel = '', out = [], skipExtra = null) {
+async function walk(root, rel = '', out = []) {
   const dir = path.join(root, rel)
   let entries = []
   try {
@@ -47,10 +47,9 @@ async function walk(root, rel = '', out = [], skipExtra = null) {
   for (const entry of entries) {
     const next = rel ? `${rel}/${entry.name}` : entry.name
     if (!rel && SKIP_TOP.has(entry.name)) continue
-    if (!rel && skipExtra && skipExtra.has(entry.name)) continue
     if (entry.name.startsWith('.')) continue
     if (entry.isDirectory()) {
-      await walk(root, next, out, skipExtra)
+      await walk(root, next, out)
     } else if (entry.isFile()) {
       out.push(next)
     }
@@ -243,7 +242,7 @@ async function exportProfile({ entry, format = 'zip', targetPath, onProgress, on
   const packName = plan?.name || entry.name || 'Modpack'
   const packVersion = plan?.version || '1.0.0'
 
-  const files = await walk(dir, '', [], kind === 'zip' ? null : new Set(['saves']))
+  const files = await walk(dir)
   const mods = files.filter((rel) => /^mods\/.+\.jar$/i.test(rel))
   const others = files.filter((rel) => !/^mods\//i.test(rel))
 

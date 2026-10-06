@@ -318,6 +318,18 @@ function mrCreators(teamId) {
     .catch(() => [])
 }
 
+function uniqueByUrl(list) {
+  const seen = new Set()
+  const out = []
+  for (const item of list || []) {
+    const url = String(item?.url || '').trim()
+    if (!url || seen.has(url)) continue
+    seen.add(url)
+    out.push(item)
+  }
+  return out
+}
+
 async function projectModrinth({ id }) {
   const d = await fetchJson(`${MODRINTH}/project/${encodeURIComponent(id)}`)
   const creators = await mrCreators(d.team)
@@ -344,15 +356,15 @@ async function projectModrinth({ id }) {
     environment: { client: d.client_side || '', server: d.server_side || '' },
     creators,
     status: d.status || '',
-    gallery: (d.gallery || []).map((g) => ({ url: g.url, title: g.title || '' })).slice(0, 12),
-    links: [
+    gallery: uniqueByUrl((d.gallery || []).map((g) => ({ url: g.url, title: g.title || '' }))).slice(0, 12),
+    links: uniqueByUrl([
       { label: 'Modrinth', url: `https://modrinth.com/project/${d.slug || d.id}` },
       ...(d.source_url ? [{ label: 'Mã nguồn', url: d.source_url }] : []),
       ...(d.issues_url ? [{ label: 'Báo lỗi', url: d.issues_url }] : []),
       ...(d.wiki_url ? [{ label: 'Wiki', url: d.wiki_url }] : []),
       ...(d.discord_url ? [{ label: 'Discord', url: d.discord_url }] : []),
       ...(d.donation_urls || []).slice(0, 1).map((don) => ({ label: 'Ủng hộ', url: don.url })),
-    ],
+    ]),
   }
 }
 
@@ -388,14 +400,14 @@ async function projectCurseforge({ id, kind }) {
     environment: { client: '', server: '' },
     creators: (m.authors || []).map((a) => ({ name: a.name, role: '', avatar: '' })).filter((a) => a.name),
     status: '',
-    gallery: (m.screenshots || []).map((s) => ({ url: s.url || s.thumbnailUrl, title: s.title || '' })).slice(0, 12),
-    links: [
+    gallery: uniqueByUrl((m.screenshots || []).map((s) => ({ url: s.url || s.thumbnailUrl, title: s.title || '' }))).slice(0, 12),
+    links: uniqueByUrl([
       { label: 'CurseForge', url: `https://www.curseforge.com/minecraft/${CF_CLASS_URL[kind] || 'mc-mods'}/${m.slug || m.id}` },
       ...(extra.websiteUrl ? [{ label: 'Website', url: extra.websiteUrl }] : []),
       ...(extra.sourceUrl ? [{ label: 'Mã nguồn', url: extra.sourceUrl }] : []),
       ...(extra.issuesUrl ? [{ label: 'Báo lỗi', url: extra.issuesUrl }] : []),
       ...(extra.wikiUrl ? [{ label: 'Wiki', url: extra.wikiUrl }] : []),
-    ],
+    ]),
   }
 }
 

@@ -165,7 +165,7 @@ function clientExtraJar({ chain, paths }) {
   return fs.existsSync(file) ? file : null
 }
 
-function buildLaunch({ chain, paths, nativesDir, instanceDir, username, memoryMb, extraJvm = [], demo = false }) {
+function buildLaunch({ chain, paths, nativesDir, instanceDir, username, memoryMb, extraJvm = [], auth = null, demo = false }) {
   const ownJarExists = fs.existsSync(path.join(paths.versions, chain._id, `${chain._id}.jar`))
   const forgeBootstrap = (chain.arguments?.jvm || []).some((arg) => typeof arg === 'string' && arg.includes('client-extra'))
   const extraClient = forgeBootstrap ? clientExtraJar({ chain, paths }) : null
@@ -200,7 +200,7 @@ function buildLaunch({ chain, paths, nativesDir, instanceDir, username, memoryMb
     nativesDir,
   ].join(process.platform === 'win32' ? ';' : ':')
 
-  const uuid = offlineUuid(username)
+  const uuid = auth?.uuid || offlineUuid(username)
   const map = {
     auth_player_name: username,
     version_name: chain.id,
@@ -209,11 +209,11 @@ function buildLaunch({ chain, paths, nativesDir, instanceDir, username, memoryMb
     game_assets: paths.assets,
     assets_index_name: chain.assetIndex?.id || chain.assets || 'legacy',
     auth_uuid: uuid,
-    auth_access_token: '0',
-    auth_session: '0',
+    auth_access_token: auth?.accessToken || '0',
+    auth_session: auth?.accessToken ? `token:${auth.accessToken}` : '0',
     clientid: '0',
-    auth_xuid: '0',
-    user_type: 'legacy',
+    auth_xuid: auth?.xuid || '0',
+    user_type: auth?.userType || 'legacy',
     version_type: chain.type || 'release',
     user_properties: '{}',
     natives_directory: nativesDir,

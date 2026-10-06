@@ -54,9 +54,42 @@ const launcher = require('./launcher.cjs')
 const presence = require('./presence.cjs')
 const updater = require('./updater.cjs')
 const installer = require('./installer.cjs')
+const tokenStore = require('./auth.cjs')
+const skins = require('./skins.cjs')
+const tray = require('./tray.cjs')
+
+let hiddenForGame = false
+
+function showWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  hiddenForGame = false
+  mainWindow.show()
+  mainWindow.focus()
+}
+
+function hideWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  hiddenForGame = false
+  mainWindow.hide()
+}
+
+function syncGameWindow(payload) {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  if (payload?.type !== 'state' && payload?.type !== 'exit') return
+  tray.refresh()
+  if (readSettings().hideOnLaunch === false) return
+  const running = (launcher.runningIds().ids || []).length > 0
+  if (running && mainWindow.isVisible()) {
+    hiddenForGame = true
+    mainWindow.hide()
+    return
+  }
+  if (!running && hiddenForGame) showWindow()
+}
 
 function emitLauncher(payload) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('luns:launcher-event', payload)
+  syncGameWindow(payload)
 }
 
 function registerIpc() {
@@ -109,9 +142,25 @@ function registerIpc() {
   ipcMain.handle('launcher:account-remove', (_e, opts) => {
     const current = readSettings()
     const res = launcher.accountRemove({ id: (opts || {}).id, accounts: current.accounts, activeAccountId: current.activeAccountId })
+    if (res.ok) {
+      tokenStore.setToken((opts || {}).id, null)
+      writeSettings({ accounts: res.accounts, activeAccountId: res.activeAccountId })
+    }
+    return res
+  })
+  ipcMain.handle('launcher:account-signin', async (_e, opts) => {
+    const current = readSettings()
+    const res = await launcher.accountSignIn({
+      ...(opts || {}),
+      parent: mainWindow,
+      accounts: current.accounts,
+      activeAccountId: current.activeAccountId,
+    })
     if (res.ok) writeSettings({ accounts: res.accounts, activeAccountId: res.activeAccountId })
     return res
   })
+  ipcMain.handle('launcher:account-refresh', (_e, opts) => launcher.accountRefresh({ id: (opts || {}).id, accounts: readSettings().accounts }))
+  ipcMain.handle('skin:resolve', (_e, opts) => skins.resolve(opts || {}))
   ipcMain.handle('launcher:account-active', (_e, opts) => {
     const current = readSettings()
     const res = launcher.accountSetActive({ id: (opts || {}).id, accounts: current.accounts, activeAccountId: current.activeAccountId })
@@ -356,6 +405,19 @@ if (MODE !== 'app') {
   app.whenReady().then(() => {
     registerIpc()
     createWindow()
+    tray.create({
+      getWindow: () => mainWindow,
+      getRunning: () => {
+        const ids = launcher.runningIds().ids || []
+        if (!ids.length) return []
+        const list = launcher.listInstances(readSettings())?.instances || []
+        return ids.map((id) => list.find((item) => item.id === id)?.name || id)
+      },
+      getLang: () => (readSettings().language === 'en' ? 'en' : 'vi'),
+      onShow: showWindow,
+      onHide: hideWindow,
+      onQuit: () => app.quit(),
+    })
     presence.configure(readSettings())
     presence.idle()
     updater.init({ settings: readSettings(), onEvent: emitLauncher })
@@ -370,6 +432,7 @@ if (MODE !== 'app') {
     updater.autoInstall()
     updater.shutdown()
     presence.shutdown()
+    tray.destroy()
   })
 
   app.on('window-all-closed', () => {

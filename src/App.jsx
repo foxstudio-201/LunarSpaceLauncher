@@ -310,9 +310,13 @@ function AppContent() {
         }
         return
       }
+      if (ev.type === 'log-clear') {
+        setLogs((l) => ({ ...l, [ev.id]: [] }))
+        return
+      }
       if (ev.type === 'banner') {
         const inst = instancesRef.current.find((i) => i.id === ev.id) || selectedRef.current
-        setLogs((l) => ({ ...l, [ev.id]: [...(l[ev.id] || []), ...launchBannerLines(inst, versionRef.current)] }))
+        setLogs((l) => ({ ...l, [ev.id]: launchBannerLines(inst, versionRef.current) }))
         return
       }
       if (ev.type === 'log') {

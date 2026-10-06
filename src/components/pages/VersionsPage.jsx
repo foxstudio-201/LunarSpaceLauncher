@@ -452,7 +452,7 @@ export default function VersionsPage({
             >
               {activeAccount ? (
                 <>
-                  <HeadSkin name={activeAccount.name} uuid={activeAccount.uuid} size={20} radius={5} theme={theme} />
+                  <HeadSkin name={activeAccount.name} uuid={activeAccount.uuid} type={activeAccount.type} size={20} radius={5} theme={theme} />
                   <span className="text-[11px] font-medium truncate" style={{ color: c.text }}>{activeAccount.name}</span>
                   <span className="flex-1" />
                   <button onClick={onOpenAccounts} className="text-[10px] font-semibold shrink-0" style={{ color: c.accent }}>
