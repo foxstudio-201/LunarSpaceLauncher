@@ -1,0 +1,116 @@
+{
+  "name": "lunaspace-launcher",
+  "private": true,
+  "version": "1.0.1",
+  "description": "LunarSpace Launcher - Minecraft launcher client",
+  "author": {
+    "name": "LunarSpace",
+    "email": "contact@lunarspace.local"
+  },
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite --no-open",
+    "build": "vite build",
+    "preview": "vite preview",
+    "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5175 && cross-env NODE_ENV=development electron .\"",
+    "electron:build": "npm run build && electron-builder",
+    "start": "electron ."
+  },
+  "dependencies": {
+    "@phosphor-icons/react": "^2.1.10",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/addon-search": "^0.16.0",
+    "@xterm/addon-unicode11": "^0.9.0",
+    "@xterm/xterm": "^6.0.0",
+    "adm-zip": "^0.5.16",
+    "electron-updater": "^6.8.9"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.0",
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "@vitejs/plugin-react": "^6.0.1",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "dompurify": "^3.4.16",
+    "electron": "^44.4.1",
+    "electron-builder": "^26.8.1",
+    "globals": "^17.5.0",
+    "marked": "^18.1.0",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "tailwindcss": "^4.3.0",
+    "vite": "^8.0.10",
+    "wait-on": "^9.0.5"
+  },
+  "build": {
+    "appId": "com.lunarspace.launcher",
+    "productName": "LunarSpace Launcher",
+    "copyright": "Copyright © 2026 LunarSpace",
+    "asar": true,
+    "directories": {
+      "output": "dist-electron",
+      "buildResources": "build-resources"
+    },
+    "compression": "maximum",
+    "files": [
+      "dist/**/*",
+      "!dist/**/*.exe",
+      "electron/**/*",
+      "!**/*.map"
+    ],
+    "extraResources": [
+      {
+        "from": "public/icon.png",
+        "to": "icon.png"
+      },
+      {
+        "from": "build-resources/license-vi.txt",
+        "to": "license.txt"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "public/icon.png",
+      "requestedExecutionLevel": "asInvoker",
+      "forceCodeSigning": false
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "Game",
+      "icon": "public/icon.png",
+      "maintainer": "LunarSpace <contact@lunarspace.local>"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "foxstudio-201",
+        "repo": "LunarSpaceLauncher"
+      }
+    ],
+    "portable": {
+      "artifactName": "LunarSpace-Launcher-Setup-${version}.${ext}",
+      "unpackDirName": "lunarspace-launcher-setup",
+      "splashImage": "build-resources/installer-splash.bmp"
+    },
+    "appImage": {
+      "artifactName": "LunarSpace-Launcher-${version}.${ext}"
+    }
+  }
+}

@@ -1,0 +1,53 @@
+﻿LUNARSPACE LAUNCHER - ĐIỀU KHOẢN SỬ DỤNG & TRÁCH NHIỆM
+Phiên bản 1.0.2 - Cập nhật: 06/10/2026
+
+Vui lòng đọc kỹ các điều khoản dưới đây trước khi cài đặt. Bằng việc chọn
+"Tôi đồng ý" và tiếp tục, bạn đồng ý với toàn bộ nội dung này.
+
+1. GIỚI THIỆU
+LunarSpace Launcher là phần mềm máy khách (client) dùng để quản lý và khởi
+chạy Minecraft trên máy của bạn: tạo phiên bản (Vanilla, Fabric, Quilt, Forge,
+NeoForge), cài modpack từ Modrinth và CurseForge, quản lý mod, shader, gói tài
+nguyên, bản lưu và tài khoản. Phần mềm chạy hoàn toàn trên máy bạn.
+
+2. QUYỀN CỦA BẠN
+- Bạn được cài đặt và sử dụng LunarSpace Launcher miễn phí cho mục đích hợp pháp.
+- Bạn toàn quyền kiểm soát dữ liệu của mình: gỡ cài đặt bất kỳ lúc nào, xoá
+  thư mục phiên bản bất kỳ lúc nào.
+
+3. TRÁCH NHIỆM CỦA BẠN
+- Bạn cần sở hữu bản quyền Minecraft hợp lệ để chơi. LunarSpace Launcher KHÔNG
+  cung cấp, KHÔNG chia sẻ và KHÔNG bẻ khoá game.
+- Bạn tự chịu trách nhiệm về nội dung bạn cài đặt (mod, shader, modpack, gói tài
+  nguyên) và về việc tuân thủ điều khoản của nhà cung cấp nội dung đó
+  (Modrinth, CurseForge, tác giả mod) cũng như quy định của máy chủ bạn tham gia.
+- Không sử dụng phần mềm để gian lận, phá hoại hoặc xâm phạm hệ thống của người
+  khác.
+
+4. DỮ LIỆU
+- LunarSpace Launcher KHÔNG có máy chủ trung gian, KHÔNG thu thập và KHÔNG gửi
+  dữ liệu của bạn cho bên thứ ba. Mọi dữ liệu (phiên bản, mod, bản lưu, tài
+  khoản offline, cài đặt) chỉ được lưu trên máy của bạn.
+- Khi bạn yêu cầu tải nội dung, phần mềm gọi trực tiếp API công khai của
+  Modrinth, CurseForge, Mojang và các trang tải Java tương ứng.
+
+5. MIỄN TRỪ BẢO HÀNH
+Phần mềm được cung cấp "nguyên trạng" (as-is), không kèm bảo hành dưới bất kỳ
+hình thức nào. Tác giả không cam kết phần mềm hoạt động không lỗi, và KHÔNG
+chịu trách nhiệm cho bất kỳ thiệt hại nào phát sinh từ việc sử dụng, bao gồm
+nhưng không giới hạn: mất hoặc hỏng dữ liệu thế giới chơi, hỏng cấu hình mod,
+gián đoạn hoạt động, mất tài khoản do vi phạm quy định của máy chủ.
+
+6. THƯƠNG HIỆU
+LunarSpace Launcher không phải sản phẩm chính thức của Mojang Studios hay
+Microsoft. Minecraft là thương hiệu của Mojang Studios. Modrinth và CurseForge
+là thương hiệu của chủ sở hữu tương ứng. Các thương hiệu chỉ được nhắc tới để
+mô tả chức năng tương thích.
+
+7. CẬP NHẬT
+Phần mềm có thể tự kiểm tra và tải bản cập nhật từ trang phát hành chính thức
+trên GitHub. Việc tự động cập nhật có thể tắt trong phần Cài đặt hệ thống.
+
+8. CHẤP NHẬN
+Nếu bạn không đồng ý với bất kỳ điều khoản nào ở trên, vui lòng không cài đặt
+và không sử dụng phần mềm.

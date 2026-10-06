@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta
+    http-equiv="Content-Security-Policy"
+    content="default-src 'self' file:; script-src 'self' file: 'unsafe-inline'; style-src 'self' file: 'unsafe-inline'; img-src 'self' file: data: blob: https:; font-src 'self' file: data:; connect-src 'self' file: http://localhost:* ws://localhost:* wss://localhost:* http://127.0.0.1:* ws://127.0.0.1:* https:; object-src 'none'; base-uri 'self'; form-action 'none'"
+  />
+  <title>LunarSpace Launcher</title>
+  <link rel="icon" type="image/png" href="/favicon.png" />
+  <script>
+    (function () {
+      var q = new URLSearchParams(location.search)
+      var theme = q.get('theme') === 'light' ? 'light' : q.get('theme') === 'dark' ? 'dark' : ''
+      var lang = q.get('lang') === 'en' ? 'en' : q.get('lang') === 'vi' ? 'vi' : ''
+      var skin = q.get('skin') === 'pixel' ? 'pixel' : 'default'
+      if (theme) document.documentElement.setAttribute('data-theme', theme)
+      document.documentElement.setAttribute('data-skin', skin)
+      window.__boot = { theme: theme || 'dark', lang: lang || 'vi', skin: skin }
+    })()
+  </script>
+  <style>
+    html, body {
+      margin: 0;
+      overflow: hidden;
+      background: #0a0a0a;
+    }
+    html[data-theme="light"], html[data-theme="light"] body {
+      background: #f5f5f5;
+    }
+    html[data-skin="pixel"], html[data-skin="pixel"] body {
+      background: #0a0d12;
+    }
+    html[data-skin="pixel"][data-theme="light"], html[data-skin="pixel"][data-theme="light"] body {
+      background: #edf2f9;
+    }
+    html[data-skin="pixel"] body {
+      font-family: 'VT323', ui-monospace, monospace;
+    }
+
+    .splash-root {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(180deg, #0b0d14 0%, #08080c 55%, #050507 100%);
+      font-family: system-ui, -apple-system, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      transition: opacity 380ms cubic-bezier(0.4, 0, 1, 1), transform 380ms cubic-bezier(0.4, 0, 1, 1);
+    }
+    html[data-theme="light"] .splash-root {
+      background: linear-gradient(180deg, #fbfbfc 0%, #f1f1f4 60%, #e9e9ef 100%);
+    }
+    .splash-leaving {
+      opacity: 0;
+      transform: scale(1.02);
+    }
+
+    .splash-blob {
+      position: absolute;
+      pointer-events: none;
+      border-radius: 50%;
+      filter: blur(50px);
+    }
+    .splash-blob-a {
+      top: -14%; left: -10%; width: 58%; height: 58%;
+      background: radial-gradient(circle at 50% 50%, rgba(99, 102, 241, 0.42) 0%, rgba(99, 102, 241, 0) 68%);
+      opacity: 0.5;
+      animation: splash-blob-a 17s ease-in-out infinite;
+    }
+    .splash-blob-b {
+      bottom: -16%; right: -12%; width: 62%; height: 62%;
+      background: radial-gradient(circle at 50% 50%, rgba(34, 211, 238, 0.38) 0%, rgba(34, 211, 238, 0) 68%);
+      opacity: 0.46;
+      animation: splash-blob-b 21s ease-in-out infinite;
+    }
+    html[data-theme="light"] .splash-blob-a { opacity: 0.34; }
+    html[data-theme="light"] .splash-blob-b { opacity: 0.3; }
+
+    .splash-center {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .splash-glow {
+      position: absolute;
+      top: -54px; left: 50%; width: 340px; height: 168px;
+      margin-left: -170px;
+      pointer-events: none;
+      border-radius: 50%;
+      background: radial-gradient(circle at 50% 50%, rgba(167, 139, 250, 0.34) 0%, rgba(99, 102, 241, 0.22) 46%, rgba(34, 211, 238, 0) 74%);
+      filter: blur(28px);
+      animation: splash-glow 4.2s ease-in-out infinite;
+    }
+    .splash-sub {
+      position: relative;
+      margin: 14px 0 0;
+      font-size: 11px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.22em;
+      color: rgba(255, 255, 255, 0.5);
+    }
+    html[data-theme="light"] .splash-sub { color: #6b7280; }
+
+    .splash-ascii-slot {
+      height: 63px;
+      margin: 22px auto 0;
+    }
+
+    .splash-ascii {
+      position: relative;
+      display: block;
+      width: max-content;
+      margin: 22px auto 0;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 10px;
+      line-height: 1.04;
+      letter-spacing: 0;
+      filter: drop-shadow(0 0 10px rgba(139, 92, 246, 0.45));
+    }
+    .splash-ascii-row {
+      display: block;
+      white-space: pre;
+      color: var(--row-color, #a78bfa);
+      clip-path: inset(0 100% 0 0);
+      animation: splash-ascii-row 380ms cubic-bezier(0.33, 0, 0.2, 1) both;
+      animation-delay: calc(100ms + var(--i) * 50ms);
+    }
+    .splash-ascii-row:nth-child(1) { --row-color: #f5f3ff; }
+    .splash-ascii-row:nth-child(2) { --row-color: #ddd6fe; }
+    .splash-ascii-row:nth-child(3) { --row-color: #c4b5fd; }
+    .splash-ascii-row:nth-child(4) { --row-color: #a78bfa; }
+    .splash-ascii-row:nth-child(5) { --row-color: #8b5cf6; }
+    .splash-ascii-row:nth-child(6) { --row-color: #7c3aed; }
+    html[data-theme="light"] .splash-ascii-row:nth-child(1) { --row-color: #a78bfa; }
+    html[data-theme="light"] .splash-ascii-row:nth-child(2) { --row-color: #9b7cf7; }
+    html[data-theme="light"] .splash-ascii-row:nth-child(3) { --row-color: #8b5cf6; }
+    html[data-theme="light"] .splash-ascii-row:nth-child(4) { --row-color: #7c3aed; }
+    html[data-theme="light"] .splash-ascii-row:nth-child(5) { --row-color: #6d28d9; }
+    html[data-theme="light"] .splash-ascii-row:nth-child(6) { --row-color: #5b21b6; }
+    html[data-theme="light"] .splash-ascii { filter: drop-shadow(0 0 9px rgba(139, 92, 246, 0.3)); }
+
+    @keyframes splash-ascii-row {
+      from { clip-path: inset(0 100% 0 0); opacity: 0.4; }
+      to { clip-path: inset(0 0 0 0); opacity: 1; }
+    }
+
+    .splash-foot {
+      position: absolute;
+      left: 0; right: 0; bottom: 48px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+    }
+    .splash-status {
+      margin: 0;
+      font-size: 11px;
+      font-weight: 500;
+      color: rgba(255, 255, 255, 0.5);
+    }
+    html[data-theme="light"] .splash-status { color: #6b7280; }
+    .splash-track {
+      position: relative;
+      overflow: hidden;
+      width: 168px;
+      height: 3px;
+      border-radius: 99px;
+      background: rgba(255, 255, 255, 0.08);
+    }
+    html[data-theme="light"] .splash-track { background: rgba(0, 0, 0, 0.08); }
+    .splash-sweep {
+      position: absolute;
+      top: 0; bottom: 0; left: 0;
+      width: 46%;
+      border-radius: 99px;
+      background: linear-gradient(90deg, rgba(99, 102, 241, 0) 0%, #6366f1 30%, #818cf8 60%, #22d3ee 88%, rgba(34, 211, 238, 0) 100%);
+      animation: splash-sweep 1.25s linear infinite;
+    }
+    .splash-version {
+      margin: 0;
+      min-height: 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 10px;
+      letter-spacing: 0.02em;
+      color: rgba(255, 255, 255, 0.35);
+    }
+    html[data-theme="light"] .splash-version { color: rgba(0, 0, 0, 0.35); }
+
+    #boot-splash .splash-center,
+    #boot-splash .splash-foot {
+      animation: splash-in 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
+    }
+    #boot-splash .splash-foot { animation-delay: 120ms; }
+
+    @keyframes splash-in {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes splash-blob-a {
+      0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+      50% { transform: translate3d(7%, 6%, 0) scale(1.1); }
+    }
+    @keyframes splash-blob-b {
+      0%, 100% { transform: translate3d(0, 0, 0) scale(1.06); }
+      50% { transform: translate3d(-6%, -7%, 0) scale(0.97); }
+    }
+    @keyframes splash-glow {
+      0%, 100% { opacity: 0.62; transform: scale(1); }
+      50% { opacity: 1; transform: scale(1.07); }
+    }
+    @keyframes splash-sweep {
+      0% { transform: translateX(-105%); }
+      100% { transform: translateX(240%); }
+    }
+    @keyframes splash-fade-in {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+  <div id="root">
+    <div id="boot-splash" class="splash-root">
+      <div class="splash-blob splash-blob-a"></div>
+      <div class="splash-blob splash-blob-b"></div>
+      <div class="splash-center">
+        <div class="splash-glow"></div>
+        <div class="splash-ascii-slot" aria-hidden="true"></div>
+        <p class="splash-sub" data-boot-sub>Trình khởi chạy Minecraft</p>
+      </div>
+      <div class="splash-foot">
+        <p class="splash-status" data-boot-status>Đang khởi động…</p>
+        <div class="splash-track"><div class="splash-sweep"></div></div>
+        <p class="splash-version"></p>
+      </div>
+    </div>
+  </div>
+  <script>
+    (function () {
+      if (window.__boot.lang !== 'en') return
+      var sub = document.querySelector('[data-boot-sub]')
+      var status = document.querySelector('[data-boot-status]')
+      if (sub) sub.textContent = 'Minecraft Launcher'
+      if (status) status.textContent = 'Starting…'
+    })()
+  </script>
+  <script type="module" src="/src/main.jsx"></script>
+</body>
+</html>
