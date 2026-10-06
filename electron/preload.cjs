@@ -63,6 +63,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   removeJavaRuntime: (opts) => ipcRenderer.invoke('launcher:runtime-remove', opts),
 
   modpackSearch: (opts) => ipcRenderer.invoke('launcher:modpack-search', opts),
+  modpackTags: (opts) => ipcRenderer.invoke('launcher:modpack-tags', opts),
   modpackVersions: (opts) => ipcRenderer.invoke('launcher:modpack-versions', opts),
   modpackResolve: (opts) => ipcRenderer.invoke('launcher:modpack-resolve', opts),
   modpackImport: (opts) => ipcRenderer.invoke('launcher:modpack-import', opts),

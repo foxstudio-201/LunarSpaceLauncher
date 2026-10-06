@@ -211,6 +211,7 @@ function registerIpc() {
   ipcMain.handle('launcher:runtime-remove', (_e, opts) => launcher.removeJavaRuntime({ ...(opts || {}), settings: readSettings() }))
 
   ipcMain.handle('launcher:modpack-search', (_e, opts) => launcher.modpackSearch(opts || {}))
+  ipcMain.handle('launcher:modpack-tags', (_e, opts) => launcher.modpackTags(opts || {}))
   ipcMain.handle('launcher:modpack-versions', (_e, opts) => launcher.modpackVersions(opts || {}))
   ipcMain.handle('launcher:modpack-resolve', (_e, opts) => launcher.modpackResolve({ ...(opts || {}), settings: readSettings() }))
   ipcMain.handle('launcher:modpack-import', (_e, opts) => launcher.modpackImport({ ...(opts || {}), settings: readSettings() }))

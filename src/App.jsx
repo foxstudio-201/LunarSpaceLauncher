@@ -489,7 +489,7 @@ function AppContent() {
 
   return (
     <div className="w-screen h-screen flex flex-col overflow-hidden relative z-10" style={{ background: 'transparent' }}>
-      <TitleBar version={version} system={system} instance={isInInstance ? selectedInstance : null} />
+      <TitleBar />
 
       {instancesError && (
         <div

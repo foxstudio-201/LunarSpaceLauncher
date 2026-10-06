@@ -45,6 +45,14 @@ const SORT_LABELS = {
 
 const LOADERS = { vanilla: 'Vanilla', fabric: 'Fabric', quilt: 'Quilt', forge: 'Forge', neoforge: 'NeoForge' }
 
+const ENVS = ['client', 'server', 'both']
+
+const ENV_LABELS = {
+  client: ['Máy khách', 'Client'],
+  server: ['Máy chủ', 'Server'],
+  both: ['Cả hai', 'Both'],
+}
+
 const MODPACK_EXT = /\.(mrpack|zip)$/i
 
 const TABS = [
@@ -61,6 +69,10 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
   const [sort, setSort] = useState('relevance')
   const [filterGame, setFilterGame] = useState('')
   const [filterLoaderOuter, setFilterLoaderOuter] = useState('')
+  const [filterTag, setFilterTag] = useState('')
+  const [filterEnv, setFilterEnv] = useState('')
+  const [tagOptions, setTagOptions] = useState([])
+  const [envSupported, setEnvSupported] = useState(true)
   const [query, setQuery] = useState('')
   const [applied, setApplied] = useState('')
   const [hits, setHits] = useState([])
@@ -105,7 +117,17 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
     setLoading(true)
     setListError('')
     const offset = reset ? 0 : hits.length
-    const res = await api.modpackSearch({ source, query: applied, sort, offset, limit: PAGE, game: filterGame || undefined, loader: filterLoaderOuter || undefined }).catch((err) => ({ ok: false, error: err.message }))
+    const res = await api.modpackSearch({
+      source,
+      query: applied,
+      sort,
+      offset,
+      limit: PAGE,
+      game: filterGame || undefined,
+      loader: filterLoaderOuter || undefined,
+      category: filterTag || undefined,
+      environment: envSupported && filterEnv ? filterEnv : undefined,
+    }).catch((err) => ({ ok: false, error: err.message }))
     if (id !== reqRef.current) return
     setLoading(false)
     if (!res?.ok) {
@@ -118,7 +140,7 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
     }
     setTotal(res.total || 0)
     setHits((prev) => (reset ? res.hits : [...prev, ...res.hits]))
-  }, [source, applied, sort, filterGame, filterLoaderOuter, hits.length])
+  }, [source, applied, sort, filterGame, filterLoaderOuter, filterTag, filterEnv, envSupported, hits.length])
 
   useEffect(() => {
     const timer = setTimeout(() => setApplied(query.trim()), 340)
@@ -128,7 +150,28 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
   useEffect(() => {
     setHits([])
     load({ reset: true })
-  }, [source, applied, sort, filterGame, filterLoaderOuter])
+  }, [source, applied, sort, filterGame, filterLoaderOuter, filterTag, filterEnv])
+
+  useEffect(() => {
+    let alive = true
+    api.modpackTags({ source })
+      .then((res) => {
+        if (!alive) return
+        setTagOptions(res?.options || [])
+        setEnvSupported(res?.environment !== false)
+      })
+      .catch(() => {
+        if (alive) setTagOptions([])
+      })
+    return () => { alive = false }
+  }, [source])
+
+  const pickSource = useCallback((next) => {
+    if (next === source) return
+    setSource(next)
+    setFilterTag('')
+    setFilterEnv('')
+  }, [source])
 
   const swap = useCallback((next) => {
     setFading(true)
@@ -324,7 +367,7 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
               return (
                 <button
                   key={s.id}
-                  onClick={() => setSource(s.id)}
+                  onClick={() => pickSource(s.id)}
                   className="h-8 px-3 rounded-md text-[11px] font-semibold transition-colors"
                   style={{ background: on ? c.surface : 'transparent', color: on ? c.accent : c.label, border: `1px solid ${on ? 'rgba(167,139,250,0.32)' : 'transparent'}` }}
                 >
@@ -394,7 +437,7 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
           <div ref={listRef} className="h-full overflow-y-auto">
             <div className="max-w-5xl mx-auto p-6 flex flex-col gap-4">
               <div className="flex items-center gap-2 flex-wrap">
-                <div className="w-[150px]">
+                <div className="w-[170px]">
                   <Select
                     theme={theme}
                     value={filterGame}
@@ -412,14 +455,42 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
                     placeholder={vn(lang, 'Mọi loader', 'Any loader')}
                   />
                 </div>
-                {(filterGame || filterLoaderOuter) && (
+                <div className="w-[150px]">
+                  <Select
+                    theme={theme}
+                    value={filterTag}
+                    options={tagOptions}
+                    onChange={setFilterTag}
+                    placeholder={vn(lang, 'Mọi thẻ', 'Any tag')}
+                  />
+                </div>
+                <div className="w-[160px]">
+                  <Select
+                    theme={theme}
+                    value={filterEnv}
+                    options={ENVS.map((value) => ({ value, label: vn(lang, ENV_LABELS[value][0], ENV_LABELS[value][1]) }))}
+                    onChange={setFilterEnv}
+                    disabled={!envSupported}
+                    placeholder={vn(lang, 'Mọi môi trường', 'Any environment')}
+                  />
+                </div>
+                {(filterGame || filterLoaderOuter || filterTag || filterEnv) && (
                   <button
-                    onClick={() => { setFilterGame(''); setFilterLoaderOuter('') }}
+                    onClick={() => { setFilterGame(''); setFilterLoaderOuter(''); setFilterTag(''); setFilterEnv('') }}
                     className="h-9 px-2.5 rounded-lg text-[11px] font-semibold"
                     style={{ background: c.input, border: `1px solid ${c.border}`, color: c.label }}
                   >
                     {vn(lang, 'Xoá lọc', 'Clear')}
                   </button>
+                )}
+                {!envSupported && (
+                  <p className="w-full text-[10px] leading-relaxed" style={{ color: c.faint }}>
+                    {vn(
+                      lang,
+                      'CurseForge không trả về dữ liệu máy khách/máy chủ qua API, nên bộ lọc môi trường chỉ dùng được với Modrinth.',
+                      'CurseForge’s API exposes no client/server data, so the environment filter only works with Modrinth.',
+                    )}
+                  </p>
                 )}
               </div>
 

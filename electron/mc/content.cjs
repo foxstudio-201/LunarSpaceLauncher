@@ -35,8 +35,8 @@ const stripCodes = (value) => String(value || '').replace(/§./g, '').trim()
 const loadersOf = (list) => {
   const set = new Set()
   for (const item of list || []) {
-    const value = String(item || '').toLowerCase()
-    const hit = ['fabric', 'quilt', 'forge', 'neoforge'].find((id) => value === id || value.startsWith(`${id}-`) || value.includes(id))
+    const tokens = String(item || '').toLowerCase().replace(/([a-z])(\d)/g, '$1-$2').split(/[^a-z]+/)
+    const hit = ['neoforge', 'forge', 'fabric', 'quilt'].find((id) => tokens.includes(id))
     if (hit) set.add(hit)
   }
   return [...set]

@@ -393,24 +393,49 @@ export async function removeJavaRuntime({ component } = {}) {
 
 const CF_PROXY = 'https://api.curse.tools/v1'
 const MODRINTH_API = 'https://api.modrinth.com/v2'
-const PACK_LOADER_IDS = ['fabric', 'quilt', 'forge', 'neoforge']
+const PACK_LOADER_IDS = ['neoforge', 'forge', 'fabric', 'quilt']
 
 function packLoaders(list) {
   const set = new Set()
   for (const item of list || []) {
-    const value = String(item || '').toLowerCase()
-    const hit = PACK_LOADER_IDS.find((id) => value === id || value.startsWith(`${id}-`) || value.includes(id))
+    const tokens = String(item || '').toLowerCase().replace(/([a-z])(\d)/g, '$1-$2').split(/[^a-z]+/)
+    const hit = PACK_LOADER_IDS.find((id) => tokens.includes(id))
     if (hit) set.add(hit)
   }
   return [...set]
 }
 
-export async function modpackSearch({ source, query = '', sort = 'relevance', offset = 0, limit = 24 } = {}) {
-  if (bridge?.modpackSearch) return bridge.modpackSearch({ source, query, sort, offset, limit })
+const PACK_ENV_FACETS = {
+  client: [['client_side:required', 'client_side:optional']],
+  server: [['server_side:required', 'server_side:optional']],
+  both: [['client_side:required', 'client_side:optional'], ['server_side:required', 'server_side:optional']],
+}
+
+function packFacets({ game, loader, category, environment }) {
+  const facets = [['project_type:modpack']]
+  if (game) facets.push([`versions:${game}`])
+  if (loader && loader !== 'vanilla') facets.push([`categories:${loader}`])
+  if (category) facets.push([`categories:${category}`])
+  const env = PACK_ENV_FACETS[environment]
+  if (env) facets.push(...env)
+  return JSON.stringify(facets)
+}
+
+function tagLabel(slug) {
+  return String(slug || '').split('-').map((word) => (word ? word[0].toUpperCase() + word.slice(1) : word)).join(' ')
+}
+
+export async function modpackSearch({ source, query = '', sort = 'relevance', offset = 0, limit = 24, game, loader, category, environment } = {}) {
+  if (bridge?.modpackSearch) return bridge.modpackSearch({ source, query, sort, offset, limit, game, loader, category, environment })
   try {
     if (source === 'curseforge') {
       const sortField = sort === 'downloads' ? 6 : sort === 'updated' ? 3 : 1
-      const url = `${CF_PROXY}/mods/search?gameId=432&classId=4471&searchFilter=${encodeURIComponent(query)}&sortField=${sortField}&sortOrder=desc&pageSize=${limit}&index=${offset}`
+      const categoryId = Number(category) > 0 ? Number(category) : null
+      const url =
+        `${CF_PROXY}/mods/search?gameId=432&classId=4471&searchFilter=${encodeURIComponent(query)}&sortField=${sortField}&sortOrder=desc&pageSize=${limit}&index=${offset}` +
+        (game ? `&gameVersion=${encodeURIComponent(game)}` : '') +
+        (loader && loader !== 'vanilla' ? `&modLoaderType=${{ forge: 1, fabric: 4, quilt: 5, neoforge: 6 }[loader] || ''}` : '') +
+        (categoryId ? `&categoryId=${categoryId}` : '')
       const data = await webJson(url)
       return {
         ok: true,
@@ -429,7 +454,7 @@ export async function modpackSearch({ source, query = '', sort = 'relevance', of
         })),
       }
     }
-    const facets = JSON.stringify([['project_type:modpack']])
+    const facets = packFacets({ game, loader, category, environment })
     const index = ['relevance', 'downloads', 'follows', 'newest', 'updated'].includes(sort) ? sort : 'relevance'
     const url = `${MODRINTH_API}/search?query=${encodeURIComponent(query)}&facets=${encodeURIComponent(facets)}&index=${index}&limit=${limit}&offset=${offset}`
     const data = await webJson(url)
@@ -451,6 +476,28 @@ export async function modpackSearch({ source, query = '', sort = 'relevance', of
     }
   } catch (err) {
     return { ok: false, error: err.message, hits: [], total: 0 }
+  }
+}
+
+export async function modpackTags({ source } = {}) {
+  if (bridge?.modpackTags) return bridge.modpackTags({ source })
+  try {
+    if (source === 'curseforge') {
+      const data = await webJson(`${CF_PROXY}/categories?gameId=432`)
+      const options = (data?.data || [])
+        .filter((cat) => cat.classId === 4471)
+        .map((cat) => ({ value: String(cat.id), label: cat.name || tagLabel(cat.slug) }))
+        .sort((a, b) => a.label.localeCompare(b.label))
+      return { ok: true, options, environment: false }
+    }
+    const list = await webJson(`${MODRINTH_API}/tag/category`)
+    const options = (list || [])
+      .filter((tag) => tag.project_type === 'modpack')
+      .map((tag) => ({ value: tag.name, label: tagLabel(tag.name) }))
+      .sort((a, b) => a.label.localeCompare(b.label))
+    return { ok: true, options, environment: true }
+  } catch (err) {
+    return { ok: false, error: err.message, options: [], environment: source !== 'curseforge' }
   }
 }
 

@@ -1361,12 +1361,20 @@ function normalizePackPlan(plan) {
   return plan
 }
 
-async function modpackSearch({ source, query = '', sort = 'relevance', offset = 0, limit = 24 } = {}) {
+async function modpackSearch({ source, query = '', sort = 'relevance', offset = 0, limit = 24, game, loader, category, environment } = {}) {
   try {
-    const res = await modpack.search({ source, query, sort, offset, limit })
+    const res = await modpack.search({ source, query, sort, offset, limit, game, loader, category, environment })
     return { ok: true, ...res }
   } catch (err) {
     return { ok: false, error: err.message, hits: [], total: 0 }
+  }
+}
+
+async function modpackTags({ source } = {}) {
+  try {
+    return { ok: true, ...(await modpack.packTags({ source })) }
+  } catch (err) {
+    return { ok: false, error: err.message, options: [], environment: source !== 'curseforge' }
   }
 }
 
@@ -1707,6 +1715,7 @@ module.exports = {
   installJavaRuntime,
   removeJavaRuntime,
   modpackSearch,
+  modpackTags,
   modpackVersions,
   modpackResolve,
   modpackImport,

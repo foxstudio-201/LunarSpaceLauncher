@@ -9,7 +9,7 @@ const CF = 'https://api.curse.tools/v1'
 const CF_GAME = 432
 const CF_CLASS_MODPACK = 4471
 const CF_CLASS_MOD = 6
-const LOADER_IDS = ['fabric', 'quilt', 'forge', 'neoforge']
+const LOADER_IDS = ['neoforge', 'forge', 'fabric', 'quilt']
 const CF_LOADER_ID = { forge: 1, fabric: 4, quilt: 5, neoforge: 6 }
 const SLUG_SUFFIXES = ['-fabric', '-forge', '-neoforge', '-quilt']
 const JSON_HEADERS = { ...UA, Accept: 'application/json' }
@@ -76,8 +76,8 @@ function mcVersionsOf(list) {
 function loadersOf(list) {
   const set = new Set()
   for (const item of list || []) {
-    const value = String(item || '').toLowerCase()
-    const hit = LOADER_IDS.find((id) => value === id || value.startsWith(`${id}-`) || value.includes(id))
+    const tokens = String(item || '').toLowerCase().replace(/([a-z])(\d)/g, '$1-$2').split(/[^a-z]+/)
+    const hit = LOADER_IDS.find((id) => tokens.includes(id))
     if (hit) set.add(hit)
   }
   return [...set]
@@ -112,8 +112,24 @@ async function mapLimit(items, limit, fn) {
   return out
 }
 
-async function searchModrinth({ query = '', sort = 'relevance', offset = 0, limit = 24 } = {}) {
-  const facets = JSON.stringify([['project_type:modpack']])
+const ENV_FACETS = {
+  client: [['client_side:required', 'client_side:optional']],
+  server: [['server_side:required', 'server_side:optional']],
+  both: [['client_side:required', 'client_side:optional'], ['server_side:required', 'server_side:optional']],
+}
+
+function packFacets({ game, loader, category, environment } = {}) {
+  const facets = [['project_type:modpack']]
+  if (game) facets.push([`versions:${game}`])
+  if (loader && loader !== 'vanilla') facets.push([`categories:${loader}`])
+  if (category) facets.push([`categories:${category}`])
+  const env = ENV_FACETS[environment]
+  if (env) facets.push(...env)
+  return JSON.stringify(facets)
+}
+
+async function searchModrinth({ query = '', sort = 'relevance', offset = 0, limit = 24, game, loader, category, environment } = {}) {
+  const facets = packFacets({ game, loader, category, environment })
   const index = ['relevance', 'downloads', 'follows', 'newest', 'updated'].includes(sort) ? sort : 'relevance'
   const url = `${MODRINTH}/search?query=${encodeURIComponent(query)}&facets=${encodeURIComponent(facets)}&index=${index}&limit=${limit}&offset=${offset}`
   const data = await fetchJson(url)
@@ -135,11 +151,16 @@ async function searchModrinth({ query = '', sort = 'relevance', offset = 0, limi
   }
 }
 
-async function searchCurseforge({ query = '', sort = 'relevance', offset = 0, limit = 24 } = {}) {
+async function searchCurseforge({ query = '', sort = 'relevance', offset = 0, limit = 24, game, loader, category } = {}) {
   const sortField = sort === 'downloads' ? 6 : sort === 'updated' ? 3 : 1
+  const loaderId = loader && loader !== 'vanilla' ? CF_LOADER_ID[loader] : null
+  const categoryId = Number(category) > 0 ? Number(category) : null
   const url =
     `${CF}/mods/search?gameId=${CF_GAME}&classId=${CF_CLASS_MODPACK}` +
-    `&searchFilter=${encodeURIComponent(query)}&sortField=${sortField}&sortOrder=desc&pageSize=${limit}&index=${offset}`
+    `&searchFilter=${encodeURIComponent(query)}&sortField=${sortField}&sortOrder=desc&pageSize=${limit}&index=${offset}` +
+    (game ? `&gameVersion=${encodeURIComponent(game)}` : '') +
+    (loaderId ? `&modLoaderType=${loaderId}` : '') +
+    (categoryId ? `&categoryId=${categoryId}` : '')
   const data = await cfJson(url)
   return {
     total: data?.pagination?.totalCount || 0,
@@ -232,6 +253,49 @@ async function versionsCurseforge({ id }) {
 
 async function search({ source, ...rest } = {}) {
   return source === 'curseforge' ? searchCurseforge(rest) : searchModrinth(rest)
+}
+
+function prettifyTag(slug) {
+  return String(slug || '')
+    .split('-')
+    .map((word) => (word ? word[0].toUpperCase() + word.slice(1) : word))
+    .join(' ')
+}
+
+const packTagsCache = { modrinth: null, curseforge: null }
+
+async function fetchJsonRetry(url, tries = 3) {
+  let last = null
+  for (let i = 0; i < tries; i += 1) {
+    try {
+      return await fetchJson(url)
+    } catch (err) {
+      last = err
+      if (i < tries - 1) await sleep(400 * 2 ** i)
+    }
+  }
+  throw last
+}
+
+async function packTags({ source } = {}) {
+  if (source === 'curseforge') {
+    if (!packTagsCache.curseforge) {
+      const data = await cfJson(`${CF}/categories?gameId=${CF_GAME}`)
+      packTagsCache.curseforge = (data?.data || [])
+        .filter((cat) => cat.classId === CF_CLASS_MODPACK)
+        .map((cat) => ({ value: String(cat.id), label: cat.name || prettifyTag(cat.slug) }))
+        .sort((a, b) => a.label.localeCompare(b.label))
+    }
+    return { options: packTagsCache.curseforge, environment: false }
+  }
+  if (!packTagsCache.modrinth) {
+    const list = await fetchJsonRetry(`${MODRINTH}/tag/category`)
+    packTagsCache.modrinth = (list || [])
+      .filter((tag) => tag.project_type === 'modpack')
+      .map((tag) => ({ value: tag.name, label: prettifyTag(tag.name) }))
+      .sort((a, b) => a.label.localeCompare(b.label))
+  }
+  return { options: packTagsCache.modrinth, environment: true }
 }
 
 async function versions({ source, id } = {}) {
@@ -715,6 +779,7 @@ module.exports = {
   normName,
   pickFile,
   search,
+  packTags,
   versions,
   resolvePlan,
   applyPlan,
