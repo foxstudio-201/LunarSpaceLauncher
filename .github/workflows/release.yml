@@ -78,7 +78,9 @@ jobs:
         run: |
           highest=$(git ls-remote --tags https://github.com/${{ github.repository }}.git 'refs/tags/v*' | sed 's#.*refs/tags/##' | grep -v '\^{}' | sort -V | tail -1)
           echo "highest tag: $highest, this tag: $GITHUB_REF_NAME"
-          if [ "$highest" = "$GITHUB_REF_NAME" ]; then echo "make_latest=true" >> "$GITHUB_OUTPUT"; else echo "make_latest=false" >> "$GITHUB_OUTPUT"; fi
+          if [ -z "$highest" ]; then echo "make_latest=legacy" >> "$GITHUB_OUTPUT"
+          elif [ "$highest" = "$GITHUB_REF_NAME" ]; then echo "make_latest=true" >> "$GITHUB_OUTPUT"
+          else echo "make_latest=false" >> "$GITHUB_OUTPUT"; fi
 
       - uses: softprops/action-gh-release@v2
         with:
