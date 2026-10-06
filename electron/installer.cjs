@@ -305,18 +305,23 @@ async function freeSpace(dir) {
   return 0
 }
 
-function existingInstance() {
-  return new Promise((resolve) => {
-    execFile('tasklist.exe', ['/fi', `imagename eq ${APP_EXE}`, '/fo', 'csv', '/nh'], { windowsHide: true }, (err, stdout) => {
-      if (err) return resolve(false)
-      const pids = String(stdout || '')
-        .split(/\r?\n/)
-        .map((line) => line.match(/^"[^"]+","(\d+)"/))
-        .filter(Boolean)
-        .map((match) => Number(match[1]))
-      resolve(pids.some((pid) => pid !== process.pid))
-    })
-  })
+function targetLocked(dir) {
+  const exe = path.join(dir, APP_EXE)
+  if (!fs.existsSync(exe)) return false
+  try {
+    fs.closeSync(fs.openSync(exe, 'r+'))
+    return false
+  } catch {
+    return true
+  }
+}
+
+async function waitTargetFree(dir) {
+  for (let i = 0; i < 6; i += 1) {
+    if (!targetLocked(dir)) return true
+    await new Promise((resolve) => setTimeout(resolve, 400))
+  }
+  return !targetLocked(dir)
 }
 
 async function runInstall(dir) {
@@ -333,7 +338,7 @@ async function runInstall(dir) {
     const free = await freeSpace(dir)
     if (free && free < total * 1.1) throw new Error('no space')
 
-    if (await existingInstance()) throw new Error('running')
+    if (!(await waitTargetFree(dir))) throw new Error('running')
 
     setState({ phase: 'copy', installDir: dir, percent: 0, bytesDone: 0, totalBytes: total, file: '', step: 'files', error: '' })
 
@@ -351,7 +356,8 @@ async function runInstall(dir) {
     setState({ phase: 'done', percent: 100, step: 'done', bytesDone: bytes, totalBytes: bytes, file: '' })
     return { ok: true }
   } catch (err) {
-    const code = err?.message || 'unknown'
+    const busy = ['EBUSY', 'EPERM', 'EACCES'].includes(err?.code)
+    const code = busy ? 'running' : err?.message || 'unknown'
     setState({ phase: 'error', error: code })
     return { ok: false, error: code }
   } finally {

@@ -286,7 +286,9 @@ export default function InstallerApp() {
 
       <footer className="shrink-0 flex items-center gap-2.5 px-6 h-[68px]" style={{ borderTop: `1px solid ${c.border}` }}>
         <span className="text-[10px] truncate flex-1" style={{ color: c.faint }}>
-          {phase === 'done'
+          {phase === 'error'
+            ? ''
+            : phase === 'done'
             ? (mode === 'uninstall' ? '' : state?.installDir || '')
             : installing
               ? tr('installer.keepOpen')
