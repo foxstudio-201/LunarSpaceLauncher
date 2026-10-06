@@ -584,11 +584,12 @@ async function planFromCurseforgeZip({ zipPath, onLog, onPlan }) {
     extraNoMatch = extra.noMatch
     for (const file of extra.files) files.push(file)
     if (extras) onLog?.(`[LunarSpace] modlist.html: thêm ${extras} mod ngoài manifest.json`)
-    if (extraNoMatch.length) onLog?.(`[LunarSpace] ${extraNoMatch.length} mod trong modlist.html không có bản cho ${mc} ${loader}: ${extraNoMatch.slice(0, 6).join(', ')}`)
-    if (extraUnresolved.length) onLog?.(`[LunarSpace] ${extraUnresolved.length} mục trong modlist.html không xác định được: ${extraUnresolved.slice(0, 6).join(', ')}`)
+    if (missing.length) {
+      if (extraNoMatch.length) onLog?.(`[LunarSpace] ${extraNoMatch.length} mod trong modlist.html không có bản cho ${mc} ${loader}: ${extraNoMatch.slice(0, 6).join(', ')}`)
+      if (extraUnresolved.length) onLog?.(`[LunarSpace] ${extraUnresolved.length} mục trong modlist.html không xác định được: ${extraUnresolved.slice(0, 6).join(', ')}`)
+    }
   }
-  const allMissing = [...missing, ...extraUnresolved, ...extraNoMatch].filter(Boolean)
-  if (allMissing.length) onLog?.(`[LunarSpace] Không tải được ${allMissing.length} mod: ${allMissing.slice(0, 6).join(', ')}`)
+  if (missing.length) onLog?.(`[LunarSpace] Không tải được ${missing.length} mod: ${missing.slice(0, 6).join(', ')}`)
 
   return {
     name: manifest.name || 'Modpack',
@@ -598,7 +599,7 @@ async function planFromCurseforgeZip({ zipPath, onLog, onPlan }) {
     loader,
     loaderVersion,
     files,
-    missing: allMissing,
+    missing: [...missing, ...extraUnresolved, ...extraNoMatch].filter(Boolean),
     listed,
     extras,
     optional,
@@ -696,7 +697,6 @@ async function applyPlan({ plan, instanceDir, onProgress, onLog }) {
   const zip = new AdmZip(plan.zipPath)
   const overrides = await extractOverrides({ entries: zip.getEntries(), prefixes: plan.overrides || [], targetDir: instanceDir })
   const failed = [...new Set(errors.map((e) => path.basename(e.file)))]
-  onLog?.(`[LunarSpace] Modpack: ${tasks.length - failed.length}/${tasks.length} tệp, ${overrides} tệp overrides`)
   if (failed.length) onLog?.(`[LunarSpace] Tải lỗi ${failed.length} tệp: ${failed.slice(0, 6).join(', ')}`)
   return { files: tasks.length, downloaded: tasks.length - failed.length, overrides, errors, failed }
 }

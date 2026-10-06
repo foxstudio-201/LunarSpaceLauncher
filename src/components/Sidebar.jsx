@@ -13,7 +13,7 @@ export const RAIL_W = 180
 export const RAIL_W_COLLAPSED = 64
 
 const ACCENT = '#a78bfa'
-const ICON = 20
+const ICON = 28
 const HEAD = 28
 const LABEL_W = 124
 const FILLET = 14
@@ -225,9 +225,9 @@ export default function Sidebar({
   )
 
   const rowPad = (iconW) =>
-    iconW === ICON || !collapsed
-      ? undefined
-      : { paddingLeft: Math.max(0, (RAIL_W_COLLAPSED - iconW) / 2), transition: `padding-left ${SWEEP}` }
+    collapsed
+      ? { paddingLeft: Math.max(0, (RAIL_W_COLLAPSED - iconW) / 2), transition: `padding-left ${SWEEP}` }
+      : undefined
 
   const label = (text, active) => (
     <span
@@ -244,7 +244,8 @@ export default function Sidebar({
     'aria-current': activeKey === key ? 'page' : undefined,
   })
 
-  const slotIcon = (inst) => (inst?.game === 'terraria' ? './terraria_slot.png' : loaderIcon(inst?.loader))
+  const loaderSlot = (inst) => (inst?.game === 'terraria' ? './terraria_slot.png' : loaderIcon(inst?.loader))
+  const slotIcon = (inst) => inst?.icon || loaderSlot(inst)
 
   const list = (
     <div ref={listRef} className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col gap-0.5">
@@ -261,7 +262,7 @@ export default function Sidebar({
               {...navKeyProps(p.key, text)}
               data-nav-row
               className={rowClass(false)}
-              style={{ color: isActive ? accent : labelColor }}
+              style={{ ...rowPad(ICON), color: isActive ? accent : labelColor }}
             >
               {!isActive && hoverBar()}
               <Icon size={ICON} weight="duotone" className="relative z-20 shrink-0" />
@@ -359,7 +360,7 @@ export default function Sidebar({
               {...navKeyProps(p.key, text)}
               data-nav-row
               className={rowClass(true)}
-              style={{ color: isActive ? accent : labelColor }}
+              style={{ ...rowPad(ICON), color: isActive ? accent : labelColor }}
             >
               {!isActive && hoverBar()}
               <Icon size={ICON} weight="duotone" className="relative z-20 shrink-0" />
@@ -375,7 +376,7 @@ export default function Sidebar({
             data-tip={collapsed ? t(lang, 'sidebar.home') : undefined}
             data-nav-row
             className={rowClass(true)}
-            style={{ color: labelColor }}
+            style={{ ...rowPad(ICON), color: labelColor }}
           >
             {hoverBar()}
             <ArrowLeft size={ICON} weight="duotone" className="relative z-20 shrink-0" />
@@ -411,7 +412,7 @@ export default function Sidebar({
               data-tip={collapsed ? t(lang, 'sidebar.newInstance') : undefined}
               data-nav-row
               className={rowClass(false)}
-              style={{ color: labelColor }}
+              style={{ ...rowPad(ICON), color: labelColor }}
             >
               {hoverBar()}
               <Plus size={ICON} weight="duotone" className="relative z-20 shrink-0" />
@@ -432,10 +433,20 @@ export default function Sidebar({
                     data-tip={collapsed ? inst.name : undefined}
                     data-nav-row
                     className={rowClass(false)}
-                    style={{ color: isSelected ? accent : labelColor, background: isSelected ? pillBg : undefined, borderRadius: RADIUS }}
+                    style={{ ...rowPad(ICON), color: isSelected ? accent : labelColor, background: isSelected ? pillBg : undefined, borderRadius: RADIUS }}
                   >
                     {!isSelected && hoverBar()}
-                    <img src={slotIcon(inst)} alt="" className="relative z-20 w-5 h-5 rounded object-cover shrink-0" />
+                    <img
+                      src={slotIcon(inst)}
+                      alt=""
+                      className="relative z-20 w-7 h-7 rounded-md object-cover shrink-0"
+                      onError={(event) => {
+                        const el = event.currentTarget
+                        if (el.dataset.fallback) return
+                        el.dataset.fallback = '1'
+                        el.src = loaderSlot(inst)
+                      }}
+                    />
                     {label(inst.name, isSelected)}
                     <span className="relative z-20 ml-auto w-2 h-2 rounded-full shrink-0" style={{ background: statusColor(inst.status) }} />
                   </button>
@@ -491,7 +502,7 @@ export default function Sidebar({
           {...navKeyProps('settings', t(lang, 'sidebar.settings'))}
           data-nav-row
           className={rowClass(true)}
-          style={{ color: activeKey === 'settings' ? accent : labelColor }}
+          style={{ ...rowPad(ICON), color: activeKey === 'settings' ? accent : labelColor }}
         >
           {activeKey !== 'settings' && hoverBar()}
           <Gear size={ICON} weight="duotone" className="relative z-20 shrink-0" />

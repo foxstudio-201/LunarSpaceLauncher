@@ -143,6 +143,7 @@ const vi = {
   'files.name': 'Tên',
   'files.size': 'Kích thước',
   'files.modified': 'Sửa đổi',
+  'files.searchPlaceholder': 'Tìm theo tên…',
   'files.items': 'mục',
   'files.reload': 'Tải lại',
   'files.reveal': 'Mở trên máy',

@@ -21,6 +21,8 @@ const vn = (lang, vi, en) => (lang === 'vi' ? vi : en)
 const PAGE = 24
 const FADE_MS = 190
 const DEFAULT_MEMORY = 4096
+const OUTER_LOADERS = ['forge', 'neoforge', 'fabric', 'quilt']
+
 const KIND = 'modpacks'
 
 const SOURCES = [
@@ -57,6 +59,8 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
 
   const [source, setSource] = useState('modrinth')
   const [sort, setSort] = useState('relevance')
+  const [filterGame, setFilterGame] = useState('')
+  const [filterLoaderOuter, setFilterLoaderOuter] = useState('')
   const [query, setQuery] = useState('')
   const [applied, setApplied] = useState('')
   const [hits, setHits] = useState([])
@@ -72,6 +76,8 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
   const [tab, setTab] = useState('about')
   const [versions, setVersions] = useState([])
   const [versionsLoading, setVersionsLoading] = useState(false)
+  const [filterMc, setFilterMc] = useState('')
+  const [filterLoader, setFilterLoader] = useState('')
   const [versionId, setVersionId] = useState('')
   const [gallery, setGallery] = useState(null)
   const [openLog, setOpenLog] = useState('')
@@ -99,7 +105,7 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
     setLoading(true)
     setListError('')
     const offset = reset ? 0 : hits.length
-    const res = await api.modpackSearch({ source, query: applied, sort, offset, limit: PAGE }).catch((err) => ({ ok: false, error: err.message }))
+    const res = await api.modpackSearch({ source, query: applied, sort, offset, limit: PAGE, game: filterGame || undefined, loader: filterLoaderOuter || undefined }).catch((err) => ({ ok: false, error: err.message }))
     if (id !== reqRef.current) return
     setLoading(false)
     if (!res?.ok) {
@@ -112,7 +118,7 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
     }
     setTotal(res.total || 0)
     setHits((prev) => (reset ? res.hits : [...prev, ...res.hits]))
-  }, [source, applied, sort, hits.length])
+  }, [source, applied, sort, filterGame, filterLoaderOuter, hits.length])
 
   useEffect(() => {
     const timer = setTimeout(() => setApplied(query.trim()), 340)
@@ -122,7 +128,7 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
   useEffect(() => {
     setHits([])
     load({ reset: true })
-  }, [source, applied, sort])
+  }, [source, applied, sort, filterGame, filterLoaderOuter])
 
   const swap = useCallback((next) => {
     setFading(true)
@@ -145,6 +151,15 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
     setStage('')
     setImported(null)
   }, [])
+
+  const outerGameOptions = [...new Set((hits || []).flatMap((hit) => hit.gameVersions || []))].sort().reverse()
+  const mcOptions = [...new Set(versions.flatMap((v) => v.gameVersions || []))].sort().reverse()
+  const loaderOptions = [...new Set(versions.flatMap((v) => v.loaders || []))]
+  const shownVersions = versions.filter((v) => {
+    if (filterMc && !(v.gameVersions || []).includes(filterMc)) return false
+    if (filterLoader && !(v.loaders || []).includes(filterLoader)) return false
+    return true
+  })
 
   const openHit = useCallback(async (hit) => {
     reset()
@@ -274,6 +289,7 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
       token: res.plan.token,
       name: name.trim() || res.plan.name,
       dir: dir || undefined,
+      icon: selected?.icon || '',
       memoryMb: memory,
     })
     setStage('')
@@ -377,6 +393,36 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
         {view === 'list' ? (
           <div ref={listRef} className="h-full overflow-y-auto">
             <div className="max-w-5xl mx-auto p-6 flex flex-col gap-4">
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="w-[150px]">
+                  <Select
+                    theme={theme}
+                    value={filterGame}
+                    options={outerGameOptions.map((game) => ({ value: game, label: game }))}
+                    onChange={setFilterGame}
+                    placeholder={vn(lang, 'Mọi phiên bản game', 'Any game version')}
+                  />
+                </div>
+                <div className="w-[140px]">
+                  <Select
+                    theme={theme}
+                    value={filterLoaderOuter}
+                    options={OUTER_LOADERS.map((item) => ({ value: item, label: item, icon: loaderIcon(item) }))}
+                    onChange={setFilterLoaderOuter}
+                    placeholder={vn(lang, 'Mọi loader', 'Any loader')}
+                  />
+                </div>
+                {(filterGame || filterLoaderOuter) && (
+                  <button
+                    onClick={() => { setFilterGame(''); setFilterLoaderOuter('') }}
+                    className="h-9 px-2.5 rounded-lg text-[11px] font-semibold"
+                    style={{ background: c.input, border: `1px solid ${c.border}`, color: c.label }}
+                  >
+                    {vn(lang, 'Xoá lọc', 'Clear')}
+                  </button>
+                )}
+              </div>
+
               <div className="flex items-center gap-2.5">
                 <label className="relative flex-1 min-w-0 flex items-center">
                   <MagnifyingGlass size={14} className="absolute left-3 pointer-events-none" style={{ color: c.faint }} />
@@ -691,13 +737,47 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
                       </p>
                       <span className="text-[10px] font-mono" style={{ color: c.faint }}>{versions.length}</span>
                     </div>
+                    {!versionsLoading && versions.length > 0 && (
+                      <div className="flex items-center gap-2 pb-2 flex-wrap">
+                        <div className="w-[160px]">
+                          <Select
+                            theme={theme}
+                            value={filterMc}
+                            options={mcOptions.map((mc) => ({ value: mc, label: mc }))}
+                            onChange={setFilterMc}
+                            placeholder={vn(lang, 'Mọi phiên bản game', 'Any game version')}
+                          />
+                        </div>
+                        <div className="w-[150px]">
+                          <Select
+                            theme={theme}
+                            value={filterLoader}
+                            options={loaderOptions.map((item) => ({ value: item, label: item, icon: loaderIcon(item) }))}
+                            onChange={setFilterLoader}
+                            placeholder={vn(lang, 'Mọi loader', 'Any loader')}
+                          />
+                        </div>
+                        {(filterMc || filterLoader) && (
+                          <button
+                            onClick={() => { setFilterMc(''); setFilterLoader('') }}
+                            className="h-8 px-2 rounded-lg text-[11px] font-semibold"
+                            style={{ background: c.input, border: `1px solid ${c.border}`, color: c.label }}
+                          >
+                            {vn(lang, 'Xoá lọc', 'Clear')}
+                          </button>
+                        )}
+                        <span className="text-[10px] font-mono ml-auto" style={{ color: c.faint }}>
+                          {shownVersions.length}/{versions.length}
+                        </span>
+                      </div>
+                    )}
                     {versionsLoading ? (
                       <p className="text-[11px] py-6" style={{ color: c.faint }}>{vn(lang, 'Đang đọc danh sách…', 'Loading versions…')}</p>
                     ) : !versions.length ? (
                       <p className="text-[11px] py-6" style={{ color: c.faint }}>{vn(lang, 'Không có bản nào cho modpack này.', 'No versions for this modpack.')}</p>
                     ) : (
                       <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${c.border}` }}>
-                        {versions.map((v, i) => (
+                        {shownVersions.map((v, i) => (
                           <PackVersionRow
                             key={v.id}
                             c={c}

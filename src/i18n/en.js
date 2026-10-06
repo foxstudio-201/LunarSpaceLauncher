@@ -143,6 +143,7 @@ const en = {
   'files.name': 'Name',
   'files.size': 'Size',
   'files.modified': 'Modified',
+  'files.searchPlaceholder': 'Search by name…',
   'files.items': 'items',
   'files.reload': 'Reload',
   'files.reveal': 'Reveal in folder',

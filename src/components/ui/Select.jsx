@@ -75,7 +75,8 @@ export default function Select({ theme, value, options = [], onChange, placehold
     if (row) row.scrollIntoView({ block: 'nearest' })
   }, [open, active])
 
-  const label = selected >= 0 ? options[selected].label : placeholder
+  const selectedOption = selected >= 0 ? options[selected] : null
+  const label = selectedOption ? selectedOption.label : placeholder
   const panel = rect && open && (
     <>
       <div className="fixed inset-0" style={{ zIndex: 9998 }} onClick={close} />
@@ -114,6 +115,9 @@ export default function Select({ theme, value, options = [], onChange, placehold
               {isActive && !isSelected && (
                 <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 rounded-full" style={{ height: 16, background: c.accent }} />
               )}
+              {option.icon && (
+                <img src={option.icon} alt="" className="w-4 h-4 rounded object-contain shrink-0" />
+              )}
               <span className="text-[11px] font-mono truncate flex-1">{option.label}</span>
               {option.hint && (
                 <span className="text-[9px] font-mono shrink-0" style={{ color: c.faint }}>{option.hint}</span>
@@ -150,6 +154,9 @@ export default function Select({ theme, value, options = [], onChange, placehold
         className="w-full h-9 px-2.5 rounded-lg flex items-center gap-2 text-left transition-colors disabled:opacity-50"
         style={{ background: c.input, border: `1px solid ${open ? 'rgba(167,139,250,0.42)' : c.border}`, color: c.text }}
       >
+        {selectedOption?.icon && (
+          <img src={selectedOption.icon} alt="" className="w-4 h-4 rounded object-contain shrink-0" />
+        )}
         <span className="text-[11px] font-mono truncate flex-1">{label}</span>
         {badgeLabel && (
           <span className="px-1.5 py-0.5 rounded text-[9px] font-bold shrink-0" style={{ background: c.surface, color: c.label }}>

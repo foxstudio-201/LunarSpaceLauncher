@@ -27,6 +27,7 @@ export default function FilesPage({ instance, theme, lang }) {
   const c = palette(theme)
   const [rel, setRel] = useState('')
   const [entries, setEntries] = useState([])
+  const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [menu, setMenu] = useState(null)
@@ -269,7 +270,9 @@ export default function FilesPage({ instance, theme, lang }) {
     setSelected((prev) => (prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]))
   }
 
-  const allSelected = entries.length > 0 && selected.length === entries.length
+  const needle = query.trim().toLowerCase()
+  const shown = needle ? entries.filter((entry) => String(entry.name || '').toLowerCase().includes(needle)) : entries
+  const allSelected = shown.length > 0 && selected.every((name) => shown.some((entry) => entry.name === name))
 
   const toggleAll = () => setSelected(allSelected ? [] : entries.map((e) => e.name))
 
@@ -547,6 +550,13 @@ export default function FilesPage({ instance, theme, lang }) {
           </span>
         )}
         <span className="text-[10px]" style={{ color: c.label }}>
+        <input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder={t(lang, 'files.searchPlaceholder')}
+          className="h-7 w-40 px-2 rounded-md text-[11px] outline-none"
+          style={{ background: c.input, border: `1px solid ${c.border}`, color: c.text }}
+        />
           {entries.length} {t(lang, 'files.items')}
         </span>
         <button
@@ -723,13 +733,13 @@ export default function FilesPage({ instance, theme, lang }) {
           <div className="flex items-center justify-center py-12">
             <span className="text-[12px]" style={{ color: c.label }}>{t(lang, 'home.loading')}</span>
           </div>
-        ) : entries.length === 0 ? (
+        ) : shown.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 gap-2">
             <Folder size={28} weight="duotone" style={{ color: c.label, opacity: 0.4 }} />
             <span className="text-[12px]" style={{ color: c.label }}>{t(lang, 'instance.files.empty')}</span>
           </div>
         ) : (
-          entries.map((entry) => {
+          shown.map((entry) => {
             const isSelected = selected.includes(entry.name)
             const isMenu = menu?.name === entry.name
             const isDropHot = entry.dir && dropTarget === entry.name

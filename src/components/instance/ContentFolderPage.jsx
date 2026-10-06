@@ -31,6 +31,7 @@ export default function ContentFolderPage({
   const c = palette(theme)
   const instProgress = progress?.[instance.id]
   const [entries, setEntries] = useState([])
+  const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [menu, setMenu] = useState(null)
@@ -185,7 +186,9 @@ export default function ContentFolderPage({
     setSelected((prev) => (prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]))
   }
 
-  const allSelected = entries.length > 0 && selected.length === entries.length
+  const needle = query.trim().toLowerCase()
+  const shown = needle ? entries.filter((entry) => String(entry.name || '').toLowerCase().includes(needle)) : entries
+  const allSelected = shown.length > 0 && selected.every((name) => shown.some((entry) => entry.name === name))
   const toggleAll = () => setSelected(allSelected ? [] : entries.map((e) => e.name))
 
   const onRowClick = (entry) => {
@@ -270,6 +273,13 @@ export default function ContentFolderPage({
             {fill(lang, 'files.uploading', { n: busy })}
           </span>
         )}
+        <input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder={t(lang, 'files.searchPlaceholder')}
+          className="h-7 w-40 px-2 rounded-md text-[11px] outline-none"
+          style={{ background: c.input, border: `1px solid ${c.border}`, color: c.text }}
+        />
         <span className="text-[10px]" style={{ color: c.label }}>
           {entries.length} {t(lang, 'files.items')}
         </span>
@@ -421,13 +431,13 @@ export default function ContentFolderPage({
           <div className="flex items-center justify-center py-12">
             <span className="text-[12px]" style={{ color: c.label }}>{t(lang, 'home.loading')}</span>
           </div>
-        ) : entries.length === 0 ? (
+        ) : shown.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 gap-2">
             <Icon size={28} weight="duotone" style={{ color: c.label, opacity: 0.4 }} />
             <span className="text-[12px]" style={{ color: c.label }}>{emptyHint}</span>
           </div>
         ) : (
-          entries.map((entry) => {
+          shown.map((entry) => {
             const isSelected = selected.includes(entry.name)
             const isMenu = menu?.name === entry.name
             const enabled = !entry.disabled

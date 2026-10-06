@@ -266,7 +266,7 @@ export default function ConsolePage({ instance, theme, lang, logs, launchError, 
       lastLineRef.current = live.length ? live[live.length - 1] : null
       return
     }
-    const start = last == null ? 0 : live.lastIndexOf(last) + 1
+    const start = last == null ? live.length : live.lastIndexOf(last) + 1
     writeLines(live.slice(start).filter((line) => matches(line)))
     if (live.length) lastLineRef.current = live[live.length - 1]
     if (autoScrollRef.current) {

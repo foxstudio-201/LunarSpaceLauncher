@@ -106,6 +106,38 @@ async function getLoaderGames({ kind } = {}) {
   return { ok: true, games, all: games.length === 0 }
 }
 
+const iconLookups = new Set()
+
+function scheduleInstanceIcon(entry) {
+  if (!entry?.id || !entry?.dir || iconLookups.has(entry.id)) return
+  const planFile = path.join(entry.dir, PACK_PLAN_FILE)
+  try {
+    if (!fs.existsSync(planFile)) return
+  } catch {
+    return
+  }
+  iconLookups.add(entry.id)
+  fsp
+    .readFile(planFile, 'utf8')
+    .then((raw) => JSON.parse(raw))
+    .then(async (plan) => {
+      const name = String(plan?.name || '').trim()
+      if (!name) return
+      const source = plan?.source === 'modrinth' ? 'modrinth' : 'curseforge'
+      const res = await content.search({ kind: 'modpacks', source, query: name, limit: 8 })
+      const norm = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '')
+      const hits = res?.hits || []
+      const hit = hits.find((item) => norm(item.name) === norm(name)) || hits.find((item) => plan?.slug && norm(item.slug) === norm(plan.slug))
+      if (!hit?.icon) return
+      const list = readIndex()
+      const at = list.findIndex((item) => item.id === entry.id)
+      if (at < 0 || list[at].icon) return
+      list[at].icon = hit.icon
+      writeIndex(list)
+    })
+    .catch(() => {})
+}
+
 function listInstances(settings) {
   const { shared, defaultInstanceDir } = storageFor(settings)
   const index = readIndex()
@@ -113,6 +145,13 @@ function listInstances(settings) {
   const list = index.map((entry) => {
     const isRunning = running.has(entry.id)
     const row = { ...entry, running: isRunning }
+    if (!row.icon) {
+      const local = path.join(entry.dir, 'icon.png')
+      try {
+        if (fs.existsSync(local)) row.icon = `file:///${String(entry.dir).split('\\').join('/')}/icon.png`
+      } catch {}
+    }
+    if (!row.icon) scheduleInstanceIcon(entry)
     if (!isRunning && !installingIds.has(entry.id) && (entry.status === 'running' || entry.status === 'stopping' || entry.status === 'starting' || entry.status === 'installing')) {
       row.status = 'ready'
       dirty = true
@@ -266,7 +305,7 @@ async function installForge({ entry, paths, settings, emit }) {
   return created
 }
 
-async function createInstance({ name, version, loader = 'vanilla', loaderVersion, memoryMb = 2048, dir, username = 'Player', demo = false, awaitInstall = false, settings }, emit) {
+async function createInstance({ name, version, loader = 'vanilla', loaderVersion, memoryMb = 2048, dir, username = 'Player', demo = false, icon = '', awaitInstall = false, settings }, emit) {
   if (!name || !version) return { ok: false, error: 'Thiếu tên hoặc phiên bản.' }
   const { paths, defaultInstanceDir } = storageFor(settings)
   const instanceDir = dir || path.join(defaultInstanceDir, String(name).replace(/[^\w.-]+/g, '-'))
@@ -302,6 +341,7 @@ async function createInstance({ name, version, loader = 'vanilla', loaderVersion
     username: String(username || 'Player'),
     demo: !!demo,
     dir: instanceDir,
+    ...(icon ? { icon: String(icon) } : {}),
     status: 'installing',
     created: new Date().toISOString(),
     lastPlayed: null,
@@ -1375,7 +1415,7 @@ async function modpackImport({ filePath } = {}) {
   }
 }
 
-async function modpackInstall({ token, name, dir, memoryMb = 4096, settings } = {}, emit) {
+async function modpackInstall({ token, name, dir, icon = '', memoryMb = 4096, settings } = {}, emit) {
   const plan = pendingPacks.get(token)
   if (!plan) return { ok: false, error: 'Modpack đã hết hạn chờ, hãy chọn lại.' }
 
@@ -1404,6 +1444,7 @@ async function modpackInstall({ token, name, dir, memoryMb = 4096, settings } = 
       loaderVersion: plan.loaderVersion,
       memoryMb,
       dir,
+      icon,
       awaitInstall: true,
       settings,
     },

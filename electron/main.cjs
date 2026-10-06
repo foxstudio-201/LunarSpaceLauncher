@@ -355,10 +355,10 @@ function createWindow() {
   }
 
   mainWindow = new BrowserWindow({
-    width: 1100,
-    height: 700,
-    minWidth: 900,
-    minHeight: 600,
+    width: 1145,
+    height: 720,
+    resizable: false,
+    maximizable: false,
     show: false,
     backgroundColor: BOOT_BG[`${bootTheme}-${bootSkin}`] || '#0a0a0a',
     frame: false,
