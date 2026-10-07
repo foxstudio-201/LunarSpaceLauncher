@@ -1183,10 +1183,11 @@ async function runLaunch({ id, username, demo: demoOverride, settings }, emit) {
     emit?.({ type: 'log', id: entry.id, line })
   }
   const userJvm = entry.jvmArgs ? entry.jvmArgs.split(/\s+/).filter(Boolean) : []
-  const { args } = buildLaunch({
+  const { args, pathFix } = buildLaunch({
     chain,
     paths,
     nativesDir,
+    linkDir: path.join(app.getPath('userData'), 'links'),
     instanceDir: entry.dir,
     username: player,
     memoryMb: entry.memoryMb || 2048,
@@ -1196,6 +1197,12 @@ async function runLaunch({ id, username, demo: demoOverride, settings }, emit) {
   })
 
   logs.set(id, [])
+  if (pathFix) {
+    pushLog(
+      id,
+      `[LunarSpace] Đường dẫn có ký tự đặc biệt (một số bản Java không đọc được) — dùng đường dẫn rút gọn: ${pathFix.to}`,
+    )
+  }
   emit?.({ type: 'banner', id })
 
   updateEntry(id, { status: 'starting' })

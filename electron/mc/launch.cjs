@@ -2,8 +2,55 @@ const fs = require('fs')
 const fsp = fs.promises
 const path = require('path')
 const crypto = require('crypto')
-const { spawn, execFile } = require('child_process')
+const { spawn, execFile, execFileSync } = require('child_process')
 const { OS_NAME, ruleAllows } = require('./install.cjs')
+
+const asciiPathCache = new Map()
+
+const hasWide = (value) => /[^\x00-\x7F]/.test(String(value || ''))
+
+function shortPathOf(value) {
+  const literal = String(value).replace(/'/g, "''")
+  const script = `(New-Object -ComObject Scripting.FileSystemObject).GetFolder('${literal}').ShortPath`
+  const out = execFileSync('powershell', ['-NoProfile', '-Command', script], {
+    encoding: 'utf8',
+    windowsHide: true,
+    timeout: 10000,
+  })
+  return String(out || '').trim()
+}
+
+function linkPathFor(linkDir, value) {
+  const name = crypto.createHash('sha1').update(String(value)).digest('hex').slice(0, 12)
+  const link = path.join(linkDir, name)
+  let ready = false
+  try {
+    ready = fs.existsSync(link)
+  } catch {}
+  if (!ready) {
+    fs.mkdirSync(linkDir, { recursive: true })
+    fs.symlinkSync(String(value), link, 'junction')
+  }
+  return link
+}
+
+function asciiSafePath(value, linkDir) {
+  const input = String(value || '')
+  if (process.platform !== 'win32' || !hasWide(input)) return input
+  if (asciiPathCache.has(input)) return asciiPathCache.get(input)
+  let result = input
+  try {
+    const short = shortPathOf(input)
+    if (short && !hasWide(short)) result = short
+  } catch {}
+  if (hasWide(result) && linkDir) {
+    try {
+      result = linkPathFor(linkDir, input)
+    } catch {}
+  }
+  asciiPathCache.set(input, result)
+  return result
+}
 
 const JAVA_HINTS = [
   'C:/Program Files/Java',
@@ -165,7 +212,22 @@ function clientExtraJar({ chain, paths }) {
   return fs.existsSync(file) ? file : null
 }
 
-function buildLaunch({ chain, paths, nativesDir, instanceDir, username, memoryMb, extraJvm = [], auth = null, demo = false }) {
+function buildLaunch({ chain, paths, nativesDir, instanceDir, username, memoryMb, extraJvm = [], auth = null, demo = false, linkDir = '' }) {
+  const safeInstance = asciiSafePath(instanceDir, linkDir)
+  const safeAssets = asciiSafePath(paths.assets, linkDir)
+  const safeNatives = asciiSafePath(nativesDir, linkDir)
+  const safeLibraries = asciiSafePath(paths.libraries, linkDir)
+  const safeVersions = asciiSafePath(paths.versions, linkDir)
+  const pathFix = [
+    [instanceDir, safeInstance],
+    [nativesDir, safeNatives],
+    [paths.assets, safeAssets],
+    [paths.libraries, safeLibraries],
+    [paths.versions, safeVersions],
+  ].find(([before, after]) => before && after && before !== after) || null
+  instanceDir = safeInstance
+  nativesDir = safeNatives
+  paths = { ...paths, assets: safeAssets, libraries: safeLibraries, versions: safeVersions }
   const ownJarExists = fs.existsSync(path.join(paths.versions, chain._id, `${chain._id}.jar`))
   const forgeBootstrap = (chain.arguments?.jvm || []).some((arg) => typeof arg === 'string' && arg.includes('client-extra'))
   const extraClient = forgeBootstrap ? clientExtraJar({ chain, paths }) : null
@@ -258,7 +320,7 @@ function buildLaunch({ chain, paths, nativesDir, instanceDir, username, memoryMb
   if (demo && !game.includes('--demo')) game.push('--demo')
 
   const jvmArgs = [`-Xmx${memoryMb}M`, ...extraJvm.filter(Boolean), ...jvm]
-  return { args: [...jvmArgs, chain.mainClass, ...game], classpath, uuid }
+  return { args: [...jvmArgs, chain.mainClass, ...game], classpath, uuid, pathFix }
 }
 
 function stripAnsi(text) {
