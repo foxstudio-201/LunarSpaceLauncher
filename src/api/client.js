@@ -582,6 +582,152 @@ export async function serverpackExport(opts = {}) {
   return { ok: false, error: NEEDS_APP }
 }
 
+export async function serverTestEggs() {
+  if (bridge?.serverTestEggs) return bridge.serverTestEggs()
+  return { ok: false, error: NEEDS_APP, eggs: [] }
+}
+
+export async function serverTestList() {
+  if (bridge?.serverTestList) return bridge.serverTestList()
+  return { ok: false, error: NEEDS_APP, servers: [] }
+}
+
+export async function serverTestSuggest(opts = {}) {
+  if (bridge?.serverTestSuggest) return bridge.serverTestSuggest(opts)
+  return { ok: false, error: NEEDS_APP }
+}
+
+export async function serverTestDefaults(opts = {}) {
+  if (bridge?.serverTestDefaults) return bridge.serverTestDefaults(opts)
+  return { ok: false, error: NEEDS_APP, include: [] }
+}
+
+export async function serverTestCreate(opts = {}) {
+  if (bridge?.serverTestCreate) return bridge.serverTestCreate(opts)
+  return { ok: false, error: NEEDS_APP }
+}
+
+export async function serverTestCopy(opts = {}) {
+  if (bridge?.serverTestCopy) return bridge.serverTestCopy(opts)
+  return { ok: false, error: NEEDS_APP }
+}
+
+export async function serverTestUpdate(opts = {}) {
+  if (bridge?.serverTestUpdate) return bridge.serverTestUpdate(opts)
+  return { ok: false, error: NEEDS_APP }
+}
+
+export async function serverTestRemove(opts = {}) {
+  if (bridge?.serverTestRemove) return bridge.serverTestRemove(opts)
+  return { ok: false, error: NEEDS_APP }
+}
+
+export async function serverTestInstall(opts = {}) {
+  if (bridge?.serverTestInstall) return bridge.serverTestInstall(opts)
+  return { ok: false, error: NEEDS_APP }
+}
+
+export async function serverTestStart(opts = {}) {
+  if (bridge?.serverTestStart) return bridge.serverTestStart(opts)
+  return { ok: false, error: NEEDS_APP }
+}
+
+export async function serverTestStop(opts = {}) {
+  if (bridge?.serverTestStop) return bridge.serverTestStop(opts)
+  return { ok: false, error: NEEDS_APP }
+}
+
+export async function serverTestCommand(opts = {}) {
+  if (bridge?.serverTestCommand) return bridge.serverTestCommand(opts)
+  return { ok: false, error: NEEDS_APP }
+}
+
+export async function serverTestStatus(opts = {}) {
+  if (bridge?.serverTestStatus) return bridge.serverTestStatus(opts)
+  return { ok: false, error: NEEDS_APP }
+}
+
+export async function serverTestLogs(opts = {}) {
+  if (bridge?.serverTestLogs) return bridge.serverTestLogs(opts)
+  return { ok: false, error: NEEDS_APP, lines: [], cursor: 0 }
+}
+
+export async function serverTestClearLogs(opts = {}) {
+  if (bridge?.serverTestClearLogs) return bridge.serverTestClearLogs(opts)
+  return { ok: false, error: NEEDS_APP }
+}
+
+export async function getServerConfigs() {
+  if (bridge?.getServerConfigs) return bridge.getServerConfigs()
+  return { ok: false, error: NEEDS_APP, servers: [] }
+}
+
+export async function getServerConfig(id) {
+  if (bridge?.getServerConfig) return bridge.getServerConfig(id)
+  return { ok: false, error: NEEDS_APP }
+}
+
+export async function startGameServer(id) {
+  if (bridge?.startGameServer) return bridge.startGameServer(id)
+  return { ok: false, error: NEEDS_APP }
+}
+
+export async function stopGameServer(id) {
+  if (bridge?.stopGameServer) return bridge.stopGameServer(id)
+  return { ok: false, error: NEEDS_APP }
+}
+
+export async function killGameServer(id) {
+  if (bridge?.killGameServer) return bridge.killGameServer(id)
+  return { ok: false, error: NEEDS_APP }
+}
+
+export async function wingsServerPower(id, action) {
+  if (bridge?.wingsServerPower) return bridge.wingsServerPower(id, action)
+  return { ok: false, error: NEEDS_APP }
+}
+
+export async function wingsDeleteServer(id) {
+  if (bridge?.wingsDeleteServer) return bridge.wingsDeleteServer(id)
+  return { ok: false, error: NEEDS_APP }
+}
+
+export async function removeServerConfig(id) {
+  if (bridge?.removeServerConfig) return bridge.removeServerConfig(id)
+  return { ok: true }
+}
+
+export async function installServer(id) {
+  if (bridge?.installServer) return bridge.installServer(id)
+  return { ok: false, error: NEEDS_APP }
+}
+
+export async function getServerHistory(id) {
+  if (bridge?.getServerHistory) return bridge.getServerHistory(id)
+  return { ok: false, error: NEEDS_APP, history: [] }
+}
+
+export async function getServerStatus(id) {
+  if (bridge?.getServerStatus) return bridge.getServerStatus(id)
+  return { ok: false, error: NEEDS_APP }
+}
+
+export async function serverLocalTrash() {
+  if (bridge?.serverLocalTrash) return bridge.serverLocalTrash()
+  return { ok: false, error: NEEDS_APP, items: [] }
+}
+
+export async function serverLocalRestore(trashId) {
+  if (bridge?.serverLocalRestore) return bridge.serverLocalRestore(trashId)
+  return { ok: false, error: NEEDS_APP }
+}
+
+export async function serverLocalPurge(trashId) {
+  if (bridge?.serverLocalPurge) return bridge.serverLocalPurge(trashId)
+  return { ok: false, error: NEEDS_APP }
+}
+
+
 export async function contentSearch(opts = {}) {
   if (bridge?.contentSearch) return bridge.contentSearch(opts)
   return { ok: false, error: NEEDS_APP, hits: [], total: 0 }

@@ -7,6 +7,17 @@ const on = (channel) => (callback) => {
   return () => ipcRenderer.removeListener(channel, listener)
 }
 
+const call = (method, args) => ipcRenderer.invoke('launcher:server-local', { method, args: args || [] })
+const localEvent = (type, map) => (callback) => {
+  if (typeof callback !== 'function') return () => {}
+  const listener = (_event, payload) => {
+    if (!payload || payload.type !== type) return
+    callback(map ? map(payload) : payload)
+  }
+  ipcRenderer.on('luns:launcher-event', listener)
+  return () => ipcRenderer.removeListener('luns:launcher-event', listener)
+}
+
 contextBridge.exposeInMainWorld('electronAPI', {
   getSettings: () => ipcRenderer.invoke('settings:get'),
   saveSettings: (patch) => ipcRenderer.invoke('settings:set', patch),
@@ -75,6 +86,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
   instanceTree: (opts) => ipcRenderer.invoke('launcher:instance-tree', opts),
   serverpackWalk: (opts) => ipcRenderer.invoke('launcher:serverpack-walk', opts),
   serverpackExport: (opts) => ipcRenderer.invoke('launcher:serverpack-export', opts),
+  serverTestEggs: () => ipcRenderer.invoke('launcher:server-test-eggs'),
+  serverTestList: () => ipcRenderer.invoke('launcher:server-test-list'),
+  serverTestSuggest: (opts) => ipcRenderer.invoke('launcher:server-test-suggest', opts),
+  serverTestDefaults: (opts) => ipcRenderer.invoke('launcher:server-test-defaults', opts),
+  serverTestCreate: (opts) => ipcRenderer.invoke('launcher:server-test-create', opts),
+  serverTestCopy: (opts) => ipcRenderer.invoke('launcher:server-test-copy', opts),
+  serverTestUpdate: (opts) => ipcRenderer.invoke('launcher:server-test-update', opts),
+  serverTestRemove: (opts) => ipcRenderer.invoke('launcher:server-test-remove', opts),
+  serverTestInstall: (opts) => ipcRenderer.invoke('launcher:server-test-install', opts),
+  serverTestStart: (opts) => ipcRenderer.invoke('launcher:server-test-start', opts),
+  serverTestStop: (opts) => ipcRenderer.invoke('launcher:server-test-stop', opts),
+  serverTestCommand: (opts) => ipcRenderer.invoke('launcher:server-test-command', opts),
+  serverTestStatus: (opts) => ipcRenderer.invoke('launcher:server-test-status', opts),
+  serverTestLogs: (opts) => ipcRenderer.invoke('launcher:server-test-logs', opts),
+  serverTestClearLogs: (opts) => ipcRenderer.invoke('launcher:server-test-clear-logs', opts),
   updateStatus: () => ipcRenderer.invoke('update:status'),
   updateCheck: () => ipcRenderer.invoke('update:check'),
   updateDownload: () => ipcRenderer.invoke('update:download'),
@@ -102,6 +128,65 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   clipboardWrite: (text) => ipcRenderer.invoke('clipboard:write', text),
   openExternal: (url) => ipcRenderer.invoke('shell:open', url),
+
+  getServerConfigs: () => call('configs'),
+  getServerConfig: (id) => call('config', [id]),
+  getServerStatus: (id) => call('status', [id]),
+  getServerHistory: (id) => call('history', [id]),
+  getServerTps: (id) => call('tps', [id]),
+  wingsServerState: (id) => call('state', [id]),
+  wingsServerPower: (id, action) => call('power', [id, action]),
+  startGameServer: (id) => call('power', [id, 'start']),
+  stopGameServer: (id) => call('power', [id, 'stop']),
+  killGameServer: (id) => call('power', [id, 'kill']),
+  wingsServerLogs: (id, lines) => call('logs', [id, lines]),
+  serverGetLogs: (id) => call('logEntries', [id]),
+  wingsServerCommand: (id, command) => call('command', [id, command]),
+  wingsListFiles: (id, dir) => call('fileList', [id, dir]),
+  wingsReadFile: (id, file) => call('fileRead', [id, file]),
+  wingsWriteFile: (id, file, content) => call('fileWrite', [id, file, content]),
+  wingsDeleteFile: (id, file) => call('fileDelete', [id, file]),
+  wingsCreateFile: (id, dir, name) => call('fileCreate', [id, dir, name, false]),
+  wingsCreateFolder: (id, dir, name) => call('fileCreate', [id, dir, name, true]),
+  wingsMoveFile: (id, from, to) => call('fileMove', [id, from, to]),
+  wingsUploadFile: (id, dest, data) => call('fileUpload', [id, dest, data]),
+  wingsSyncConfig: (id, patch) => call('syncConfig', [id, patch]),
+  installServer: (id) => call('install', [id]),
+  wingsDeleteServer: (id) => call('remove', [id]),
+  serverLocalPruneMods: (id) => call('pruneClientMods', [id]),
+  serverLocalTrash: () => call('trashList'),
+  serverLocalRestore: (trashId) => call('trashRestore', [trashId]),
+  serverLocalPurge: (trashId) => call('trashPurge', [trashId]),
+  removeServerConfig: () => Promise.resolve({ ok: true }),
+  databaseSetup: (name, user, pass) => call('databaseSetup', [name, user, pass]),
+  wingsWsConnect: (id) => call('wsConnect', [id]),
+  wingsWsDisconnect: (id) => call('wsDisconnect', [id]),
+  wingsWsStatus: (id) => call('wsStatus', [id]),
+  wingsWsSend: (id, event, args) => call('wsSend', [id, event, args]),
+  backupList: (id) => call('backupList', [id]),
+  backupCreate: (id, payload) => call('backupCreate', [id, payload]),
+  backupUpdate: (id, uuid, patch) => call('backupUpdate', [id, uuid, patch]),
+  backupRestore: (id, uuid, opts) => call('backupRestore', [id, uuid, opts]),
+  backupDelete: (id, uuid) => call('backupDelete', [id, uuid]),
+  backupDownload: (id, uuid) => call('backupDownload', [id, uuid]),
+  scheduleList: (id) => call('scheduleList', [id]),
+  schedulePreview: (expr) => call('schedulePreview', [expr]),
+  scheduleCreate: (id, payload) => call('scheduleCreate', [id, payload]),
+  scheduleUpdate: (id, payload) => call('scheduleUpdate', [id, payload]),
+  scheduleToggle: (id, active) => call('scheduleToggle', [id, active]),
+  scheduleRun: (id) => call('scheduleRun', [id]),
+  scheduleDelete: (id) => call('scheduleDelete', [id]),
+
+  onServerLog: localEvent('server-log', (ev) => ({ serverId: ev.serverId, message: ev.message })),
+  onServerLogSnapshot: localEvent('server-log-snapshot', (ev) => ({ serverId: ev.serverId, logs: ev.logs })),
+  onServerLogReset: localEvent('server-log-reset', (ev) => ({ serverId: ev.serverId })),
+  onServerProgress: localEvent('server-progress', (ev) => ({ serverId: ev.serverId, percent: ev.percent, message: ev.message })),
+  onServerTps: localEvent('server-tps', (ev) => ({ serverId: ev.serverId, tps: ev.tps })),
+  onWingsWsEvent: localEvent('wings-ws', (ev) => ({ serverId: ev.serverId, event: ev.event, payload: ev.payload })),
+  onBackupUpdate: localEvent('backup-update', (ev) => ({ serverId: ev.serverId, event: ev.event, uuid: ev.uuid, data: ev.data })),
+  onScheduleUpdate: localEvent('schedule-update'),
+  onScheduleDeleted: localEvent('schedule-deleted', (ev) => ({ id: ev.id })),
+  onScheduleRan: localEvent('schedule-ran'),
 
   minimizeWindow: () => ipcRenderer.invoke('win:minimize'),
   closeWindow: () => ipcRenderer.invoke('win:close'),

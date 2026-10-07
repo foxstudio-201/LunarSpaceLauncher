@@ -12,7 +12,7 @@ import ServerPackPage from './ServerPackPage'
 export default function InstancePanel({
   instance, theme, lang, displayPage, progress, logs, launchError, crashes, onOpenCrash,
   instances, onBack, onOpenAccounts, onRemove, onSaveInstance, onLaunch, onStop, onRestart,
-  account, onNavigate,
+  account, onNavigate, onOpenLocalServer,
 }) {
   if (displayPage === 'instance-overview') {
     return (
@@ -70,6 +70,8 @@ export default function InstancePanel({
         theme={theme}
         lang={lang}
         progress={progress}
+        onNavigate={onNavigate}
+        onOpenLocalServer={onOpenLocalServer}
         onClose={() => onNavigate('instance-settings')}
       />
     )

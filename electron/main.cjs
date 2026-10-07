@@ -92,6 +92,9 @@ function emitLauncher(payload) {
   syncGameWindow(payload)
 }
 
+launcher.setBroadcast(emitLauncher)
+launcher.serverLocalStart()
+
 function registerIpc() {
   ipcMain.handle('settings:get', () => readSettings())
   ipcMain.handle('settings:set', (_e, patch) => {
@@ -258,6 +261,34 @@ function registerIpc() {
     })
     if (picked.canceled || !picked.filePath) return { ok: false, canceled: true }
     return launcher.serverpackExport({ ...rest, targetPath: picked.filePath, settings: readSettings() }, emitLauncher)
+  })
+
+  ipcMain.handle('launcher:server-test-eggs', () => launcher.serverTestEggs())
+  ipcMain.handle('launcher:server-test-list', () => launcher.serverTestList())
+  ipcMain.handle('launcher:server-test-suggest', (_e, opts) => launcher.serverTestSuggest(opts || {}))
+  ipcMain.handle('launcher:server-test-defaults', (_e, opts) => launcher.serverTestDefaultInclude({ ...(opts || {}), settings: readSettings() }))
+  ipcMain.handle('launcher:server-test-create', (_e, opts) => launcher.serverTestCreate(opts || {}, emitLauncher))
+  ipcMain.handle('launcher:server-test-copy', (_e, opts) => launcher.serverTestCopyFrom({ ...(opts || {}), settings: readSettings() }, emitLauncher))
+  ipcMain.handle('launcher:server-test-update', (_e, opts) => launcher.serverTestUpdate(opts || {}))
+  ipcMain.handle('launcher:server-test-remove', (_e, opts) => launcher.serverTestRemove(opts || {}))
+  ipcMain.handle('launcher:server-test-install', (_e, opts) => launcher.serverTestInstall(opts || {}, emitLauncher))
+  ipcMain.handle('launcher:server-test-start', (_e, opts) => launcher.serverTestStart(opts || {}, emitLauncher))
+  ipcMain.handle('launcher:server-test-stop', (_e, opts) => launcher.serverTestStop(opts || {}))
+  ipcMain.handle('launcher:server-test-command', (_e, opts) => launcher.serverTestCommand(opts || {}))
+  ipcMain.handle('launcher:server-test-status', (_e, opts) => launcher.serverTestStatus(opts || {}))
+  ipcMain.handle('launcher:server-test-logs', (_e, opts) => launcher.serverTestLogs(opts || {}))
+  ipcMain.handle('launcher:server-test-clear-logs', (_e, opts) => launcher.serverTestClearLogs(opts || {}))
+
+  ipcMain.handle('launcher:server-local', (_e, opts) => launcher.serverLocalCall({ ...(opts || {}), settings: readSettings() }))
+  ipcMain.handle('launcher:server-local-backup-download', async (_e, { id, uuid, name } = {}) => {
+    const safe = String(name || 'backup').replace(/[\\/:*?"<>|]/g, '_').trim() || 'backup'
+    const picked = await dialog.showSaveDialog(mainWindow, {
+      title: 'Tải backup',
+      defaultPath: path.join(app.getPath('downloads'), `${safe}.tar.gz`),
+      filters: [{ name: 'Archive', extensions: ['tar.gz', 'gz'] }],
+    })
+    if (picked.canceled || !picked.filePath) return { ok: false, canceled: true }
+    return launcher.serverLocalCall({ method: 'backupDownload', args: [id, uuid, picked.filePath], settings: readSettings() })
   })
 
   ipcMain.handle('launcher:content-project', (_e, opts) => launcher.contentProject(opts || {}))
@@ -457,6 +488,9 @@ if (MODE !== 'app') {
     tray.destroy()
     try {
       launcher.hostStop()
+    } catch {}
+    try {
+      launcher.serverTestStopAll()
     } catch {}
   })
 

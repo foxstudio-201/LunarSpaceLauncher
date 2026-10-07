@@ -2,6 +2,11 @@ const en = {
   'app.name': 'LunarSpace',
   'app.subtitle': 'Minecraft Launcher',
 
+  'toast.deleted': 'Server deleted',
+  'toast.failed': 'Action failed',
+  'toast.reinstalling': 'Reinstall started…',
+  'install.wait': 'Installing server',
+  'install.pleaseWait': 'Please wait a moment…',
   'sidebar.home': 'Home',
   'sidebar.versions': 'Versions',
   'sidebar.mods': 'Mods',

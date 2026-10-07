@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   House, Gear, List, Terminal, Files, Archive, User, Trash,
-  Cube, PuzzlePiece, Stack, GearSix, ArrowLeft, ChartLineUp, SidebarSimple, Image, PaintBrush, Plus, Cloud,
+  Cube, PuzzlePiece, Stack, GearSix, ArrowLeft, ChartLineUp, SidebarSimple, Image, PaintBrush, Plus, Cloud, HardDrives,
+  Database, Clock, Users, Network, Play,
 } from '@phosphor-icons/react'
 import { t } from '../i18n/translations'
 import { statusColor } from '../lib/status'
@@ -29,6 +30,7 @@ const MAIN_PAGES = [
   { key: 'home', icon: House, label: 'Home', labelVi: 'Trang chủ' },
   { key: 'versions', icon: Cube, label: 'Versions', labelVi: 'Phiên bản' },
   { key: 'host', icon: Cloud, label: 'Host', labelVi: 'Host' },
+  { key: 'server-test', icon: HardDrives, label: 'ServerLocalHost', labelVi: 'ServerLocalHost' },
   { key: 'modpacks', icon: Stack, label: 'Modpack', labelVi: 'Modpack' },
 ]
 
@@ -46,10 +48,24 @@ const INSTANCE_PAGES = [
 
 const SUB_PAGE_PARENT = { 'instance-serverpack': 'instance-settings' }
 
+const SERVER_LOCAL_PAGES = [
+  { key: 'server-overview', icon: ChartLineUp, label: 'Overview', labelVi: 'Tổng quan' },
+  { key: 'server-console', icon: Terminal, label: 'Console', labelVi: 'Bảng điều khiển' },
+  { key: 'server-files', icon: Files, label: 'Files', labelVi: 'Tệp tin' },
+  { key: 'server-databases', icon: Database, label: 'Databases', labelVi: 'Cơ sở dữ liệu' },
+  { key: 'server-schedules', icon: Clock, label: 'Schedules', labelVi: 'Lịch trình' },
+  { key: 'server-users', icon: Users, label: 'Users', labelVi: 'Người dùng' },
+  { key: 'server-backups', icon: Archive, label: 'Backups', labelVi: 'Sao lưu' },
+  { key: 'server-network', icon: Network, label: 'Network', labelVi: 'Mạng' },
+  { key: 'server-startup', icon: Play, label: 'Startup', labelVi: 'Khởi động' },
+  { key: 'server-settings', icon: GearSix, label: 'Settings', labelVi: 'Cài đặt' },
+]
+
 export default function Sidebar({
   theme, lang, version, account,
   instances, selectedInstance, onSelectInstance,
   isInInstance, displayPage, activePage, onNavigate, onBack,
+  inLocalServer, onExitLocalServer,
   collapsed, onToggleCollapsed,
 }) {
   const navRef = useRef(null)
@@ -65,7 +81,11 @@ export default function Sidebar({
   const handleBg = px ? c.input : theme === 'light' ? '#ffffff' : '#1a1a1a'
   const accent = px ? c.accent : ACCENT
 
-  const activeKey = isInInstance ? SUB_PAGE_PARENT[displayPage] || displayPage : activePage
+  const activeKey = inLocalServer
+    ? displayPage
+    : isInInstance
+      ? SUB_PAGE_PARENT[displayPage] || displayPage
+      : activePage
   const railW = collapsed ? RAIL_W_COLLAPSED : RAIL_W
 
   const measure = useCallback(() => {
@@ -351,7 +371,7 @@ export default function Sidebar({
           style={{ borderColor }}
         />
 
-        {!isInInstance && MAIN_PAGES.filter((p) => p.key !== 'versions').map((p) => {
+        {!isInInstance && !inLocalServer && MAIN_PAGES.filter((p) => p.key !== 'versions').map((p) => {
           const Icon = p.icon
           const text = lang === 'vi' ? p.labelVi : p.label
           const isActive = activeKey === p.key
@@ -371,6 +391,21 @@ export default function Sidebar({
             </button>
           )
         })}
+
+        {inLocalServer && (
+          <button
+            type="button"
+            onClick={onExitLocalServer}
+            data-tip={collapsed ? (lang === 'vi' ? 'Danh sách server' : 'Server list') : undefined}
+            data-nav-row
+            className={rowClass(true)}
+            style={{ ...rowPad(ICON), color: labelColor }}
+          >
+            {hoverBar()}
+            <ArrowLeft size={ICON} weight="duotone" className="relative z-20 shrink-0" />
+            {label(lang === 'vi' ? 'Danh sách server' : 'Server list', false)}
+          </button>
+        )}
 
         {isInInstance && (
           <button
@@ -407,7 +442,30 @@ export default function Sidebar({
           className="absolute left-0 right-0 bottom-0 h-3.5 border-b border-r rounded-br-[14px] pointer-events-none"
           style={{ borderColor }}
         />
-        {isInInstance ? list : (
+        {inLocalServer ? (
+          <div ref={listRef} className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col gap-0.5">
+            {SERVER_LOCAL_PAGES.map((p) => {
+              const Icon = p.icon
+              const text = lang === 'vi' ? p.labelVi : p.label
+              const isActive = activeKey === p.key
+              return (
+                <button
+                  type="button"
+                  key={p.key}
+                  onClick={() => onNavigate(p.key)}
+                  {...navKeyProps(p.key, text)}
+                  data-nav-row
+                  className={rowClass(false)}
+                  style={{ ...rowPad(ICON), color: isActive ? accent : labelColor }}
+                >
+                  {!isActive && hoverBar()}
+                  <Icon size={ICON} weight="duotone" className="relative z-20 shrink-0" />
+                  {label(text, isActive)}
+                </button>
+              )
+            })}
+          </div>
+        ) : isInInstance ? list : (
           <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col gap-0.5">
             <button
               type="button"

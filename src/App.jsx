@@ -11,6 +11,7 @@ import HomePage from './components/pages/HomePage'
 import VersionsPage from './components/pages/VersionsPage'
 import ModpackPage from './components/pages/ModpackPage'
 import HostPage from './components/pages/HostPage'
+import ServerLocalHostPage from './components/pages/ServerLocalHostPage'
 import AccountsPage from './components/pages/AccountsPage'
 import SettingsPage from './components/pages/SettingsPage'
 import InstancePanel from './components/instance/InstancePanel'
@@ -49,6 +50,7 @@ function AppContent() {
 
   const [displayPage, setDisplayPage] = useState('home')
   const [activePage, setActivePage] = useState('home')
+  const [localServer, setLocalServer] = useState(null)
   const [phase, setPhase] = useState('idle')
   const [selectedInstance, setSelectedInstance] = useState(null)
   const [showDropdown, setShowDropdown] = useState(false)
@@ -461,6 +463,7 @@ function AppContent() {
   const transitionClass = `transition-opacity duration-200 ${opacityClass}`
 
   const isInInstance = displayPage.startsWith('instance-') && !!selectedInstance
+  const inLocalServer = !!localServer && displayPage.startsWith('server-') && displayPage !== 'server-test'
   const railW = railCollapsed ? RAIL_W_COLLAPSED : RAIL_W
 
   const instancesWithLive = instances.map((i) => ({ ...i, status: i.running ? 'running' : i.status }))
@@ -478,6 +481,7 @@ function AppContent() {
     selectedInstance,
     onSelectInstance: handleSelectInstance,
     onNavigate: navigateTo,
+    onOpenLocalServer: (srv) => { if (srv) { setLocalServer(srv); navigateTo('server-overview') } },
     toast,
     update,
     progress,
@@ -518,6 +522,8 @@ function AppContent() {
           onToggleDropdown={() => setShowDropdown((v) => !v)}
           onSelectInstance={handleSelectInstance}
           isInInstance={isInInstance}
+          inLocalServer={inLocalServer}
+          onExitLocalServer={() => { setLocalServer(null); navigateTo('server-test') }}
           displayPage={displayPage}
           activePage={activePage}
           onNavigate={navigateTo}
@@ -559,6 +565,16 @@ function AppContent() {
               />
             )}
             {displayPage === 'host' && <HostPage {...shared} />}
+            {(displayPage === 'server-test' || inLocalServer) && (
+              <ServerLocalHostPage
+                {...shared}
+                server={inLocalServer ? localServer : null}
+                displayPage={displayPage}
+                onSelect={(srv) => { setLocalServer(srv); navigateTo('server-overview') }}
+                onUpdate={(next) => setLocalServer((prev) => (prev && prev.id === next.id ? { ...prev, ...next } : prev))}
+                onDeleted={() => { setLocalServer(null); navigateTo('server-test') }}
+              />
+            )}
             {displayPage === 'modpacks' && (
               <ModpackPage {...shared} defaultInstanceDir={storage.defaultInstanceDir} />
             )}

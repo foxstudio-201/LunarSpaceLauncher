@@ -18,6 +18,35 @@ const content = require('./mc/content.cjs')
 const host = require('./host.cjs')
 const profileExport = require('./mc/export.cjs')
 const serverpack = require('./mc/serverpack.cjs')
+const servertest = require('./mc/servertest.cjs')
+const serverlocal = require('./mc/serverlocal.cjs')
+
+let broadcast = () => {}
+
+function setBroadcast(fn) {
+  if (typeof fn === 'function') broadcast = fn
+  serverlocal.configure({ emit: (payload) => broadcast(payload) })
+}
+
+async function serverLocalCall({ method, args = [], settings } = {}) {
+  serverlocal.configure({
+    root: () => serverTestRoot(),
+    metaDir: () => storageFor(settings).paths.meta,
+  })
+  const fn = serverlocal[method]
+  if (typeof fn !== 'function') return { ok: false, error: `Không hỗ trợ: ${method}` }
+  try {
+    return await fn(...(Array.isArray(args) ? args : [args]))
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+}
+
+function serverLocalStart() {
+  serverlocal.configure({ root: () => serverTestRoot(), metaDir: () => storageFor({}).paths.meta })
+  serverlocal.startScheduler()
+  return { ok: true }
+}
 const tokenStore = require('./auth.cjs')
 const msAuth = require('./msAuth.cjs')
 const elyAuth = require('./elyAuth.cjs')
@@ -1559,15 +1588,15 @@ async function modpackRepair({ id } = {}, emit) {
   }
 }
 
-async function instanceModEnvs({ id } = {}) {
-  let entry
+async function instanceModEnvs({ id, serverId } = {}) {
+  let src
   try {
-    entry = findEntry(id)
+    src = serverpackSource({ id, serverId })
   } catch (err) {
     return { ok: false, error: err.message, envs: {} }
   }
   try {
-    const dir = path.join(entry.dir, 'mods')
+    const dir = path.join(src.dir, 'mods')
     const names = (await fsp.readdir(dir)).filter((name) => /\.jar(\.disabled)?$/i.test(name))
     if (!names.length) return { ok: true, envs: {} }
     const parts = []
@@ -1576,10 +1605,17 @@ async function instanceModEnvs({ id } = {}) {
       parts.push(`${name}:${st ? `${st.size}:${st.mtimeMs}` : 'x'}`)
     }
     const key = parts.join('|')
-    const cached = modEnvCache.get(entry.id)
+    const cached = modEnvCache.get(src.key)
     if (cached && cached.key === key) return { ok: true, envs: cached.envs }
     const envs = await content.modEnvs({ dir, names })
-    modEnvCache.set(entry.id, { key, envs })
+    const { declaredSide, isClientOnlyJar } = require('./mc/modscan.cjs')
+    for (const name of names) {
+      if (envs[name]) continue
+      const declared = declaredSide(path.join(dir, name))
+      if (declared?.env) envs[name] = declared.env
+      else if (isClientOnlyJar(path.join(dir, name))) envs[name] = 'client'
+    }
+    modEnvCache.set(src.key, { key, envs })
     return { ok: true, envs }
   } catch (err) {
     return { ok: false, error: err.message, envs: {} }
@@ -1735,66 +1771,93 @@ async function exportProfile({ id, format = 'zip', targetPath } = {}, emit) {
   }
 }
 
-async function serverpackPlan({ id, settings } = {}) {
-  let entry
+function serverpackSource({ id, serverId } = {}) {
+  if (serverId) {
+    const entry = findServerTest(serverId)
+    return {
+      key: `st:${entry.id}`,
+      id: entry.id,
+      dir: entry.dir,
+      name: entry.name,
+      version: entry.mc || '',
+      loader: entry.eggId,
+      loaderVersion: entry.loaderVersion || '',
+    }
+  }
+  const entry = findEntry(id)
+  return {
+    key: `in:${entry.id}`,
+    id: entry.id,
+    dir: entry.dir,
+    name: entry.name,
+    version: entry.version,
+    loader: entry.loader,
+    loaderVersion: entry.loaderVersion || entry.forgeVersion || '',
+  }
+}
+
+async function serverpackPlan({ id, serverId, settings } = {}) {
+  let src
   try {
-    entry = findEntry(id)
+    src = serverpackSource({ id, serverId })
   } catch (err) {
     return { ok: false, error: err.message }
   }
   const { paths } = storageFor(settings)
   try {
     return await serverpack.plan({
-      dir: entry.dir,
-      id: entry.id,
-      name: entry.name,
-      version: entry.version,
-      loader: entry.loader,
-      loaderVersion: entry.loaderVersion || entry.forgeVersion || '',
+      dir: src.dir,
+      id: src.key,
+      name: src.name,
+      version: src.version,
+      loader: src.loader,
+      loaderVersion: src.loaderVersion,
       metaDir: paths.meta,
+      skipServer: !!serverId,
     })
   } catch (err) {
     return { ok: false, error: err.message }
   }
 }
 
-async function instanceTree({ id, rel = '' } = {}) {
-  let entry
+async function instanceTree({ id, serverId, rel = '' } = {}) {
+  let src
   try {
-    entry = findEntry(id)
+    src = serverpackSource({ id, serverId })
   } catch (err) {
     return { ok: false, error: err.message, entries: [] }
   }
-  return serverpack.listTree({ dir: entry.dir, rel })
+  return serverpack.listTree({ dir: src.dir, rel })
 }
 
-async function serverpackWalk({ id, rel = '' } = {}) {
-  let entry
+async function serverpackWalk({ id, serverId, rel = '' } = {}) {
+  let src
   try {
-    entry = findEntry(id)
+    src = serverpackSource({ id, serverId })
   } catch (err) {
     return { ok: false, error: err.message, files: [] }
   }
-  return serverpack.walkFiles({ dir: entry.dir, rel })
+  return serverpack.walkFiles({ dir: src.dir, rel })
 }
 
-async function serverpackExport({ id, include = [], props = null, raw = null, server = null, targetPath, settings } = {}, emit) {
-  let entry
+async function serverpackExport({ id, serverId, include = [], props = null, raw = null, server = null, targetPath, settings } = {}, emit) {
+  let src
   try {
-    entry = findEntry(id)
+    src = serverpackSource({ id, serverId })
   } catch (err) {
     return { ok: false, error: err.message }
   }
   if (!targetPath) return { ok: false, error: 'Thiếu đường dẫn lưu.' }
   const { paths, shared } = storageFor(settings)
   const log = (line) => {
-    pushLog(entry.id, line)
-    emit?.({ type: 'log', id: entry.id, line })
+    if (serverId) servertest.pushLine(serverId, line)
+    else pushLog(src.id, line)
+    emit?.({ type: 'log', id: src.id, line })
   }
-  emit?.({ type: 'progress', id: entry.id, phase: 'serverpack', label: 'serverpack', done: 0, total: include.length })
+  emit?.({ type: 'progress', id: src.id, phase: 'serverpack', label: 'serverpack', done: 0, total: include.length })
   try {
     const res = await serverpack.exportServerPack({
-      dir: entry.dir,
+      dir: src.dir,
       targetPath,
       include,
       props,
@@ -1802,14 +1865,14 @@ async function serverpackExport({ id, include = [], props = null, raw = null, se
       server,
       metaDir: paths.meta,
       cacheDir: path.join(shared, 'serverpack'),
-      onProgress: (p) => emit?.({ type: 'progress', id: entry.id, ...p }),
+      onProgress: (p) => emit?.({ type: 'progress', id: src.id, ...p }),
       onLog: log,
     })
-    emit?.({ type: 'progress', id: entry.id, phase: 'done', label: 'serverpack', summary: res })
+    emit?.({ type: 'progress', id: src.id, phase: 'done', label: 'serverpack', summary: res })
     return res
   } catch (err) {
     log(`[LunarSpace] Xuất serverpack lỗi: ${err.message}`)
-    emit?.({ type: 'progress', id: entry.id, phase: 'error', error: err.message })
+    emit?.({ type: 'progress', id: src.id, phase: 'error', error: err.message })
     return { ok: false, error: err.message }
   }
 }
@@ -1820,6 +1883,375 @@ async function contentProject({ kind, source, id } = {}) {
   } catch (err) {
     return { ok: false, error: err.message }
   }
+}
+
+const serverTestRoot = () => path.join(app.getPath('userData'), 'servertest')
+const serverTestIndexFile = () => path.join(serverTestRoot(), 'index.json')
+
+function readServerTests() {
+  try {
+    const list = JSON.parse(fs.readFileSync(serverTestIndexFile(), 'utf8'))
+    return Array.isArray(list) ? list : []
+  } catch {
+    return []
+  }
+}
+
+function writeServerTests(list) {
+  try {
+    fs.mkdirSync(serverTestRoot(), { recursive: true })
+    fs.writeFileSync(serverTestIndexFile(), JSON.stringify(list, null, 2), 'utf8')
+  } catch {}
+  return list
+}
+
+function findServerTest(id) {
+  const entry = readServerTests().find((s) => s.id === id)
+  if (!entry) throw new Error('Không tìm thấy server thử.')
+  return entry
+}
+
+function serverTestView(entry) {
+  const status = servertest.statusOf(entry.id)
+  return { ...entry, ...status, logs: undefined }
+}
+
+async function serverTestEggs() {
+  return { ok: true, eggs: servertest.eggList(), bash: servertest.findBash(), platform: process.platform }
+}
+
+async function serverTestList() {
+  const list = readServerTests().map(serverTestView)
+  list.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+  return { ok: true, servers: list }
+}
+
+async function resolveLoaderVersion({ mc, loader, loaderVersion }) {
+  const raw = String(loaderVersion || '')
+  if (!raw) return ''
+  try {
+    if (loader === 'neoforge') return await neoMod.resolveFullId({ game: mc, idOrVersion: raw })
+    if (loader === 'forge') return await forgeMod.resolveFullId({ game: mc, idOrVersion: raw })
+  } catch {}
+  return raw
+}
+
+async function serverTestSuggest({ instanceId } = {}) {
+  let entry = null
+  try {
+    entry = instanceId ? findEntry(instanceId) : null
+  } catch {}
+  let mc = entry?.version || ''
+  let loader = entry?.loader || 'vanilla'
+  let loaderVersion = entry?.loaderVersion || entry?.forgeVersion || ''
+  if (entry) {
+    const pack = await serverpack.readPackPlan(entry.dir).catch(() => null)
+    if (pack?.mc) mc = pack.mc
+    if (pack?.loader) loader = pack.loader
+    if (pack?.loaderVersion) loaderVersion = pack.loaderVersion
+  }
+  const eggId = servertest.eggForLoader(loader)
+  const port = await servertest.freePort(25565)
+  const fullVersion = await resolveLoaderVersion({ mc, loader, loaderVersion })
+  const vars = servertest.buildEggEnv(servertest.readEgg(eggId), {
+    SERVER_JARFILE: 'server.jar',
+    MC_VERSION: mc,
+    NEOFORGE_VERSION: eggId === 'neoforge' ? fullVersion : '',
+    FORGE_VERSION: eggId === 'forge' ? fullVersion : '',
+  })
+  return {
+    ok: true,
+    instanceId: entry?.id || null,
+    mc,
+    loader,
+    loaderVersion: fullVersion,
+    buildVersion: loaderVersion,
+    eggId,
+    port,
+    ramMb: entry?.memoryMb || 4096,
+    javaMajor: servertest.javaMajorFor(mc) || 21,
+    vars,
+    eggs: servertest.eggList(),
+  }
+}
+
+async function filterClientOnlyMods(instanceDir, include) {
+  const modsDir = path.join(instanceDir, 'mods')
+  const rels = include.filter((rel) => /^mods\/[^/]+\.jar$/i.test(rel))
+  if (!rels.length) return { include, removed: 0, names: [] }
+  const { isClientOnlyJar, declaredSide } = require('./mc/modscan.cjs')
+  const envs = await content.modEnvs({ dir: modsDir, names: rels.map((rel) => rel.slice('mods/'.length)) }).catch(() => ({}))
+  const removed = []
+  const kept = include.filter((rel) => {
+    if (!/^mods\/[^/]+\.jar$/i.test(rel)) return true
+    const name = rel.slice('mods/'.length)
+    const full = path.join(modsDir, name)
+    if (envs[name] === 'client' || declaredSide(full)?.env === 'client' || isClientOnlyJar(full)) {
+      removed.push(name)
+      return false
+    }
+    return true
+  })
+  return { include: kept, removed: removed.length, names: removed }
+}
+
+async function serverTestDefaultInclude({ instanceId, settings } = {}) {
+  let entry
+  try {
+    entry = findEntry(instanceId)
+  } catch (err) {
+    return { ok: false, error: err.message, include: [] }
+  }
+  try {
+    const plan = await serverpack.plan({
+      dir: entry.dir,
+      id: entry.id,
+      name: entry.name,
+      version: entry.version,
+      loader: entry.loader,
+      loaderVersion: entry.loaderVersion || entry.forgeVersion || '',
+      metaDir: storageFor(settings).paths.meta,
+    })
+    const base = plan.files.filter((f) => f.def).map((f) => f.rel)
+    const filtered = await filterClientOnlyMods(entry.dir, base)
+    return { ok: true, include: filtered.include, total: plan.files.length, removed: filtered.removed, skippedMods: filtered.names }
+  } catch (err) {
+    return { ok: false, error: err.message, include: [] }
+  }
+}
+
+async function serverTestCreate({ name, eggId, mc, loaderVersion, ramMb, port, include, instanceId, vars } = {}, emit) {
+  const egg = servertest.readEgg(eggId)
+  if (!egg) return { ok: false, error: `Egg "${eggId}" không tồn tại.` }
+  const id = `st-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
+  const dir = path.join(serverTestRoot(), 'servers', id)
+  try {
+    await fsp.mkdir(dir, { recursive: true })
+  } catch (err) {
+    return { ok: false, error: `Không tạo được thư mục server: ${err.message}` }
+  }
+
+  let sourceDir = null
+  if (instanceId) {
+    try {
+      sourceDir = findEntry(instanceId).dir
+    } catch {
+      sourceDir = null
+    }
+  }
+
+  const merged = {
+    SERVER_JARFILE: 'server.jar',
+    MC_VERSION: mc || '',
+    NEOFORGE_VERSION: eggId === 'neoforge' ? await resolveLoaderVersion({ mc, loader: 'neoforge', loaderVersion }) : '',
+    FORGE_VERSION: eggId === 'forge' ? await resolveLoaderVersion({ mc, loader: 'forge', loaderVersion }) : '',
+    ...(vars || {}),
+  }
+  merged.port = await servertest.freePort(Number(port) || 25565)
+  const entry = {
+    id,
+    name: name || `${egg.name} test`,
+    eggId,
+    dir,
+    mc: merged.MC_VERSION,
+    loaderVersion: loaderVersion || '',
+    ramMb: Math.max(512, Number(ramMb) || 4096),
+    port: merged.port,
+    vars: merged,
+    sourceInstanceId: sourceDir ? instanceId : null,
+    createdAt: new Date().toISOString(),
+    installed: false,
+  }
+
+  if (sourceDir && Array.isArray(include) && include.length) {
+    emit?.({ type: 'progress', id, phase: 'servertest-copy', done: 0, total: include.length })
+    const copied = await servertest.copyTree({
+      sourceDir,
+      targetDir: dir,
+      include,
+      onProgress: (p) => emit?.({ type: 'progress', id, phase: 'servertest-copy', ...p }),
+    })
+    entry.copied = copied
+  }
+
+  writeServerTests([entry, ...readServerTests()])
+  emit?.({ type: 'progress', id, phase: 'clear' })
+  return { ok: true, server: serverTestView(entry) }
+}
+
+async function serverTestCopyFrom({ id, instanceId, include } = {}, emit) {
+  let entry
+  try {
+    entry = findServerTest(id)
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+  if (servertest.statusOf(id).running) return { ok: false, error: 'Dừng server trước khi chép nội dung.' }
+  let source
+  try {
+    source = findEntry(instanceId)
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+  const list = Array.isArray(include) && include.length ? include : (await serverTestDefaultInclude({ instanceId })).include
+  const copied = await servertest.copyTree({
+    sourceDir: source.dir,
+    targetDir: entry.dir,
+    include: list,
+    onProgress: (p) => emit?.({ type: 'progress', id, phase: 'servertest-copy', ...p }),
+  })
+  const next = readServerTests().map((s) => (s.id === id ? { ...s, copied, sourceInstanceId: instanceId, updatedAt: new Date().toISOString() } : s))
+  writeServerTests(next)
+  emit?.({ type: 'progress', id, phase: 'clear' })
+  return { ok: true, copied, total: list.length }
+}
+
+async function serverTestUpdate({ id, patch = {} } = {}) {
+  let entry
+  try {
+    entry = findServerTest(id)
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+  const allowed = ['name', 'ramMb', 'port', 'vars', 'mc', 'loaderVersion']
+  const next = { ...entry }
+  for (const key of allowed) {
+    if (patch[key] === undefined) continue
+    if (key === 'ramMb') next.ramMb = Math.max(512, Number(patch.ramMb) || 4096)
+    else if (key === 'port') next.port = Number(patch.port) || 25565
+    else if (key === 'vars') next.vars = { ...(entry.vars || {}), ...(patch.vars || {}) }
+    else next[key] = patch[key]
+  }
+  next.updatedAt = new Date().toISOString()
+  writeServerTests(readServerTests().map((s) => (s.id === id ? next : s)))
+  if (!servertest.statusOf(id).running && next.installed) {
+    await servertest.writeProperties(next.dir, { ...next.vars, port: next.port }).catch(() => {})
+  }
+  return { ok: true, server: serverTestView(next) }
+}
+
+async function serverTestRemove({ id } = {}) {
+  let entry
+  try {
+    entry = findServerTest(id)
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+  servertest.stopServer(id, true)
+  const trash = path.join(serverTestRoot(), '.trash')
+  try {
+    await fsp.mkdir(trash, { recursive: true })
+    await fsp.rename(entry.dir, path.join(trash, `${id}-${Date.now().toString(36)}`))
+  } catch (err) {
+    return { ok: false, error: `Không chuyển được vào thùng rác: ${err.message}` }
+  }
+  writeServerTests(readServerTests().filter((s) => s.id !== id))
+  return { ok: true, trash }
+}
+
+async function serverTestInstall({ id } = {}, emit) {
+  let entry
+  try {
+    entry = findServerTest(id)
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+  if (servertest.statusOf(id).running) return { ok: false, error: 'Server đang chạy — dừng trước khi cài.' }
+  const log = (line) => {
+    servertest.pushLine(id, line)
+    emit?.({ type: 'servertest-log', id, line })
+  }
+  emit?.({ type: 'progress', id, phase: 'servertest-install', done: 0, total: 0 })
+  servertest.clearLogs(id)
+  try {
+    const res = await servertest.installServer({
+      dir: entry.dir,
+      eggId: entry.eggId,
+      vars: { ...entry.vars, port: entry.port },
+      root: serverTestRoot(),
+      onLog: log,
+      onProgress: (p) => emit?.({ type: 'progress', id, phase: 'servertest-java', delta: p.delta || 0 }),
+    })
+    const updated = { ...entry, installed: true, javaBin: res.java, serverJarFile: res.jarFile, installedAt: new Date().toISOString() }
+    writeServerTests(readServerTests().map((s) => (s.id === id ? updated : s)))
+    emit?.({ type: 'progress', id, phase: 'clear' })
+    return { ok: true, server: serverTestView(updated) }
+  } catch (err) {
+    log(`[Install] LỖI: ${err.message}`)
+    emit?.({ type: 'progress', id, phase: 'servertest-error', error: err.message })
+    emit?.({ type: 'progress', id, phase: 'clear' })
+    return { ok: false, error: err.message }
+  }
+}
+
+async function serverTestStart({ id } = {}, emit) {
+  let entry
+  try {
+    entry = findServerTest(id)
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+  const log = (line) => {
+    emit?.({ type: 'servertest-log', id, line })
+  }
+  try {
+    const javaBin =
+      entry.javaBin && fs.existsSync(entry.javaBin)
+        ? entry.javaBin
+        : await servertest.ensureJava({
+            root: serverTestRoot(),
+            major: servertest.javaMajorFor(entry.mc) || 21,
+            onLog: log,
+          })
+    await servertest.writeProperties(entry.dir, { ...entry.vars, port: entry.port })
+    const res = await servertest.startServer({
+      id: entry.id,
+      dir: entry.dir,
+      eggId: entry.eggId,
+      jarFile: entry.serverJarFile || entry.vars?.SERVER_JARFILE || 'server.jar',
+      ramMb: entry.ramMb,
+      javaBin,
+      onLog: log,
+      onExit: (code, signal) => emit?.({ type: 'servertest-exit', id, code, signal }),
+    })
+    writeServerTests(readServerTests().map((s) => (s.id === id ? { ...s, javaBin, lastStart: new Date().toISOString() } : s)))
+    return { ...res, server: serverTestView({ ...entry, javaBin }) }
+  } catch (err) {
+    log(`[Daemon] LỖI: ${err.message}`)
+    return { ok: false, error: err.message }
+  }
+}
+
+async function serverTestStop({ id, force = false } = {}) {
+  return servertest.stopServer(id, force)
+}
+
+async function serverTestCommand({ id, command } = {}) {
+  return servertest.sendCommand(id, command)
+}
+
+async function serverTestStatus({ id } = {}) {
+  const list = readServerTests()
+  if (id) {
+    const entry = list.find((s) => s.id === id)
+    if (!entry) return { ok: false, error: 'Không tìm thấy server thử.' }
+    return { ok: true, server: serverTestView(entry) }
+  }
+  return { ok: true, servers: list.map(serverTestView) }
+}
+
+async function serverTestLogs({ id, since = 0, limit = 500 } = {}) {
+  return { ok: true, ...servertest.serverLogs(id, since, limit) }
+}
+
+async function serverTestClearLogs({ id } = {}) {
+  servertest.clearLogs(id)
+  return { ok: true }
+}
+
+async function serverTestStopAll() {
+  servertest.stopAll()
+  return { ok: true, ids: servertest.runningIds() }
 }
 
 async function contentChangelog({ source, id, versionId } = {}) {
@@ -1921,6 +2353,25 @@ module.exports = {
   instanceTree,
   serverpackWalk,
   serverpackExport,
+  serverTestEggs,
+  serverTestList,
+  serverTestSuggest,
+  serverTestDefaultInclude,
+  serverTestCreate,
+  serverTestCopyFrom,
+  serverTestUpdate,
+  serverTestRemove,
+  serverTestInstall,
+  serverTestStart,
+  serverTestStop,
+  serverTestCommand,
+  serverTestStatus,
+  serverTestLogs,
+  serverTestClearLogs,
+  serverTestStopAll,
+  serverLocalCall,
+  serverLocalStart,
+  setBroadcast,
   contentSearch,
   instanceModEnvs,
   hostStatus,

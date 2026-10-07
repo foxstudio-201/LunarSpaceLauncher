@@ -24,6 +24,10 @@ const TAG_RULES = {
   resourcepacks: { tone: 'pack', vi: 'Gói tài nguyên', en: 'Resource packs', def: false },
   shaderpacks: { tone: 'pack', vi: 'Shader', en: 'Shader packs', def: false },
   saves: { tone: 'world', vi: 'Thế giới', en: 'Worlds', def: false },
+  world: { tone: 'world', vi: 'Thế giới', en: 'World', def: true },
+  world_nether: { tone: 'world', vi: 'Nether', en: 'Nether', def: true },
+  world_the_end: { tone: 'world', vi: 'The End', en: 'The End', def: true },
+  plugins: { tone: 'script', vi: 'Plugin', en: 'Plugins', def: true },
   logs: { tone: 'noise', vi: 'Log', en: 'Logs', def: false },
   'crash-reports': { tone: 'noise', vi: 'Crash', en: 'Crash reports', def: false },
   screenshots: { tone: 'noise', vi: 'Ảnh chụp', en: 'Screenshots', def: false },
@@ -416,14 +420,14 @@ function startScripts(bundle, memoryMb) {
   return { 'start.bat': bat, 'start.sh': sh }
 }
 
-async function plan({ dir, id, name, version, loader, loaderVersion, metaDir }) {
+async function plan({ dir, id, name, version, loader, loaderVersion, metaDir, skipServer = false }) {
   const pack = await readPackPlan(dir)
   const mc = pack?.mc || version || ''
   const kind = pack?.loader || loader || 'vanilla'
   const kindVersion = pack?.loaderVersion || loaderVersion || ''
   const out = { files: [], folders: {} }
   await scan({ dir, out })
-  const server = await serverBundle({ metaDir, mc, loader: kind, loaderVersion: kindVersion })
+  const server = skipServer ? { ok: false, skipped: true, error: '' } : await serverBundle({ metaDir, mc, loader: kind, loaderVersion: kindVersion })
   const existing = await readInstanceProps(dir)
   const props = mergeProps(Object.fromEntries(DEFAULT_PROPS), existing || {})
   return {
@@ -552,4 +556,4 @@ async function exportServerPack({
   }
 }
 
-module.exports = { plan, listTree, walkFiles, exportServerPack, serverBundle, parseProperties, propsText, escapeValue, unescapeValue, DEFAULT_PROPS }
+module.exports = { plan, listTree, walkFiles, exportServerPack, serverBundle, parseProperties, propsText, escapeValue, unescapeValue, readPackPlan, DEFAULT_PROPS }

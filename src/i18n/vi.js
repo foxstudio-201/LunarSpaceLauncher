@@ -2,6 +2,11 @@ const vi = {
   'app.name': 'LunarSpace',
   'app.subtitle': 'Trình khởi chạy Minecraft',
 
+  'toast.deleted': 'Đã xóa server',
+  'toast.failed': 'Thao tác thất bại',
+  'toast.reinstalling': 'Bắt đầu cài lại server…',
+  'install.wait': 'Đang cài đặt server',
+  'install.pleaseWait': 'Vui lòng đợi trong giây lát…',
   'sidebar.home': 'Trang chủ',
   'sidebar.versions': 'Phiên bản',
   'sidebar.mods': 'Mods',

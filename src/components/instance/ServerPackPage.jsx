@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowLeft, CaretDown, CaretRight, Check, Minus, MagnifyingGlass, Package, FileArrowUp,
   ArrowsClockwise, WarningCircle, CheckCircle, CloudArrowDown, ListChecks, SlidersHorizontal,
-  ArrowCounterClockwise, Code, FolderSimple, X,
+  ArrowCounterClockwise, Code, FolderSimple, X, HardDrives,
 } from '@phosphor-icons/react'
 import { t } from '../../i18n/translations'
 import { palette } from '../../lib/palette'
@@ -27,7 +27,7 @@ const TONES = {
   other: '#94a3b8',
 }
 
-const ROW_GRID = '1fr 84px 78px'
+const ROW_GRID = '1fr 124px 84px 78px'
 
 const PROP_GROUPS = [
   {
@@ -151,7 +151,7 @@ function TagChip({ entry, lang }) {
   const tone = TONES[entry.tone] || TONES.other
   return (
     <span
-      className="h-[18px] px-1.5 rounded text-[9px] font-bold uppercase tracking-wide shrink-0 inline-flex items-center"
+      className="h-[18px] px-1.5 rounded text-[9px] font-bold uppercase tracking-wide shrink-0 inline-flex items-center whitespace-nowrap"
       style={{ background: `${tone}22`, color: tone }}
     >
       {lang === 'vi' ? entry.tag : entry.tagEn}
@@ -181,8 +181,11 @@ function CheckBox({ state, onClick, c, disabled, title }) {
   )
 }
 
-export default function ServerPackPage({ instance, theme, lang, progress, onClose }) {
+export default function ServerPackPage({ instance, serverId, theme, lang, progress, onNavigate, onOpenLocalServer, onClose }) {
   const c = palette(theme)
+  const localMode = !!serverId
+  const sourceId = serverId || instance.id
+  const ref = localMode ? { serverId } : { id: instance.id }
   const [plan, setPlan] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -198,6 +201,7 @@ export default function ServerPackPage({ instance, theme, lang, progress, onClos
   const [rawMode, setRawMode] = useState(false)
   const [rawText, setRawText] = useState('')
   const [exporting, setExporting] = useState(false)
+  const [creatingTest, setCreatingTest] = useState(false)
   const [done, setDone] = useState(null)
   const [exportError, setExportError] = useState('')
   const touched = useRef(false)
@@ -209,7 +213,7 @@ export default function ServerPackPage({ instance, theme, lang, progress, onClos
     let alive = true
     const load = async () => {
       setLoading(true)
-      const res = await api.serverpackPlan({ id: instance.id }).catch((err) => ({ ok: false, error: err.message }))
+      const res = await api.serverpackPlan(ref).catch((err) => ({ ok: false, error: err.message }))
       if (!alive) return
       setLoading(false)
       if (!res?.ok) {
@@ -219,16 +223,16 @@ export default function ServerPackPage({ instance, theme, lang, progress, onClos
       setPlan(res)
       setValues(res.props || {})
       setRawText(res.propsText || '')
-      setWithServer(!!res.server?.ok)
+      setWithServer(!localMode && !!res.server?.ok)
     }
     load()
-    api.instanceModEnvs({ id: instance.id }).then((res) => {
+    api.instanceModEnvs(ref).then((res) => {
       if (alive && res?.ok) setEnvs(res.envs || {})
     }).catch(() => {})
     return () => {
       alive = false
     }
-  }, [instance.id])
+  }, [sourceId])
 
   const defaults = useMemo(() => {
     const next = new Set()
@@ -246,7 +250,7 @@ export default function ServerPackPage({ instance, theme, lang, progress, onClos
   }, [plan, defaults])
 
   const loadDir = async (rel) => {
-    const res = await api.instanceTree({ id: instance.id, rel }).catch((err) => ({ ok: false, error: err.message }))
+    const res = await api.instanceTree({ ...ref, rel }).catch((err) => ({ ok: false, error: err.message }))
     if (!res?.ok) {
       setError(res?.error || 'error')
       return []
@@ -257,7 +261,7 @@ export default function ServerPackPage({ instance, theme, lang, progress, onClos
 
   useEffect(() => {
     loadDir('')
-  }, [instance.id])
+  }, [sourceId])
 
   const toggleOpen = async (rel) => {
     if (open.has(rel)) {
@@ -278,7 +282,7 @@ export default function ServerPackPage({ instance, theme, lang, progress, onClos
 
   const folderFiles = async (rel) => {
     if (walks.current[rel]) return walks.current[rel]
-    const res = await api.serverpackWalk({ id: instance.id, rel }).catch(() => ({ ok: false, files: [] }))
+    const res = await api.serverpackWalk({ ...ref, rel }).catch(() => ({ ok: false, files: [] }))
     walks.current[rel] = res?.files || []
     return walks.current[rel]
   }
@@ -439,6 +443,35 @@ export default function ServerPackPage({ instance, theme, lang, progress, onClos
     setRawMode(false)
   }
 
+  const createTestServer = async () => {
+    if (creatingTest || !plan) return
+    setCreatingTest(true)
+    setExportError('')
+    const suggest = await api.serverTestSuggest({ instanceId: instance.id }).catch(() => null)
+    const res = await api
+      .serverTestCreate({
+        name: `${instance.name} · test`,
+        eggId: suggest?.eggId || 'vanilla',
+        mc: plan.mc || instance.version,
+        loaderVersion: suggest?.loaderVersion || plan.loaderVersion || '',
+        ramMb: suggest?.ramMb || instance.memoryMb || 4096,
+        port: suggest?.port || 25565,
+        include: [...sel],
+        instanceId: instance.id,
+        vars: { ...(suggest?.vars || {}), MC_VERSION: plan.mc || instance.version, port: suggest?.port || 25565 },
+      })
+      .catch((err) => ({ ok: false, error: err.message }))
+    setCreatingTest(false)
+    if (!res?.ok) {
+      setExportError(res?.error || 'error')
+      return
+    }
+    const cfg = await api.getServerConfig(res.server.id).catch(() => null)
+    api.installServer(res.server.id).catch(() => {})
+    if (cfg?.server && onOpenLocalServer) onOpenLocalServer(cfg.server)
+    else onNavigate?.('server-test')
+  }
+
   const runExport = async () => {
     if (exporting || !plan) return
     setExporting(true)
@@ -446,7 +479,7 @@ export default function ServerPackPage({ instance, theme, lang, progress, onClos
     setDone(null)
     const res = await api
       .serverpackExport({
-        id: instance.id,
+        ...ref,
         name: instance.name,
         include: [...sel],
         props: rawMode ? null : values,
@@ -492,10 +525,12 @@ export default function ServerPackPage({ instance, theme, lang, progress, onClos
           </p>
         </div>
         <div className="flex-1" />
-        <span className="h-7 px-2.5 max-w-[380px] rounded-md text-[10px] font-mono inline-flex items-center gap-1.5" style={{ background: c.input, border: `1px solid ${c.border}`, color: c.label }}>
-          <CloudArrowDown size={12} weight="duotone" className="shrink-0" style={{ color: serverOk ? c.accent : '#f59e0b' }} />
-          <span className="truncate">{plan?.server?.name || vn(lang, 'chưa rõ tệp server', 'server file unknown')}</span>
-        </span>
+        {!localMode && (
+          <span className="h-7 px-2.5 max-w-[380px] rounded-md text-[10px] font-mono inline-flex items-center gap-1.5" style={{ background: c.input, border: `1px solid ${c.border}`, color: c.label }}>
+            <CloudArrowDown size={12} weight="duotone" className="shrink-0" style={{ color: serverOk ? c.accent : '#f59e0b' }} />
+            <span className="truncate">{plan?.server?.name || vn(lang, 'chưa rõ tệp server', 'server file unknown')}</span>
+          </span>
+        )}
       </div>
 
       <div className="shrink-0 flex items-center gap-1 px-3 h-10" style={{ borderBottom: `1px solid ${c.border}` }}>
@@ -578,6 +613,7 @@ export default function ServerPackPage({ instance, theme, lang, progress, onClos
 
             <div className="shrink-0 grid items-center px-3 py-1.5 text-[9px] font-bold uppercase tracking-wider" style={{ gridTemplateColumns: ROW_GRID, background: c.bar, color: c.faint, borderBottom: `1px solid ${c.border}` }}>
               <span>{vn(lang, 'Thư mục & tệp', 'Folders & files')}</span>
+              <span>{vn(lang, 'Loại', 'Type')}</span>
               <span className="text-right">{vn(lang, 'Kích thước', 'Size')}</span>
               <span className="text-right">{vn(lang, 'Chọn', 'Pick')}</span>
             </div>
@@ -649,8 +685,9 @@ export default function ServerPackPage({ instance, theme, lang, progress, onClos
                             {t(lang, 'mods.disabled')}
                           </span>
                         )}
-                        {showTag && <TagChip entry={entry} lang={lang} />}
-                        {env && <EnvChip c={c} env={env} lang={lang} />}
+                      </div>
+                      <div className="min-w-0 flex items-center overflow-hidden">
+                        {env ? <EnvChip c={c} env={env} lang={lang} /> : showTag ? <TagChip entry={entry} lang={lang} /> : null}
                       </div>
                       <span className="text-right text-[10px] font-mono" style={{ color: c.faint }}>
                         {entry.dir ? (total ? sizeLabel(folder?.size || 0) : '—') : sizeLabel(entry.size)}
@@ -678,6 +715,7 @@ export default function ServerPackPage({ instance, theme, lang, progress, onClos
               </p>
             </div>
 
+            {!localMode && (
             <div className="rounded-xl overflow-hidden" style={{ background: c.surface, border: `1px solid ${c.border}` }}>
               <div className="flex items-start gap-2 px-3 pt-3">
                 <CloudArrowDown size={14} weight="duotone" style={{ color: serverOk ? c.accent : '#f59e0b' }} />
@@ -716,6 +754,20 @@ export default function ServerPackPage({ instance, theme, lang, progress, onClos
                   : vn(lang, 'Tệp server chạy được ngay bằng start.bat hoặc start.sh.', 'The server file runs straight away with start.bat or start.sh.')}
               </p>
             </div>
+            )}
+
+            {localMode && (
+              <div className="rounded-xl p-3 flex items-start gap-2" style={{ background: c.surface, border: `1px solid ${c.border}` }}>
+                <HardDrives size={14} weight="duotone" className="shrink-0 mt-0.5" style={{ color: c.accent }} />
+                <p className="text-[10px] leading-relaxed" style={{ color: c.label }}>
+                  {vn(
+                    lang,
+                    'Gói lấy trực tiếp từ thư mục server đang chạy — cây bên trái là toàn bộ nội dung server (mods, config, world, tệp server đã cài…).',
+                    'The pack reads straight from the running server folder — the tree is the whole server content (mods, config, world, installed server files…).',
+                  )}
+                </p>
+              </div>
+            )}
 
             <div className="rounded-xl overflow-hidden" style={{ background: c.surface, border: `1px solid ${c.border}` }}>
               <p className="px-3 pt-3 text-[9px] font-bold uppercase tracking-wider" style={{ color: c.faint }}>
@@ -764,11 +816,11 @@ export default function ServerPackPage({ instance, theme, lang, progress, onClos
                 {vn(
                   lang,
                   plan?.hasProps
-                    ? 'Instance đã có server.properties — form lấy sẵn giá trị trong đó, sửa rồi xuất là ghi vào gói.'
-                    : 'Chưa có server.properties trong instance — form đang dùng giá trị gốc của Minecraft.',
+                    ? `${localMode ? 'Server' : 'Instance'} đã có server.properties — form lấy sẵn giá trị trong đó, sửa rồi xuất là ghi vào gói.`
+                    : `Chưa có server.properties trong ${localMode ? 'server' : 'instance'} — form đang dùng giá trị gốc của Minecraft.`,
                   plan?.hasProps
-                    ? 'This instance already has server.properties — the form started from it, edits are written into the pack.'
-                    : 'No server.properties in this instance — the form uses Minecraft defaults.',
+                    ? `This ${localMode ? 'server' : 'instance'} already has server.properties — the form started from it, edits are written into the pack.`
+                    : `No server.properties in this ${localMode ? 'server' : 'instance'} — the form uses Minecraft defaults.`,
                 )}
               </p>
               <button
@@ -777,7 +829,9 @@ export default function ServerPackPage({ instance, theme, lang, progress, onClos
                 style={{ background: c.input, border: `1px solid ${c.border}`, color: c.label }}
               >
                 <ArrowCounterClockwise size={11} weight="bold" />
-                {plan?.hasProps ? vn(lang, 'Lấy lại từ instance', 'Reset from instance') : vn(lang, 'Về mặc định', 'Reset to defaults')}
+                {plan?.hasProps
+                  ? vn(lang, localMode ? 'Lấy lại từ server' : 'Lấy lại từ instance', localMode ? 'Reset from server' : 'Reset from instance')
+                  : vn(lang, 'Về mặc định', 'Reset to defaults')}
               </button>
               <button
                 onClick={() => (rawMode ? leaveRaw() : enterRaw())}
@@ -921,6 +975,18 @@ export default function ServerPackPage({ instance, theme, lang, progress, onClos
         >
           {vn(lang, 'Đóng', 'Close')}
         </button>
+        {!localMode && (
+          <button
+            onClick={createTestServer}
+            disabled={creatingTest || exporting || !plan || (sel.size === 0 && !(withServer && serverOk))}
+            className="h-8 px-3.5 rounded-lg text-[11px] font-semibold inline-flex items-center gap-1.5 disabled:opacity-50"
+            style={{ background: c.input, border: `1px solid ${c.border}`, color: c.label }}
+            title={vn(lang, 'Tạo server thử trên máy từ đúng nội dung đang chọn (cài bằng script egg rồi chạy như panel)', 'Create a local test server from the current selection (installed with the egg script, run like the panel)')}
+          >
+            {creatingTest ? <ArrowsClockwise size={13} weight="bold" className="animate-spin" /> : <HardDrives size={13} weight="duotone" />}
+            {creatingTest ? vn(lang, 'Đang tạo…', 'Creating…') : vn(lang, 'Chạy thử trên máy', 'Test locally')}
+          </button>
+        )}
         <button
           onClick={runExport}
           disabled={exporting || !plan || (sel.size === 0 && !(withServer && serverOk))}
