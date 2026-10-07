@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { WarningCircle } from '@phosphor-icons/react'
+import { WarningCircle, Monitor, HardDrives } from '@phosphor-icons/react'
 
 const vn = (lang, vi, en) => (lang === 'vi' ? vi : en)
 
@@ -12,6 +12,33 @@ export function Box({ c, title, icon: Icon, children }) {
       </div>
       <div className="px-3.5 py-3">{children}</div>
     </div>
+  )
+}
+
+const ENV_KINDS = {
+  client: { vi: 'Máy khách', en: 'Client', color: '#a78bfa', bg: 'rgba(167,139,250,0.16)', icons: ['client'] },
+  server: { vi: 'Máy chủ', en: 'Server', color: '#22d3ee', bg: 'rgba(34,211,238,0.14)', icons: ['server'] },
+  both: { vi: 'Cả hai', en: 'Both', color: '#4ade80', bg: 'rgba(74,222,128,0.14)', icons: ['client', 'server'] },
+}
+
+export function EnvChip({ c, env, lang, title }) {
+  const kind = ENV_KINDS[env]
+  if (!kind) return null
+  return (
+    <span
+      className="h-5 px-1.5 rounded-md text-[9px] font-bold uppercase shrink-0 inline-flex items-center gap-1"
+      style={{ background: kind.bg, color: kind.color }}
+      title={title || (lang === 'vi' ? 'Mod chạy ở máy khách hay máy chủ' : 'Client or server side mod')}
+    >
+      {kind.icons.map((side) =>
+        side === 'client' ? (
+          <Monitor key={side} size={11} weight="duotone" />
+        ) : (
+          <HardDrives key={side} size={11} weight="duotone" />
+        ),
+      )}
+      {vn(lang, kind.vi, kind.en)}
+    </span>
   )
 }
 

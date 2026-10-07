@@ -10,6 +10,7 @@ import { progressLabel, progressPercent } from './components/ui/ProgressBar'
 import HomePage from './components/pages/HomePage'
 import VersionsPage from './components/pages/VersionsPage'
 import ModpackPage from './components/pages/ModpackPage'
+import HostPage from './components/pages/HostPage'
 import AccountsPage from './components/pages/AccountsPage'
 import SettingsPage from './components/pages/SettingsPage'
 import InstancePanel from './components/instance/InstancePanel'
@@ -553,6 +554,7 @@ function AppContent() {
                 onCreate={handleCreate}
               />
             )}
+            {displayPage === 'host' && <HostPage {...shared} />}
             {displayPage === 'modpacks' && (
               <ModpackPage {...shared} defaultInstanceDir={storage.defaultInstanceDir} />
             )}

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   House, Gear, List, Terminal, Files, Archive, User, Trash,
-  Cube, PuzzlePiece, Stack, GearSix, ArrowLeft, ChartLineUp, SidebarSimple, Image, PaintBrush, Plus,
+  Cube, PuzzlePiece, Stack, GearSix, ArrowLeft, ChartLineUp, SidebarSimple, Image, PaintBrush, Plus, Cloud,
 } from '@phosphor-icons/react'
 import { t } from '../i18n/translations'
 import { statusColor } from '../lib/status'
@@ -28,6 +28,7 @@ const LINE_TOP = -44
 const MAIN_PAGES = [
   { key: 'home', icon: House, label: 'Home', labelVi: 'Trang chủ' },
   { key: 'versions', icon: Cube, label: 'Versions', labelVi: 'Phiên bản' },
+  { key: 'host', icon: Cloud, label: 'Host', labelVi: 'Host' },
   { key: 'modpacks', icon: Stack, label: 'Modpack', labelVi: 'Modpack' },
 ]
 

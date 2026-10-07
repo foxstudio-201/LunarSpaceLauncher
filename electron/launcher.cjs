@@ -15,6 +15,7 @@ const boost = require('./mc/boost.cjs')
 const presence = require('./presence.cjs')
 const modpack = require('./mc/modpack.cjs')
 const content = require('./mc/content.cjs')
+const host = require('./host.cjs')
 const profileExport = require('./mc/export.cjs')
 const tokenStore = require('./auth.cjs')
 const msAuth = require('./msAuth.cjs')
@@ -28,6 +29,7 @@ const pendingPacks = new Map()
 const MAX_PENDING_PACKS = 12
 const installingIds = new Set()
 const PACK_PLAN_FILE = '.lunaspace-modpack.json'
+const modEnvCache = new Map()
 
 const indexFile = () => path.join(app.getPath('userData'), 'instances.json')
 
@@ -1549,6 +1551,107 @@ async function modpackRepair({ id } = {}, emit) {
   }
 }
 
+async function instanceModEnvs({ id } = {}) {
+  let entry
+  try {
+    entry = findEntry(id)
+  } catch (err) {
+    return { ok: false, error: err.message, envs: {} }
+  }
+  try {
+    const dir = path.join(entry.dir, 'mods')
+    const names = (await fsp.readdir(dir)).filter((name) => /\.jar(\.disabled)?$/i.test(name))
+    if (!names.length) return { ok: true, envs: {} }
+    const parts = []
+    for (const name of names) {
+      const st = await fsp.stat(path.join(dir, name)).catch(() => null)
+      parts.push(`${name}:${st ? `${st.size}:${st.mtimeMs}` : 'x'}`)
+    }
+    const key = parts.join('|')
+    const cached = modEnvCache.get(entry.id)
+    if (cached && cached.key === key) return { ok: true, envs: cached.envs }
+    const envs = await content.modEnvs({ dir, names })
+    modEnvCache.set(entry.id, { key, envs })
+    return { ok: true, envs }
+  } catch (err) {
+    return { ok: false, error: err.message, envs: {} }
+  }
+}
+
+const HOST_TOKEN_ID = 'host:ngrok'
+
+const hostToolsDir = () => path.join(app.getPath('userData'), 'tools')
+
+function hostHasToken() {
+  return !!String(tokenStore.getToken(HOST_TOKEN_ID)?.token || '')
+}
+
+async function hostStatus({ instanceId } = {}) {
+  let entry = null
+  try {
+    entry = instanceId ? findEntry(instanceId) : null
+  } catch {}
+  const agent = await host.agentStatus(hostToolsDir())
+  const tunnel = host.tunnelStatus()
+  const version = agent.installed && !tunnel.running ? await host.agentVersion(hostToolsDir()) : ''
+  return {
+    ok: true,
+    agent: { ...agent, version },
+    hasToken: hostHasToken(),
+    instance: entry ? { id: entry.id, name: entry.name } : null,
+    detected: entry ? await host.detectPort(entry.dir) : null,
+    tunnel,
+  }
+}
+
+async function hostInstallAgent(emit) {
+  try {
+    const res = await host.agentInstall({
+      dir: hostToolsDir(),
+      onProgress: (p) => emit?.({ type: 'host-progress', ...p }),
+    })
+    return { ok: true, path: res.path, version: await host.agentVersion(hostToolsDir()) }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+}
+
+function hostSetToken({ token } = {}) {
+  const value = String(token || '').trim()
+  tokenStore.setToken(HOST_TOKEN_ID, value ? { token: value } : null)
+  return { ok: true, hasToken: !!value }
+}
+
+async function hostStart({ instanceId, listenPort = 25565, targetPort } = {}, emit) {
+  let entry
+  try {
+    entry = findEntry(instanceId)
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+  let port = Number(targetPort) || 0
+  if (!port) {
+    const detected = await host.detectPort(entry.dir)
+    port = detected?.port || 0
+  }
+  if (!port) {
+    return { ok: false, error: 'Chưa thấy cổng world trong log — mở world rồi bấm "Mở cho LAN" trước.' }
+  }
+  const started = await host.tunnelStart({
+    dir: hostToolsDir(),
+    token: tokenStore.getToken(HOST_TOKEN_ID)?.token || '',
+    targetPort: port,
+    listenPort: Number(listenPort) || 25565,
+    onExit: (info) => emit?.({ type: 'host', state: 'stopped', ...host.tunnelStatus(), exit: info }),
+  })
+  if (started.ok) emit?.({ type: 'host', state: 'started', ...started, instanceId: entry.id })
+  return started
+}
+
+function hostStop() {
+  return host.tunnelStop()
+}
+
 async function contentSearch({ kind, source, query = '', sort = 'relevance', offset = 0, limit = 20, instanceId } = {}) {
   let entry = null
   try {
@@ -1728,6 +1831,12 @@ module.exports = {
   modpackRepair,
   exportProfile,
   contentSearch,
+  instanceModEnvs,
+  hostStatus,
+  hostInstallAgent,
+  hostSetToken,
+  hostStart,
+  hostStop,
   contentVersions,
   contentProject,
   contentChangelog,

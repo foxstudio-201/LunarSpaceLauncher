@@ -567,6 +567,36 @@ export async function contentSearch(opts = {}) {
   return { ok: false, error: NEEDS_APP, hits: [], total: 0 }
 }
 
+export async function instanceModEnvs(opts = {}) {
+  if (bridge?.instanceModEnvs) return bridge.instanceModEnvs(opts)
+  return { ok: false, error: NEEDS_APP, envs: {} }
+}
+
+export async function hostStatus(opts = {}) {
+  if (bridge?.hostStatus) return bridge.hostStatus(opts)
+  return { ok: false, error: NEEDS_APP }
+}
+
+export async function hostInstallAgent() {
+  if (bridge?.hostInstallAgent) return bridge.hostInstallAgent()
+  return { ok: false, error: NEEDS_APP }
+}
+
+export async function hostSetToken({ token } = {}) {
+  if (bridge?.hostSetToken) return bridge.hostSetToken({ token })
+  return { ok: false, error: NEEDS_APP }
+}
+
+export async function hostStart(opts = {}) {
+  if (bridge?.hostStart) return bridge.hostStart(opts)
+  return { ok: false, error: NEEDS_APP }
+}
+
+export async function hostStop() {
+  if (bridge?.hostStop) return bridge.hostStop()
+  return { ok: false, error: NEEDS_APP }
+}
+
 export async function contentVersions(opts = {}) {
   if (bridge?.contentVersions) return bridge.contentVersions(opts)
   return { ok: false, error: NEEDS_APP, versions: [] }

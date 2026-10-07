@@ -1,6 +1,6 @@
 const path = require('path')
 const fsp = require('fs').promises
-const { downloadAll, fetchJson } = require('./net.cjs')
+const { downloadAll, fetchJson, sha1File, UA } = require('./net.cjs')
 const {
   MODRINTH,
   CF,
@@ -42,6 +42,66 @@ const loadersOf = (list) => {
   return [...set]
 }
 
+const envKind = (clientSide, serverSide) => {
+  const ok = (value) => value === 'required' || value === 'optional'
+  const client = ok(clientSide)
+  const server = ok(serverSide)
+  if (client && server) return 'both'
+  if (client) return 'client'
+  if (server) return 'server'
+  return ''
+}
+
+const MOD_JAR_RE = /\.jar(\.disabled)?$/i
+
+async function postJson(url, body) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...UA },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(30000),
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json()
+}
+
+async function modEnvs({ dir, names } = {}) {
+  const list = (names || []).filter((name) => MOD_JAR_RE.test(name))
+  if (!dir || !list.length) return {}
+  const hashes = new Map()
+  for (const name of list) {
+    const hash = await sha1File(path.join(dir, name))
+    if (hash) hashes.set(hash, name)
+  }
+  if (!hashes.size) return {}
+  const owner = new Map()
+  const al1 = [...hashes.keys()]
+  for (let i = 0; i < al1.length; i += 200) {
+    try {
+      const res = await postJson(`${MODRINTH}/version_files`, { hashes: al1.slice(i, i + 200), algorithm: 'sha1' })
+      for (const [hash, version] of Object.entries(res || {})) {
+        const name = hashes.get(hash)
+        if (name && version?.project_id) owner.set(name, version.project_id)
+      }
+    } catch {}
+  }
+  const ids = [...new Set(owner.values())]
+  const sides = new Map()
+  for (let i = 0; i < ids.length; i += 100) {
+    try {
+      const res = await fetchJson(`${MODRINTH}/projects?ids=${encodeURIComponent(JSON.stringify(ids.slice(i, i + 100)))}`)
+      for (const project of res || []) sides.set(project.id, project)
+    } catch {}
+  }
+  const out = {}
+  for (const [name, projectId] of owner) {
+    const project = sides.get(projectId)
+    const env = project ? envKind(project.client_side, project.server_side) : ''
+    if (env) out[name] = env
+  }
+  return out
+}
+
 function spec(kind) {
   const entry = KINDS[kind]
   if (!entry) throw new Error(`Loại nội dung không hợp lệ: ${kind}`)
@@ -74,6 +134,7 @@ async function searchModrinth({ kind, game, loader, query = '', sort = 'relevanc
       followers: hit.follows || 0,
       updated: iso(hit.date_modified),
       loaders: loadersOf(hit.categories),
+      environment: envKind(hit.client_side, hit.server_side),
       categories: (hit.categories || []).filter((tag) => !TAG_NOISE.has(String(tag).toLowerCase())).map(prettifyTag),
       gameVersions: hit.versions || [],
     })),
@@ -503,4 +564,4 @@ async function install({ plan: prepared, root, onProgress, onLog }) {
   return { added: Math.max(0, added), existed: existing, failed, total: targets.length }
 }
 
-module.exports = { KINDS, spec, search, versions, project, changelog, plan, install, normName, cfLoaderName }
+module.exports = { KINDS, spec, search, versions, project, changelog, plan, install, modEnvs, normName, cfLoaderName }

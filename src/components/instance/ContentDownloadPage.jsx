@@ -10,7 +10,7 @@ import { timeAgo, formatDate } from '../../lib/status'
 import Select from '../ui/Select'
 import ProgressBar from '../ui/ProgressBar'
 import RichText from './RichText'
-import { Box, Chips, Stat, Leader, Banner, EnvRow, ReleaseChip, gameVersionList, followersOf, bytes, compact } from './catalogBits'
+import { Box, Chips, Stat, Leader, Banner, EnvRow, EnvChip, ReleaseChip, gameVersionList, followersOf, bytes, compact } from './catalogBits'
 import { loaderIcon } from '../../api/client'
 import * as api from '../../api/client.js'
 
@@ -782,6 +782,7 @@ function Card({ c, lang, hit, kind, game, onOpen }) {
       <p className="text-[10px] leading-relaxed line-clamp-2" style={{ color: c.label }}>{hit.summary || '—'}</p>
 
       <div className="mt-auto flex items-center gap-2 pt-2" style={{ borderTop: `1px solid ${c.border}` }}>
+        {kind === 'mods' && <EnvChip c={c} env={hit.environment} lang={lang} />}
         {kind === 'mods' && (hit.loaders || []).length > 0 && (
           <div className="flex items-center gap-1 shrink-0">
             {hit.loaders.slice(0, 4).map((l) => (

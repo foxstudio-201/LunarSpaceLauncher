@@ -219,6 +219,12 @@ function registerIpc() {
   ipcMain.handle('launcher:modpack-repair', (_e, opts) => launcher.modpackRepair(opts || {}, emitLauncher))
 
   ipcMain.handle('launcher:content-search', (_e, opts) => launcher.contentSearch(opts || {}))
+  ipcMain.handle('launcher:instance-mod-env', (_e, opts) => launcher.instanceModEnvs(opts || {}))
+  ipcMain.handle('launcher:host-status', (_e, opts) => launcher.hostStatus(opts || {}))
+  ipcMain.handle('launcher:host-install-agent', () => launcher.hostInstallAgent(emitLauncher))
+  ipcMain.handle('launcher:host-set-token', (_e, opts) => launcher.hostSetToken(opts || {}))
+  ipcMain.handle('launcher:host-start', (_e, opts) => launcher.hostStart(opts || {}, emitLauncher))
+  ipcMain.handle('launcher:host-stop', () => launcher.hostStop())
   ipcMain.handle('launcher:content-versions', (_e, opts) => launcher.contentVersions(opts || {}))
   ipcMain.handle('launcher:export-profile', async (_e, { id, format } = {}) => {
     const settings = readSettings()
@@ -434,6 +440,9 @@ if (MODE !== 'app') {
     updater.shutdown()
     presence.shutdown()
     tray.destroy()
+    try {
+      launcher.hostStop()
+    } catch {}
   })
 
   app.on('window-all-closed', () => {

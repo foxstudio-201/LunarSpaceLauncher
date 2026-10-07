@@ -9,10 +9,13 @@ import { palette } from '../../lib/palette'
 import { sizeLabel, stampLabel } from '../../lib/files'
 import ProgressBar from '../ui/ProgressBar'
 import ContentDownloadPage from './ContentDownloadPage'
+import { EnvChip } from './catalogBits'
 import * as api from '../../api/client.js'
 
 const vn = (lang, vi, en) => (lang === 'vi' ? vi : en)
-const GRID = '1fr 90px 140px 36px'
+const GRID = '1fr 100px 90px 140px 36px'
+const GRID_MODS = '1fr 100px 100px 90px 140px 36px'
+const GRID_GAP = 14
 
 function fill(lang, key, map) {
   let text = t(lang, key)
@@ -41,6 +44,23 @@ export default function ContentFolderPage({
   const [flash, setFlash] = useState(null)
   const [osDragging, setOsDragging] = useState(false)
   const [busy, setBusy] = useState(0)
+  const [envs, setEnvs] = useState({})
+  const isMods = folder === 'mods'
+  const grid = isMods ? GRID_MODS : GRID
+
+  const entryKey = entries.map((e) => e.name).join('|')
+
+  useEffect(() => {
+    if (!isMods || !instance) {
+      setEnvs({})
+      return undefined
+    }
+    let alive = true
+    api.instanceModEnvs({ id: instance.id })
+      .then((res) => { if (alive && res?.ok) setEnvs(res.envs || {}) })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [isMods, instance?.id, entryKey])
 
   const hover = theme === 'light' ? 'rgba(139,92,246,0.08)' : 'rgba(167,139,250,0.12)'
 
@@ -389,7 +409,8 @@ export default function ContentFolderPage({
       <div
         className="shrink-0 mx-3 mt-3 grid items-center px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider"
         style={{
-          gridTemplateColumns: GRID,
+          gridTemplateColumns: grid,
+          columnGap: GRID_GAP,
           background: c.bar,
           borderTop: `1px solid ${c.border}`,
           borderLeft: `1px solid ${c.border}`,
@@ -401,6 +422,8 @@ export default function ContentFolderPage({
         }}
       >
         <span>{t(lang, 'files.name')}</span>
+        {isMods && <span>{vn(lang, 'loại', 'type')}</span>}
+        <span>{vn(lang, 'trạng thái', 'status')}</span>
         <span className="text-right">{t(lang, 'files.size')}</span>
         <span className="text-right">{t(lang, 'files.modified')}</span>
         <span className="flex justify-end">
@@ -447,7 +470,8 @@ export default function ContentFolderPage({
                 onClick={() => onRowClick(entry)}
                 className="grid items-center px-3 cursor-pointer group"
                 style={{
-                  gridTemplateColumns: GRID,
+                  gridTemplateColumns: grid,
+                  columnGap: GRID_GAP,
                   minHeight: 41,
                   borderBottom: `1px solid ${c.border}`,
                   background: isSelected ? hover : 'transparent',
@@ -468,13 +492,20 @@ export default function ContentFolderPage({
                       {vn(lang, 'thư mục', 'folder')}
                     </span>
                   )}
+                </div>
+                {isMods && (
+                  <span className="flex justify-start">
+                    <EnvChip c={c} env={envs[entry.name]} lang={lang} />
+                  </span>
+                )}
+                <span className="flex justify-start">
                   <span
                     className="text-[9px] font-bold px-1 py-0.5 rounded shrink-0 uppercase"
                     style={{ background: enabled ? 'rgba(34,197,94,0.16)' : c.input, color: enabled ? '#22c55e' : c.label }}
                   >
                     {enabled ? t(lang, 'mods.enabled') : t(lang, 'mods.disabled')}
                   </span>
-                </div>
+                </span>
                 <span className="text-[11px] text-right font-mono" style={{ color: c.label }}>{entry.dir ? '—' : sizeLabel(entry.size)}</span>
                 <span className="text-[11px] text-right font-mono" style={{ color: c.label }}>{stampLabel(entry.mtime)}</span>
                 <div className="relative flex items-center justify-end">
