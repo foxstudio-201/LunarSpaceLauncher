@@ -562,6 +562,26 @@ export async function exportProfile(opts = {}) {
   return { ok: false, error: NEEDS_APP }
 }
 
+export async function serverpackPlan(opts = {}) {
+  if (bridge?.serverpackPlan) return bridge.serverpackPlan(opts)
+  return { ok: false, error: NEEDS_APP, files: [], folders: {} }
+}
+
+export async function instanceTree(opts = {}) {
+  if (bridge?.instanceTree) return bridge.instanceTree(opts)
+  return { ok: false, error: NEEDS_APP, entries: [] }
+}
+
+export async function serverpackWalk(opts = {}) {
+  if (bridge?.serverpackWalk) return bridge.serverpackWalk(opts)
+  return { ok: false, error: NEEDS_APP, files: [] }
+}
+
+export async function serverpackExport(opts = {}) {
+  if (bridge?.serverpackExport) return bridge.serverpackExport(opts)
+  return { ok: false, error: NEEDS_APP }
+}
+
 export async function contentSearch(opts = {}) {
   if (bridge?.contentSearch) return bridge.contentSearch(opts)
   return { ok: false, error: NEEDS_APP, hits: [], total: 0 }

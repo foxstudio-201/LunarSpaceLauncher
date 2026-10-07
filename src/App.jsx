@@ -213,16 +213,20 @@ function AppContent() {
               ? summary.versionId
               : summary.total !== undefined
                 ? vn(L, `thêm ${summary.added} · có sẵn ${summary.existed}`, `added ${summary.added} · kept ${summary.existed}`)
-                : summary.libraries !== undefined
-                  ? vn(L, `${summary.libraries} thư viện · ${summary.objects} tài nguyên`, `${summary.libraries} libraries · ${summary.objects} assets`)
-                  : ''
+                : summary.files !== undefined
+                  ? vn(L, `${summary.files} tệp`, `${summary.files} files`)
+                  : summary.libraries !== undefined
+                    ? vn(L, `${summary.libraries} thư viện · ${summary.objects} tài nguyên`, `${summary.libraries} libraries · ${summary.objects} assets`)
+                    : ''
           toast.finish(key, {
             tone: 'ok',
             title: ev.label === 'content'
               ? vn(L, 'Đã tải xong', 'Download finished')
               : ev.label === 'export'
                 ? vn(L, 'Đã xuất profile', 'Profile exported')
-                : progressLabel({ phase: 'done' }, L) || vn(L, 'Tải xong', 'Download finished'),
+                : ev.label === 'serverpack'
+                  ? vn(L, 'Đã xuất serverpack', 'Server pack exported')
+                  : progressLabel({ phase: 'done' }, L) || vn(L, 'Tải xong', 'Download finished'),
             message: [who, detail].filter(Boolean).join(' · '),
           })
         } else if (ev.phase === 'clear') {

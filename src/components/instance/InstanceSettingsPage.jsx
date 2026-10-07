@@ -7,6 +7,13 @@ import * as api from '../../api/client.js'
 
 const EXPORT_FORMATS = [
   {
+    id: 'serverpack',
+    vi: 'Serverpack — tệp .zip',
+    en: 'Server pack — .zip file',
+    hintVi: 'Mở trang chọn nội dung dạng cây: tick từng thư mục/tệp, tự tải tệp server theo đúng phiên bản, và tab cấu hình server.properties ghi thẳng vào gói.',
+    hintEn: 'Opens a tree picker: tick folders/files, auto-downloads the matching server file, and a server.properties tab written into the pack.',
+  },
+  {
     id: 'mrpack',
     vi: 'Modrinth — tệp .mrpack',
     en: 'Modrinth — .mrpack file',
@@ -62,7 +69,7 @@ function boostModsHint(t, lang, loader) {
 
 const JVM_DEFAULT = '-XX:+UseG1GC -XX:MaxGCPauseMillis=50'
 
-export default function InstanceSettingsPage({ instance, theme, lang, account, onRemove, onOpenAccounts, onSaveInstance }) {
+export default function InstanceSettingsPage({ instance, theme, lang, account, onNavigate, onRemove, onOpenAccounts, onSaveInstance }) {
   const c = palette(theme)
   const loader = api.LOADERS.find((l) => l.id === instance.loader) || api.LOADERS[0]
 
@@ -114,6 +121,11 @@ export default function InstanceSettingsPage({ instance, theme, lang, account, o
 
   const runExport = async () => {
     if (exporting) return
+    if (exportFormat === 'serverpack') {
+      setExportOpen(false)
+      onNavigate?.('instance-serverpack')
+      return
+    }
     setExporting(true)
     setExportError('')
     setExportDone(null)
@@ -465,7 +477,9 @@ export default function InstanceSettingsPage({ instance, theme, lang, account, o
                 {exporting ? <ArrowsClockwise size={13} weight="bold" className="animate-spin" /> : <FileArrowUp size={13} weight="bold" />}
                 {exporting
                   ? (lang === 'vi' ? 'Đang xuất…' : 'Exporting…')
-                  : (lang === 'vi' ? 'Xuất profile' : 'Export profile')}
+                  : exportFormat === 'serverpack'
+                    ? (lang === 'vi' ? 'Mở trang serverpack' : 'Open server pack page')
+                    : (lang === 'vi' ? 'Xuất profile' : 'Export profile')}
               </button>
             </div>
           </div>

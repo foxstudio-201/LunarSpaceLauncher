@@ -7,6 +7,7 @@ import FilesPage from './FilesPage'
 import TrashPage from './TrashPage'
 import SavesPage from './SavesPage'
 import InstanceSettingsPage from './InstanceSettingsPage'
+import ServerPackPage from './ServerPackPage'
 
 export default function InstancePanel({
   instance, theme, lang, displayPage, progress, logs, launchError, crashes, onOpenCrash,
@@ -62,12 +63,24 @@ export default function InstancePanel({
   if (displayPage === 'instance-saves') {
     return <SavesPage instance={instance} theme={theme} lang={lang} />
   }
+  if (displayPage === 'instance-serverpack') {
+    return (
+      <ServerPackPage
+        instance={instance}
+        theme={theme}
+        lang={lang}
+        progress={progress}
+        onClose={() => onNavigate('instance-settings')}
+      />
+    )
+  }
   return (
     <InstanceSettingsPage
       instance={instance}
       theme={theme}
       lang={lang}
       account={account}
+      onNavigate={onNavigate}
       onBack={onBack}
       onOpenAccounts={onOpenAccounts}
       onRemove={onRemove}

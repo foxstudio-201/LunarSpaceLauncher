@@ -16,6 +16,8 @@ const LABELS = {
   repair: { vi: 'Đang tải bù mod thiếu…', en: 'Re-downloading missing mods…' },
   content: { vi: 'Đang tải nội dung…', en: 'Downloading content…' },
   export: { vi: 'Đang xuất profile…', en: 'Exporting profile…' },
+  serverpack: { vi: 'Đang xuất serverpack…', en: 'Exporting server pack…' },
+  server: { vi: 'Đang tải tệp server…', en: 'Downloading server file…' },
   done: { vi: 'Cài đặt hoàn tất', en: 'Install finished' },
   error: { vi: 'Cài đặt lỗi', en: 'Install failed' },
 }

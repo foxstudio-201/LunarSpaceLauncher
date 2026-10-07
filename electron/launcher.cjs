@@ -17,6 +17,7 @@ const modpack = require('./mc/modpack.cjs')
 const content = require('./mc/content.cjs')
 const host = require('./host.cjs')
 const profileExport = require('./mc/export.cjs')
+const serverpack = require('./mc/serverpack.cjs')
 const tokenStore = require('./auth.cjs')
 const msAuth = require('./msAuth.cjs')
 const elyAuth = require('./elyAuth.cjs')
@@ -1734,6 +1735,85 @@ async function exportProfile({ id, format = 'zip', targetPath } = {}, emit) {
   }
 }
 
+async function serverpackPlan({ id, settings } = {}) {
+  let entry
+  try {
+    entry = findEntry(id)
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+  const { paths } = storageFor(settings)
+  try {
+    return await serverpack.plan({
+      dir: entry.dir,
+      id: entry.id,
+      name: entry.name,
+      version: entry.version,
+      loader: entry.loader,
+      loaderVersion: entry.loaderVersion || entry.forgeVersion || '',
+      metaDir: paths.meta,
+    })
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+}
+
+async function instanceTree({ id, rel = '' } = {}) {
+  let entry
+  try {
+    entry = findEntry(id)
+  } catch (err) {
+    return { ok: false, error: err.message, entries: [] }
+  }
+  return serverpack.listTree({ dir: entry.dir, rel })
+}
+
+async function serverpackWalk({ id, rel = '' } = {}) {
+  let entry
+  try {
+    entry = findEntry(id)
+  } catch (err) {
+    return { ok: false, error: err.message, files: [] }
+  }
+  return serverpack.walkFiles({ dir: entry.dir, rel })
+}
+
+async function serverpackExport({ id, include = [], props = null, raw = null, server = null, targetPath, settings } = {}, emit) {
+  let entry
+  try {
+    entry = findEntry(id)
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+  if (!targetPath) return { ok: false, error: 'Thiếu đường dẫn lưu.' }
+  const { paths, shared } = storageFor(settings)
+  const log = (line) => {
+    pushLog(entry.id, line)
+    emit?.({ type: 'log', id: entry.id, line })
+  }
+  emit?.({ type: 'progress', id: entry.id, phase: 'serverpack', label: 'serverpack', done: 0, total: include.length })
+  try {
+    const res = await serverpack.exportServerPack({
+      dir: entry.dir,
+      targetPath,
+      include,
+      props,
+      raw,
+      server,
+      metaDir: paths.meta,
+      cacheDir: path.join(shared, 'serverpack'),
+      onProgress: (p) => emit?.({ type: 'progress', id: entry.id, ...p }),
+      onLog: log,
+    })
+    emit?.({ type: 'progress', id: entry.id, phase: 'done', label: 'serverpack', summary: res })
+    return res
+  } catch (err) {
+    log(`[LunarSpace] Xuất serverpack lỗi: ${err.message}`)
+    emit?.({ type: 'progress', id: entry.id, phase: 'error', error: err.message })
+    return { ok: false, error: err.message }
+  }
+}
+
 async function contentProject({ kind, source, id } = {}) {
   try {
     return { ok: true, project: await content.project({ kind, source, id }) }
@@ -1837,6 +1917,10 @@ module.exports = {
   modpackInstall,
   modpackRepair,
   exportProfile,
+  serverpackPlan,
+  instanceTree,
+  serverpackWalk,
+  serverpackExport,
   contentSearch,
   instanceModEnvs,
   hostStatus,

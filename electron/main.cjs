@@ -245,6 +245,21 @@ function registerIpc() {
     return launcher.exportProfile({ id, format, targetPath: picked.filePath, settings }, emitLauncher)
   })
 
+  ipcMain.handle('launcher:serverpack-plan', (_e, opts) => launcher.serverpackPlan({ ...(opts || {}), settings: readSettings() }))
+  ipcMain.handle('launcher:instance-tree', (_e, opts) => launcher.instanceTree(opts || {}))
+  ipcMain.handle('launcher:serverpack-walk', (_e, opts) => launcher.serverpackWalk(opts || {}))
+  ipcMain.handle('launcher:serverpack-export', async (_e, { name, ...rest } = {}) => {
+    const safe = String(name || 'serverpack').replace(/[\/:*?"<>|]/g, '_').trim() || 'serverpack'
+    const picked = await dialog.showSaveDialog(mainWindow, {
+      title: 'Xuất serverpack',
+      defaultPath: path.join(app.getPath('documents'), `${safe}-serverpack.zip`),
+      filters: [{ name: 'Zip', extensions: ['zip'] }],
+      buttonLabel: 'Xuất',
+    })
+    if (picked.canceled || !picked.filePath) return { ok: false, canceled: true }
+    return launcher.serverpackExport({ ...rest, targetPath: picked.filePath, settings: readSettings() }, emitLauncher)
+  })
+
   ipcMain.handle('launcher:content-project', (_e, opts) => launcher.contentProject(opts || {}))
   ipcMain.handle('launcher:content-changelog', (_e, opts) => launcher.contentChangelog(opts || {}))
   ipcMain.handle('launcher:content-install', (_e, opts) => launcher.contentInstall(opts || {}, emitLauncher))

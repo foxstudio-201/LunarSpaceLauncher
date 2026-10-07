@@ -44,6 +44,8 @@ const INSTANCE_PAGES = [
   { key: 'instance-settings', icon: GearSix, label: 'Settings', labelVi: 'Cài đặt' },
 ]
 
+const SUB_PAGE_PARENT = { 'instance-serverpack': 'instance-settings' }
+
 export default function Sidebar({
   theme, lang, version, account,
   instances, selectedInstance, onSelectInstance,
@@ -63,7 +65,7 @@ export default function Sidebar({
   const handleBg = px ? c.input : theme === 'light' ? '#ffffff' : '#1a1a1a'
   const accent = px ? c.accent : ACCENT
 
-  const activeKey = isInInstance ? displayPage : activePage
+  const activeKey = isInInstance ? SUB_PAGE_PARENT[displayPage] || displayPage : activePage
   const railW = collapsed ? RAIL_W_COLLAPSED : RAIL_W
 
   const measure = useCallback(() => {
