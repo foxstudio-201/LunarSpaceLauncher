@@ -11,11 +11,22 @@ const AGENT_URL = 'https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-
 const AGENT_EXE = process.platform === 'win32' ? 'ngrok.exe' : 'ngrok'
 const LOG_KEEP = 40
 
-const TAIL_BYTES = 512 * 1024
-const LAN_RE = /Local game hosted on port (\d+)/
+const TAIL_BYTES = 2 * 1024 * 1024
+const LAN_RES = [
+  /Started serving on (\d+)/,
+  /Local game hosted on port \[?(\d+)\]?/,
+]
 const SERVER_RE = /Starting Minecraft server on [^:\s]*:(\d+)/
-const LINE_TIME_RE = /^\[(\d{2}:\d{2}:\d{2})\]/
+const LINE_TIME_RE = /^\[(?:[0-9]{2}[A-Za-z]{3}[0-9]{4} )?(\d{2}:\d{2}:\d{2})/
 const STOP_RE = /Stopping (?:the )?server|Stopping server/
+
+function lanPort(line) {
+  for (const re of LAN_RES) {
+    const match = line.match(re)
+    if (match) return Number(match[1])
+  }
+  return null
+}
 
 const relays = new Map()
 
@@ -68,11 +79,13 @@ async function detectPort(instanceDir) {
   let found = null
   let stopped = false
   for (const line of lines) {
-    const lan = line.match(LAN_RE)
+    const lan = lanPort(line)
     const server = lan ? null : line.match(SERVER_RE)
-    const port = lan ? Number(lan[1]) : server ? Number(server[1]) : null
+    const port = lan || (server ? Number(server[1]) : null)
     if (port) {
-      found = { port, at: line.match(LINE_TIME_RE)?.[1] || '', dedicated: !lan, line: line.trim().slice(0, 160) }
+      if (!found || found.port !== port) {
+        found = { port, at: line.match(LINE_TIME_RE)?.[1] || '', dedicated: !lan, line: line.trim().slice(0, 160) }
+      }
       stopped = false
       continue
     }
