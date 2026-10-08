@@ -11,7 +11,7 @@ import Select from '../ui/Select'
 import ProgressBar from '../ui/ProgressBar'
 import RichText from './RichText'
 import { Box, Chips, Stat, Leader, Banner, EnvRow, EnvChip, ReleaseChip, gameVersionList, followersOf, bytes, compact } from './catalogBits'
-import { loaderIcon } from '../../api/client'
+import { loaderIcon, envIcon } from '../../api/client'
 import * as api from '../../api/client.js'
 
 const vn = (lang, vi, en) => (lang === 'vi' ? vi : en)
@@ -28,6 +28,14 @@ const SORT_LABELS = {
   downloads: ['Tải nhiều', 'Most downloaded'],
   newest: ['Mới nhất', 'Newest'],
   updated: ['Vừa cập nhật', 'Recently updated'],
+}
+
+const ENVS = ['client', 'server', 'both']
+
+const ENV_LABELS = {
+  client: ['Máy khách', 'Client'],
+  server: ['Máy chủ', 'Server'],
+  both: ['Cả hai', 'Both'],
 }
 
 const LOADERS = { vanilla: 'Vanilla', fabric: 'Fabric', quilt: 'Quilt', forge: 'Forge', neoforge: 'NeoForge' }
@@ -76,6 +84,14 @@ export default function ContentDownloadPage({ instance, theme, lang, kind, progr
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [filterGame, setFilterGame] = useState(instance?.version || '')
+  const [filterLoader, setFilterLoader] = useState(instance?.loader || 'vanilla')
+  const [filterTag, setFilterTag] = useState('')
+  const [filterEnv, setFilterEnv] = useState('')
+  const [tagOptions, setTagOptions] = useState([])
+  const [envSupported, setEnvSupported] = useState(false)
+  const [stuck, setStuck] = useState(false)
+  const [updateAsk, setUpdateAsk] = useState(null)
 
   const [active, setActive] = useState(null)
   const [detail, setDetail] = useState(null)
@@ -105,7 +121,19 @@ export default function ContentDownloadPage({ instance, theme, lang, kind, progr
     setError('')
     const offset = reset ? 0 : hits.length
     const res = await api
-      .contentSearch({ kind, source, query: applied, sort, offset, limit: PAGE, instanceId: instance.id })
+      .contentSearch({
+        kind,
+        source,
+        query: applied,
+        sort,
+        offset,
+        limit: PAGE,
+        instanceId: instance.id,
+        game: filterGame,
+        loader: filterLoader,
+        category: filterTag,
+        environment: envSupported && filterEnv ? filterEnv : '',
+      })
       .catch((err) => ({ ok: false, error: err.message }))
     if (id !== reqRef.current) return
     setLoading(false)
@@ -119,7 +147,7 @@ export default function ContentDownloadPage({ instance, theme, lang, kind, progr
     }
     setTotal(res.total || 0)
     setHits((prev) => (reset ? res.hits : [...prev, ...res.hits]))
-  }, [kind, source, applied, sort, hits.length, instance.id])
+  }, [kind, source, applied, sort, hits.length, instance.id, filterGame, filterLoader, filterTag, filterEnv, envSupported])
 
   useEffect(() => {
     const timer = setTimeout(() => setApplied(query.trim()), 340)
@@ -129,7 +157,45 @@ export default function ContentDownloadPage({ instance, theme, lang, kind, progr
   useEffect(() => {
     setHits([])
     load({ reset: true })
-  }, [kind, source, applied, sort])
+  }, [kind, source, applied, sort, filterGame, filterLoader, filterTag, filterEnv])
+
+  useEffect(() => {
+    let alive = true
+    setFilterTag('')
+    setFilterEnv('')
+    api.contentTags({ kind, source })
+      .then((res) => {
+        if (!alive) return
+        setTagOptions(res?.options || [])
+        setEnvSupported(res?.environment === true)
+      })
+      .catch(() => {
+        if (!alive) return
+        setTagOptions([])
+        setEnvSupported(false)
+      })
+    return () => { alive = false }
+  }, [kind, source])
+
+  const gameOptions = useMemo(() => {
+    const set = new Set()
+    if (filterGame) set.add(filterGame)
+    if (instance?.version) set.add(instance.version)
+    for (const hit of hits) for (const version of hit.gameVersions || []) set.add(version)
+    return [...set].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).reverse()
+  }, [hits, filterGame, instance?.version])
+
+  const loadMore = useCallback(() => {
+    if (loading || !hits.length || hits.length >= total) return
+    load({ reset: false })
+  }, [loading, hits.length, total, load])
+
+  const onListScroll = useCallback((event) => {
+    const el = event.currentTarget
+    const next = el.scrollTop > 4
+    setStuck((prev) => (prev === next ? prev : next))
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 480) loadMore()
+  }, [loadMore])
 
   const swap = useCallback((next) => {
     setFading(true)
@@ -187,13 +253,13 @@ export default function ContentDownloadPage({ instance, theme, lang, kind, progr
     }))
   }, [openLog, logs, active])
 
-  const install = useCallback(async (targetId, which) => {
+  const runInstall = useCallback(async (targetId, which, remove = []) => {
     if (!active || !targetId) return
     setInstallError('')
     setDone(null)
     setInstalling(which)
     const res = await api
-      .contentInstall({ kind, source: active.source, id: active.id, versionId: targetId, instanceId: instance.id })
+      .contentInstall({ kind, source: active.source, id: active.id, versionId: targetId, instanceId: instance.id, remove })
       .catch((err) => ({ ok: false, error: err.message }))
     setInstalling('')
     if (!res?.ok) return setInstallError(res?.error || 'error')
@@ -201,11 +267,144 @@ export default function ContentDownloadPage({ instance, theme, lang, kind, progr
     onInstalled?.()
   }, [kind, active, instance.id, onInstalled])
 
+  const install = useCallback(async (targetId, which) => {
+    if (!active || !targetId) return
+    const target = versions.find((v) => v.id === targetId) || latest || {}
+    const check = await api
+      .contentInstalled({
+        kind,
+        source: active.source,
+        id: active.id,
+        versionId: targetId,
+        file: target?.file?.filename || '',
+        instanceId: instance.id,
+      })
+      .catch(() => null)
+    const matches = check?.ok ? check.matches || [] : []
+    if (matches.length) {
+      setUpdateAsk({ targetId, which, matches, version: target?.versionNumber || target?.name || '' })
+      return
+    }
+    await runInstall(targetId, which)
+  }, [active, versions, latest, kind, instance.id, runInstall])
+
   const targetLine = instance.loader && instance.loader !== 'vanilla' && kind === 'mods'
     ? `${instance.version} · ${LOADERS[instance.loader] || instance.loader}${instance.loaderVersion ? ` ${instance.loaderVersion}` : ''}`
     : instance.version
 
   const shot = (url) => url || ''
+
+  const isMod = kind === 'mods'
+  const hasFilter =
+    filterTag ||
+    filterEnv ||
+    filterGame !== (instance?.version || '') ||
+    filterLoader !== (instance?.loader || 'vanilla')
+
+  const wide = (vertical) => (vertical ? 'w-full' : 'flex-1 min-w-[140px] max-w-[260px]')
+
+  const filters = (vertical) => (
+    <>
+      <div className={vertical ? 'flex flex-col gap-2' : 'flex items-center gap-2 flex-wrap'}>
+        <div className={wide(vertical)}>
+          <Select
+            theme={theme}
+            value={filterGame}
+            options={gameOptions.map((value) => ({ value, label: value, icon: loaderIcon('vanilla') }))}
+            onChange={setFilterGame}
+            placeholder={vn(lang, 'Mọi phiên bản game', 'Any game version')}
+          />
+        </div>
+        {isMod && (
+          <div className={wide(vertical)}>
+            <Select
+              theme={theme}
+              value={filterLoader}
+              options={Object.keys(LOADERS).map((value) => ({ value, label: LOADERS[value], icon: loaderIcon(value) }))}
+              onChange={setFilterLoader}
+              placeholder={vn(lang, 'Mọi loader', 'Any loader')}
+            />
+          </div>
+        )}
+        <div className={wide(vertical)}>
+          <Select
+            theme={theme}
+            value={filterTag}
+            options={tagOptions}
+            onChange={setFilterTag}
+            placeholder={vn(lang, 'Mọi thẻ', 'Any tag')}
+          />
+        </div>
+        {isMod && (
+          <div className={wide(vertical)}>
+            <Select
+              theme={theme}
+              value={filterEnv}
+              options={ENVS.map((value) => ({ value, label: vn(lang, ENV_LABELS[value][0], ENV_LABELS[value][1]), icon: envIcon(value) }))}
+              onChange={setFilterEnv}
+              disabled={!envSupported}
+              placeholder={vn(lang, 'Mọi môi trường', 'Any environment')}
+            />
+          </div>
+        )}
+        {hasFilter && (
+          <button
+            onClick={() => {
+              setFilterGame(instance?.version || '')
+              setFilterLoader(instance?.loader || 'vanilla')
+              setFilterTag('')
+              setFilterEnv('')
+            }}
+            className={vertical ? 'h-9 w-full rounded-lg text-[11px] font-semibold' : 'h-9 px-2.5 rounded-lg text-[11px] font-semibold shrink-0'}
+            style={{ background: c.input, border: `1px solid ${c.border}`, color: c.label }}
+          >
+            {vn(lang, 'Xoá lọc', 'Clear')}
+          </button>
+        )}
+        {isMod && !envSupported && (
+          <p className="w-full text-[10px] leading-relaxed" style={{ color: c.faint }}>
+            {vn(
+              lang,
+              'CurseForge không trả về dữ liệu máy khách/máy chủ qua API, nên bộ lọc môi trường chỉ dùng được với Modrinth.',
+              'CurseForge’s API exposes no client/server data, so the environment filter only works with Modrinth.',
+            )}
+          </p>
+        )}
+      </div>
+
+      <div className={vertical ? 'flex flex-col gap-2' : 'flex items-center gap-2.5'}>
+        <label className="relative flex-1 min-w-0 flex items-center">
+          <MagnifyingGlass size={14} className="absolute left-3 pointer-events-none" style={{ color: c.faint }} />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={vn(lang, 'Tìm theo tên…', 'Search by name…')}
+            className="w-full h-9 pl-9 pr-8 rounded-lg text-[11px] outline-none"
+            style={{ background: c.input, border: `1px solid ${c.border}`, color: c.text }}
+          />
+          {query && (
+            <button onClick={() => setQuery('')} className="absolute right-2.5" style={{ color: c.faint }}>
+              <X size={12} weight="bold" />
+            </button>
+          )}
+        </label>
+        <div className={vertical ? 'w-full' : 'w-[168px] shrink-0'}>
+          <Select
+            theme={theme}
+            value={sort}
+            onChange={setSort}
+            options={['relevance', 'downloads', 'newest', 'updated'].map((value) => ({
+              value,
+              label: vn(lang, SORT_LABELS[value][0], SORT_LABELS[value][1]),
+            }))}
+          />
+        </div>
+        <span className={`${vertical ? '' : 'hidden md:inline '}text-[10px] font-mono tabular-nums shrink-0`} style={{ color: c.faint }}>
+          {loading && !hits.length ? '· · ·' : `${hits.length}/${total}`}
+        </span>
+      </div>
+    </>
+  )
 
   return (
     <div data-surface className="h-full flex flex-col overflow-hidden" style={{ background: c.bg }}>
@@ -264,39 +463,10 @@ export default function ContentDownloadPage({ instance, theme, lang, kind, progr
 
       <div className={`flex-1 min-h-0 transition-opacity duration-200 ${fading ? 'opacity-0' : 'opacity-100'}`}>
         {view === 'list' ? (
-          <div ref={listRef} className="h-full overflow-y-auto">
+          <div className="h-full flex min-h-0">
+            <div ref={listRef} className="flex-1 min-w-0 overflow-y-auto" onScroll={onListScroll}>
             <div className="max-w-5xl mx-auto p-4 flex flex-col gap-3">
-              <div className="flex items-center gap-2.5">
-                <label className="relative flex-1 min-w-0 flex items-center">
-                  <MagnifyingGlass size={14} className="absolute left-3 pointer-events-none" style={{ color: c.faint }} />
-                  <input
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    placeholder={vn(lang, 'Tìm theo tên…', 'Search by name…')}
-                    className="w-full h-9 pl-9 pr-8 rounded-lg text-[11px] outline-none"
-                    style={{ background: c.input, border: `1px solid ${c.border}`, color: c.text }}
-                  />
-                  {query && (
-                    <button onClick={() => setQuery('')} className="absolute right-2.5" style={{ color: c.faint }}>
-                      <X size={12} weight="bold" />
-                    </button>
-                  )}
-                </label>
-                <div className="w-[168px] shrink-0">
-                  <Select
-                    theme={theme}
-                    value={sort}
-                    onChange={setSort}
-                    options={['relevance', 'downloads', 'newest', 'updated'].map((value) => ({
-                      value,
-                      label: vn(lang, SORT_LABELS[value][0], SORT_LABELS[value][1]),
-                    }))}
-                  />
-                </div>
-                <span className="hidden md:inline text-[10px] font-mono tabular-nums shrink-0" style={{ color: c.faint }}>
-                  {loading && !hits.length ? '· · ·' : `${hits.length}/${total}`}
-                </span>
-              </div>
+              <div className="flex flex-col gap-3">{filters(false)}</div>
 
               {error && <Banner c={c} text={error} />}
 
@@ -331,6 +501,14 @@ export default function ContentDownloadPage({ instance, theme, lang, kind, progr
                 </>
               )}
             </div>
+            </div>
+            <aside
+              aria-hidden={!stuck}
+              className="shrink-0 overflow-hidden transition-[width] duration-200 ease-out"
+              style={{ width: stuck ? 236 : 0, visibility: stuck ? 'visible' : 'hidden', borderLeft: `1px solid ${stuck ? c.border : 'transparent'}`, background: c.bar }}
+            >
+              <div className="w-[236px] h-full overflow-y-auto p-3 flex flex-col gap-3">{filters(true)}</div>
+            </aside>
           </div>
         ) : (
           <div ref={detailRef} className="h-full flex flex-col min-h-0">
@@ -739,6 +917,96 @@ export default function ContentDownloadPage({ instance, theme, lang, kind, progr
           </div>
         )}
       </div>
+
+      {updateAsk && (
+        <div
+          className="modal-backdrop fixed inset-0 z-[210] flex items-center justify-center p-6"
+          onClick={() => { if (!installing) setUpdateAsk(null) }}
+        >
+          <div
+            className="modal-content w-full max-w-[480px] rounded-2xl flex flex-col overflow-hidden"
+            style={{ background: c.surface, border: `1px solid ${c.border}` }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-4 py-3 flex items-center gap-2" style={{ borderBottom: `1px solid ${c.border}` }}>
+              <ArrowsClockwise size={15} weight="duotone" style={{ color: c.accent }} />
+              <p className="text-[12px] font-bold flex-1" style={{ color: c.text }}>
+                {vn(lang, 'Cập nhật nội dung đã có', 'Update existing content')}
+              </p>
+              <button onClick={() => { if (!installing) setUpdateAsk(null) }} style={{ color: c.faint }}>
+                <X size={13} weight="bold" />
+              </button>
+            </div>
+            <div className="p-4 flex flex-col gap-3">
+              <p className="text-[11px] leading-relaxed" style={{ color: c.label }}>
+                {vn(
+                  lang,
+                  `Phiên bản này đã có ${updateAsk.matches.length} tệp của cùng ${noun}. Chọn bản đang có và bản muốn tải:`,
+                  `This instance already has ${updateAsk.matches.length} file(s) of the same ${noun}. Pick the current build and the one to install:`,
+                )}
+              </p>
+              <div className="flex flex-col gap-2">
+                {updateAsk.matches.map((row) => (
+                  <div
+                    key={row.file}
+                    className="rounded-xl px-2.5 py-2 flex items-center gap-2"
+                    style={{ background: c.input, border: `1px solid ${c.border}` }}
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: '#f59e0b' }} />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[11px] font-mono truncate" style={{ color: c.text }} title={row.file}>{row.file}</p>
+                      <p className="text-[9px] font-mono truncate" style={{ color: c.faint }}>
+                        {vn(lang, 'đang có', 'installed')}{row.version ? ` · ${row.version}` : ''}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+                {updateAsk.version ? (
+                  <div className="rounded-xl px-2.5 py-2 flex items-center gap-2" style={{ background: `${c.accent}14`, border: `1px solid ${c.accent}44` }}>
+                    <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: c.accent }} />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[11px] font-mono truncate" style={{ color: c.text }}>
+                        {vn(lang, 'bản mới', 'new build')}
+                      </p>
+                      <p className="text-[9px] font-mono truncate" style={{ color: c.faint }}>{updateAsk.version}</p>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+              <p className="text-[10px] leading-relaxed" style={{ color: c.faint }}>
+                {vn(
+                  lang,
+                  'Cập nhật sẽ xoá tệp đang có rồi tải bản mới về, tránh hai bản cùng chạy gây xung đột. Giữ bản cũ thì không tải gì cả.',
+                  'Update removes the installed file and downloads the new build, so two versions never load at once. Keep downloads nothing.',
+                )}
+              </p>
+            </div>
+            <div className="px-4 py-3 flex items-center gap-2 justify-end" style={{ borderTop: `1px solid ${c.border}` }}>
+              <button
+                onClick={() => setUpdateAsk(null)}
+                disabled={!!installing}
+                className="h-8 px-3 rounded-lg text-[11px] font-semibold disabled:opacity-50"
+                style={{ background: c.input, border: `1px solid ${c.border}`, color: c.label }}
+              >
+                {vn(lang, 'Giữ bản cũ', 'Keep old')}
+              </button>
+              <button
+                onClick={() => {
+                  const ask = updateAsk
+                  setUpdateAsk(null)
+                  runInstall(ask.targetId, ask.which, ask.matches.map((row) => row.file))
+                }}
+                disabled={!!installing}
+                className="h-8 px-4 rounded-lg text-[11px] font-bold inline-flex items-center gap-2 disabled:opacity-50"
+                style={{ background: c.accent, color: c.ink }}
+              >
+                <ArrowsClockwise size={12} weight="bold" />
+                {vn(lang, 'Cập nhật', 'Update')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {lightbox && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-8" style={{ background: 'rgba(0,0,0,0.82)' }} onClick={() => setLightbox(null)}>

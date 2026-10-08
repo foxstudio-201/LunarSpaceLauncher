@@ -12,9 +12,18 @@ const {
   cfStrictFile,
   normName,
   pickFile,
+  tagIcon,
 } = require('./modpack.cjs')
 
 const CF_LOADER_ID = { forge: 1, fabric: 4, quilt: 5, neoforge: 6 }
+
+const ENV_FACETS = {
+  client: [['client_side:required', 'client_side:optional']],
+  server: [['server_side:required', 'server_side:optional']],
+  both: [['client_side:required', 'client_side:optional'], ['server_side:required', 'server_side:optional']],
+}
+
+const contentTagsCache = { modrinth: {}, curseforge: {} }
 
 const KINDS = {
   mods: { mr: 'mod', cf: 6, folder: 'mods', loaderFilter: true },
@@ -65,27 +74,37 @@ async function postJson(url, body) {
   return res.json()
 }
 
-async function modEnvs({ dir, names } = {}) {
+async function localOwners({ dir, names } = {}) {
   const list = (names || []).filter((name) => MOD_JAR_RE.test(name))
-  if (!dir || !list.length) return {}
+  const out = new Map()
+  if (!dir || !list.length) return out
   const hashes = new Map()
   for (const name of list) {
     const hash = await sha1File(path.join(dir, name))
     if (hash) hashes.set(hash, name)
   }
-  if (!hashes.size) return {}
-  const owner = new Map()
-  const al1 = [...hashes.keys()]
-  for (let i = 0; i < al1.length; i += 200) {
+  if (!hashes.size) return out
+  const keys = [...hashes.keys()]
+  for (let i = 0; i < keys.length; i += 200) {
     try {
-      const res = await postJson(`${MODRINTH}/version_files`, { hashes: al1.slice(i, i + 200), algorithm: 'sha1' })
+      const res = await postJson(`${MODRINTH}/version_files`, { hashes: keys.slice(i, i + 200), algorithm: 'sha1' })
       for (const [hash, version] of Object.entries(res || {})) {
         const name = hashes.get(hash)
-        if (name && version?.project_id) owner.set(name, version.project_id)
+        if (name && version?.project_id) {
+          out.set(name, { projectId: version.project_id, versionId: version.id, version: version.version_number || '' })
+        }
       }
     } catch {}
   }
-  const ids = [...new Set(owner.values())]
+  return out
+}
+
+async function modEnvs({ dir, names } = {}) {
+  const list = (names || []).filter((name) => MOD_JAR_RE.test(name))
+  if (!dir || !list.length) return {}
+  const owner = await localOwners({ dir, names: list })
+  if (!owner.size) return {}
+  const ids = [...new Set([...owner.values()].map((row) => row.projectId))]
   const sides = new Map()
   for (let i = 0; i < ids.length; i += 100) {
     try {
@@ -94,12 +113,48 @@ async function modEnvs({ dir, names } = {}) {
     } catch {}
   }
   const out = {}
-  for (const [name, projectId] of owner) {
-    const project = sides.get(projectId)
+  for (const [name, row] of owner) {
+    const project = sides.get(row.projectId)
     const env = project ? envKind(project.client_side, project.server_side) : ''
     if (env) out[name] = env
   }
   return out
+}
+
+async function installed({ kind, source, id, versionId, file, game, loader, root } = {}) {
+  const entry = spec(kind)
+  const dir = path.join(root, entry.folder)
+  const bare = (name) => String(name || '').replace(/\.disabled$/i, '')
+  let names = []
+  try {
+    names = (await fsp.readdir(dir)).filter((name) => MOD_JAR_RE.test(name) && bare(name) !== bare(file))
+  } catch {
+    return { matches: [] }
+  }
+  if (!names.length) return { matches: [] }
+  if (source !== 'curseforge') {
+    const owner = await localOwners({ dir, names })
+    const matches = []
+    for (const name of names) {
+      const row = owner.get(name)
+      if (row && row.projectId === id && row.versionId !== versionId) matches.push({ file: name, version: row.version })
+    }
+    return { matches }
+  }
+  try {
+    const loaderId = entry.loaderFilter && loader && loader !== 'vanilla' ? CF_LOADER_ID[loader] : null
+    const filter = `&pageSize=50${game ? `&gameVersion=${encodeURIComponent(game)}` : ''}${loaderId ? `&modLoaderType=${loaderId}` : ''}`
+    const known = new Map()
+    for (let page = 0; page < 4; page += 1) {
+      const res = await cfJson(`${CF}/mods/${encodeURIComponent(id)}/files?index=${page * 50}${filter}`)
+      const rows = res?.data || []
+      for (const row of rows) if (row?.fileName) known.set(bare(row.fileName).toLowerCase(), stripCodes(row.displayName || '') || row.fileName)
+      if (rows.length < 50) break
+    }
+    return { matches: names.filter((name) => known.has(bare(name).toLowerCase())).map((name) => ({ file: name, version: known.get(bare(name).toLowerCase()) })) }
+  } catch {
+    return { matches: [] }
+  }
 }
 
 function spec(kind) {
@@ -108,17 +163,20 @@ function spec(kind) {
   return entry
 }
 
-function mrFacets({ kind, game, loader }) {
+function mrFacets({ kind, game, loader, category, environment }) {
   const entry = spec(kind)
   const facets = [[`project_type:${entry.mr}`]]
   if (game) facets.push([`versions:${game}`])
   if (entry.loaderFilter && loader && loader !== 'vanilla') facets.push([`categories:${loader}`])
+  if (category) facets.push([`categories:${category}`])
+  const env = ENV_FACETS[environment]
+  if (env) facets.push(...env)
   return JSON.stringify(facets)
 }
 
-async function searchModrinth({ kind, game, loader, query = '', sort = 'relevance', offset = 0, limit = 20 }) {
+async function searchModrinth({ kind, game, loader, category, environment, query = '', sort = 'relevance', offset = 0, limit = 20 }) {
   const index = ['relevance', 'downloads', 'follows', 'newest', 'updated'].includes(sort) ? sort : 'relevance'
-  const url = `${MODRINTH}/search?query=${encodeURIComponent(query)}&facets=${encodeURIComponent(mrFacets({ kind, game, loader }))}&index=${index}&limit=${limit}&offset=${offset}`
+  const url = `${MODRINTH}/search?query=${encodeURIComponent(query)}&facets=${encodeURIComponent(mrFacets({ kind, game, loader, category, environment }))}&index=${index}&limit=${limit}&offset=${offset}`
   const data = await fetchJson(url)
   return {
     total: data.total_hits || 0,
@@ -141,15 +199,17 @@ async function searchModrinth({ kind, game, loader, query = '', sort = 'relevanc
   }
 }
 
-async function searchCurseforge({ kind, game, loader, query = '', sort = 'relevance', offset = 0, limit = 20 }) {
+async function searchCurseforge({ kind, game, loader, category, query = '', sort = 'relevance', offset = 0, limit = 20 }) {
   const entry = spec(kind)
   const sortField = sort === 'downloads' ? 6 : sort === 'updated' ? 3 : 1
   const loaderId = entry.loaderFilter && loader ? CF_LOADER_ID[loader] : null
+  const categoryId = Number(category) > 0 ? Number(category) : null
   const url =
     `${CF}/mods/search?gameId=${CF_GAME}&classId=${entry.cf}` +
     `&searchFilter=${encodeURIComponent(query)}&sortField=${sortField}&sortOrder=desc&pageSize=${limit}&index=${offset}` +
     (game ? `&gameVersion=${encodeURIComponent(game)}` : '') +
-    (loaderId ? `&modLoaderType=${loaderId}` : '')
+    (loaderId ? `&modLoaderType=${loaderId}` : '') +
+    (categoryId ? `&categoryId=${categoryId}` : '')
   const data = await cfJson(url)
   return {
     total: data?.pagination?.totalCount || 0,
@@ -173,6 +233,34 @@ async function searchCurseforge({ kind, game, loader, query = '', sort = 'releva
 
 async function search({ kind, source, ...rest } = {}) {
   return source === 'curseforge' ? searchCurseforge({ kind, ...rest }) : searchModrinth({ kind, ...rest })
+}
+
+async function contentTags({ kind, source } = {}) {
+  const entry = spec(kind)
+  if (source === 'curseforge') {
+    if (!contentTagsCache.curseforge[kind]) {
+      const data = await cfJson(`${CF}/categories?gameId=${CF_GAME}`)
+      contentTagsCache.curseforge[kind] = (data?.data || [])
+        .filter((cat) => cat.classId === entry.cf)
+        .map((cat) => {
+          const label = cat.name || prettifyTag(cat.slug)
+          return { value: String(cat.id), label, icon: tagIcon('', label, cat.slug || cat.name) }
+        })
+        .sort((a, b) => a.label.localeCompare(b.label))
+    }
+    return { options: contentTagsCache.curseforge[kind], environment: false }
+  }
+  if (!contentTagsCache.modrinth[kind]) {
+    const list = await fetchJson(`${MODRINTH}/tag/category`)
+    contentTagsCache.modrinth[kind] = (list || [])
+      .filter((tag) => tag.project_type === entry.mr)
+      .map((tag) => {
+        const label = prettifyTag(tag.name)
+        return { value: tag.name, label, icon: tagIcon(tag.icon, label, tag.name) }
+      })
+      .sort((a, b) => a.label.localeCompare(b.label))
+  }
+  return { options: contentTagsCache.modrinth[kind], environment: kind === 'mods' }
 }
 
 function mrVersion(v) {
@@ -564,4 +652,4 @@ async function install({ plan: prepared, root, onProgress, onLog }) {
   return { added: Math.max(0, added), existed: existing, failed, total: targets.length }
 }
 
-module.exports = { KINDS, spec, search, versions, project, changelog, plan, install, modEnvs, normName, cfLoaderName }
+module.exports = { KINDS, spec, search, contentTags, versions, project, changelog, plan, install, installed, modEnvs, normName, cfLoaderName }

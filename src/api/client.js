@@ -40,6 +40,23 @@ export function loaderIcon(loader) {
   return `./${found ? found.image : LOADERS[0].image}`
 }
 
+const ENV_COLORS = { client: '#a78bfa', server: '#22d3ee', both: '#4ade80' }
+
+const ENV_GLYPHS = {
+  client: '<rect x="2.5" y="4" width="19" height="12.5" rx="2"/><line x1="8.5" y1="20" x2="15.5" y2="20"/><line x1="12" y1="16.5" x2="12" y2="20"/>',
+  server: '<rect x="2.5" y="3.5" width="19" height="7.5" rx="2"/><rect x="2.5" y="13" width="19" height="7.5" rx="2"/><line x1="6.5" y1="7.25" x2="6.51" y2="7.25"/><line x1="6.5" y1="16.75" x2="6.51" y2="16.75"/>',
+  both: '<rect x="1.5" y="4" width="10.5" height="9" rx="1.6"/><line x1="6.75" y1="16" x2="6.75" y2="13"/><line x1="4.5" y1="16" x2="9" y2="16"/><rect x="14.5" y="4" width="8" height="4.2" rx="1.4"/><rect x="14.5" y="10.3" width="8" height="4.2" rx="1.4"/>',
+}
+
+export function envIcon(env) {
+  const color = ENV_COLORS[env]
+  if (!color) return ''
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">` +
+    `${ENV_GLYPHS[env]}</svg>`
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
+}
+
 const NEEDS_APP = 'Thao tác này chỉ chạy được trong ứng dụng LunarSpace Launcher.'
 
 const cache = new Map()
@@ -773,9 +790,44 @@ export async function contentProject(opts = {}) {
   return { ok: false, error: NEEDS_APP, project: null }
 }
 
+export async function contentTags(opts = {}) {
+  if (bridge?.contentTags) return bridge.contentTags(opts)
+  return { ok: false, error: NEEDS_APP, options: [], environment: false }
+}
+
+export async function folderIcons(opts = {}) {
+  if (bridge?.folderIcons) return bridge.folderIcons(opts)
+  return { ok: false, error: NEEDS_APP, icons: {} }
+}
+
+export async function worldTree(opts = {}) {
+  if (bridge?.worldTree) return bridge.worldTree(opts)
+  return { ok: false, error: NEEDS_APP }
+}
+
+export async function worldRead(opts = {}) {
+  if (bridge?.worldRead) return bridge.worldRead(opts)
+  return { ok: false, error: NEEDS_APP }
+}
+
+export async function worldWrite(opts = {}) {
+  if (bridge?.worldWrite) return bridge.worldWrite(opts)
+  return { ok: false, error: NEEDS_APP }
+}
+
+export async function worldRestore(opts = {}) {
+  if (bridge?.worldRestore) return bridge.worldRestore(opts)
+  return { ok: false, error: NEEDS_APP }
+}
+
 export async function contentChangelog(opts = {}) {
   if (bridge?.contentChangelog) return bridge.contentChangelog(opts)
   return { ok: false, error: NEEDS_APP, text: '', format: 'markdown' }
+}
+
+export async function contentInstalled(opts = {}) {
+  if (bridge?.contentInstalled) return bridge.contentInstalled(opts)
+  return { ok: false, error: NEEDS_APP, matches: [] }
 }
 
 export async function contentInstall(opts = {}) {

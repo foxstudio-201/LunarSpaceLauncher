@@ -277,13 +277,40 @@ async function fetchJsonRetry(url, tries = 3) {
   throw last
 }
 
+const TAG_COLORS = ['#a78bfa', '#60a5fa', '#34d399', '#fbbf24', '#f472b6', '#22d3ee', '#fb923c', '#4ade80', '#f87171', '#c084fc', '#38bdf8', '#a3e635', '#e879f9', '#2dd4bf']
+
+function tagColorOf(key) {
+  const text = String(key || '')
+  let hash = 0
+  for (let i = 0; i < text.length; i += 1) hash = (hash * 31 + text.charCodeAt(i)) >>> 0
+  return TAG_COLORS[hash % TAG_COLORS.length]
+}
+
+const svgUri = (svg) => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
+
+function tagIcon(rawIcon, label, key) {
+  const color = tagColorOf(key || label)
+  const svg = String(rawIcon || '').trim()
+  if (svg.startsWith('<svg')) {
+    const colored = svg.replace(/currentColor/g, color).replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" ')
+    return svgUri(colored)
+  }
+  const letter = String(label || key || '?').trim().charAt(0).toUpperCase().replace(/[<>&"']/g, '') || '?'
+  return svgUri(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect x="2.5" y="2.5" width="19" height="19" rx="6" fill="${color}" fill-opacity="0.2" stroke="${color}" stroke-width="1.5"/><text x="12" y="16.5" text-anchor="middle" font-family="Verdana,DejaVu Sans,sans-serif" font-size="11" font-weight="bold" fill="${color}">${letter}</text></svg>`,
+  )
+}
+
 async function packTags({ source } = {}) {
   if (source === 'curseforge') {
     if (!packTagsCache.curseforge) {
       const data = await cfJson(`${CF}/categories?gameId=${CF_GAME}`)
       packTagsCache.curseforge = (data?.data || [])
         .filter((cat) => cat.classId === CF_CLASS_MODPACK)
-        .map((cat) => ({ value: String(cat.id), label: cat.name || prettifyTag(cat.slug) }))
+        .map((cat) => {
+          const label = cat.name || prettifyTag(cat.slug)
+          return { value: String(cat.id), label, icon: tagIcon('', label, cat.slug || cat.name) }
+        })
         .sort((a, b) => a.label.localeCompare(b.label))
     }
     return { options: packTagsCache.curseforge, environment: false }
@@ -292,7 +319,10 @@ async function packTags({ source } = {}) {
     const list = await fetchJsonRetry(`${MODRINTH}/tag/category`)
     packTagsCache.modrinth = (list || [])
       .filter((tag) => tag.project_type === 'modpack')
-      .map((tag) => ({ value: tag.name, label: prettifyTag(tag.name) }))
+      .map((tag) => {
+        const label = prettifyTag(tag.name)
+        return { value: tag.name, label, icon: tagIcon(tag.icon, label, tag.name) }
+      })
       .sort((a, b) => a.label.localeCompare(b.label))
   }
   return { options: packTagsCache.modrinth, environment: true }
@@ -850,5 +880,7 @@ module.exports = {
   loaderFromCurseforge,
   cfFileUrl,
   parseModlist,
+  prettifyTag,
+  tagIcon,
   normName,
 }

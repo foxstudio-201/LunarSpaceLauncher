@@ -45,10 +45,30 @@ export default function ContentFolderPage({
   const [osDragging, setOsDragging] = useState(false)
   const [busy, setBusy] = useState(0)
   const [envs, setEnvs] = useState({})
+  const [icons, setIcons] = useState({})
+  const [iconFail, setIconFail] = useState(() => new Set())
   const isMods = folder === 'mods'
   const grid = isMods ? GRID_MODS : GRID
 
   const entryKey = entries.map((e) => e.name).join('|')
+
+  useEffect(() => {
+    if (!instance) return undefined
+    const names = entries.filter((e) => !e.dir).map((e) => e.name)
+    if (!names.length) {
+      setIcons({})
+      return undefined
+    }
+    let alive = true
+    api.folderIcons({ id: instance.id, folder, names })
+      .then((res) => {
+        if (!alive || !res?.ok) return
+        setIcons(res.icons || {})
+        setIconFail(new Set())
+      })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [instance?.id, folder, entryKey])
 
   useEffect(() => {
     if (!isMods || !instance) {
@@ -480,7 +500,17 @@ export default function ContentFolderPage({
                 onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = 'transparent' }}
               >
                 <div className="flex items-center gap-2.5 min-w-0 pr-2">
-                  <Icon size={15} weight="duotone" style={{ color: enabled ? c.accent : c.label, opacity: enabled ? 1 : 0.5 }} />
+                  {icons[entry.name] && !iconFail.has(entry.name) ? (
+                    <img
+                      src={icons[entry.name]}
+                      alt=""
+                      className="w-4 h-4 rounded object-contain shrink-0"
+                      style={{ opacity: enabled ? 1 : 0.45 }}
+                      onError={() => setIconFail((prev) => new Set(prev).add(entry.name))}
+                    />
+                  ) : (
+                    <Icon size={15} weight="duotone" style={{ color: enabled ? c.accent : c.label, opacity: enabled ? 1 : 0.5 }} />
+                  )}
                   <span
                     className="text-[12px] font-medium truncate"
                     style={{ color: enabled ? c.text : c.label, textDecoration: enabled ? 'none' : 'line-through' }}

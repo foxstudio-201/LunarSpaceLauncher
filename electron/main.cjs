@@ -292,7 +292,14 @@ function registerIpc() {
   })
 
   ipcMain.handle('launcher:content-project', (_e, opts) => launcher.contentProject(opts || {}))
+  ipcMain.handle('launcher:content-tags', (_e, opts) => launcher.contentTags(opts || {}))
+  ipcMain.handle('launcher:folder-icons', (_e, opts) => launcher.folderIcons(opts || {}))
+  ipcMain.handle('launcher:world-tree', (_e, opts) => launcher.worldTree(opts || {}))
+  ipcMain.handle('launcher:world-read', (_e, opts) => launcher.worldRead(opts || {}))
+  ipcMain.handle('launcher:world-write', (_e, opts) => launcher.worldWrite(opts || {}))
+  ipcMain.handle('launcher:world-restore', (_e, opts) => launcher.worldRestore(opts || {}))
   ipcMain.handle('launcher:content-changelog', (_e, opts) => launcher.contentChangelog(opts || {}))
+  ipcMain.handle('launcher:content-installed', (_e, opts) => launcher.contentInstalled(opts || {}))
   ipcMain.handle('launcher:content-install', (_e, opts) => launcher.contentInstall(opts || {}, emitLauncher))
 
   ipcMain.handle('launcher:choose-modpack', async () => {

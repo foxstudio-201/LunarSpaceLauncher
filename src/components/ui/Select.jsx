@@ -6,8 +6,14 @@ import { palette } from '../../lib/palette'
 const PANEL_MAX = 260
 const GAP = 6
 
-export default function Select({ theme, value, options = [], onChange, placeholder = '—', disabled = false, badgeLabel }) {
+const SIZES = {
+  md: { trigger: 'h-9 px-2.5', label: 'text-[11px]', row: 'h-9 px-2.5', rowText: 'text-[11px]', icon: 16, caret: 12, max: 260 },
+  lg: { trigger: 'h-10 px-3', label: 'text-[13px]', row: 'h-11 px-3', rowText: 'text-[13px]', icon: 20, caret: 14, max: 300, minPanel: 240 },
+}
+
+export default function Select({ theme, value, options = [], onChange, placeholder = '—', disabled = false, badgeLabel, size = 'md', direction = 'auto' }) {
   const c = palette(theme)
+  const scale = SIZES[size] || SIZES.md
   const [open, setOpen] = useState(false)
   const [rect, setRect] = useState(null)
   const [flip, setFlip] = useState(false)
@@ -22,8 +28,8 @@ export default function Select({ theme, value, options = [], onChange, placehold
     if (!el) return
     const box = el.getBoundingClientRect()
     setRect(box)
-    setFlip(window.innerHeight - box.bottom < PANEL_MAX + GAP + 20)
-  }, [])
+    setFlip(direction === 'down' ? false : window.innerHeight - box.bottom < scale.max + GAP + 20)
+  }, [direction, scale.max])
 
   const close = useCallback(() => setOpen(false), [])
 
@@ -85,11 +91,11 @@ export default function Select({ theme, value, options = [], onChange, placehold
         className="select-panel fixed overflow-y-auto"
         style={{
           left: rect.left,
-          width: rect.width,
+          width: scale.minPanel ? Math.max(rect.width, scale.minPanel) : rect.width,
           zIndex: 9999,
           ...(flip
-            ? { bottom: window.innerHeight - rect.top + GAP, maxHeight: PANEL_MAX }
-            : { top: rect.bottom + GAP, maxHeight: PANEL_MAX }),
+            ? { bottom: window.innerHeight - rect.top + GAP, maxHeight: scale.max }
+            : { top: rect.bottom + GAP, maxHeight: scale.max }),
           background: c.surface,
           border: `1px solid ${c.border}`,
           borderRadius: 10,
@@ -106,7 +112,7 @@ export default function Select({ theme, value, options = [], onChange, placehold
               data-row={i}
               onMouseEnter={() => setActive(i)}
               onClick={() => { onChange(option.value); close() }}
-              className="group relative w-full flex items-center gap-2 h-9 px-2.5 text-left"
+              className={`group relative w-full flex items-center gap-2.5 text-left ${scale.row}`}
               style={{
                 background: isSelected ? 'rgba(167,139,250,0.13)' : isActive ? c.hover : 'transparent',
                 color: isSelected ? c.accent : c.text,
@@ -115,17 +121,24 @@ export default function Select({ theme, value, options = [], onChange, placehold
               {isActive && !isSelected && (
                 <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 rounded-full" style={{ height: 16, background: c.accent }} />
               )}
-              {option.icon && (
-                <img src={option.icon} alt="" className="w-4 h-4 rounded object-contain shrink-0" />
+              {option.tone && (
+                <span
+                  className="rounded-[3px] shrink-0"
+                  style={{ width: 12, height: 12, background: `${option.tone}33`, border: `2px solid ${option.tone}` }}
+                />
               )}
-              <span className="text-[11px] font-mono truncate flex-1">{option.label}</span>
+              {option.node && <span className="shrink-0 inline-flex" style={{ color: option.tone || c.label }}>{option.node}</span>}
+              {option.icon && (
+                <img src={option.icon} alt="" className="rounded object-contain shrink-0" style={{ width: scale.icon, height: scale.icon }} />
+              )}
+              <span className={`font-mono truncate flex-1 ${scale.rowText}`}>{option.label}</span>
               {option.hint && (
-                <span className="text-[9px] font-mono shrink-0" style={{ color: c.faint }}>{option.hint}</span>
+                <span className="text-[10px] font-mono shrink-0" style={{ color: c.faint }}>{option.hint}</span>
               )}
               {(option.tags || (option.badge ? [option.badge] : [])).map((tag) => (
                 <span
                   key={tag}
-                  className="px-1.5 py-0.5 rounded text-[9px] font-bold shrink-0 uppercase"
+                  className="px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 uppercase"
                   style={{
                     background: tag === 'latest' ? 'rgba(167,139,250,0.16)' : c.input,
                     color: tag === 'latest' ? c.accent : c.label,
@@ -134,7 +147,7 @@ export default function Select({ theme, value, options = [], onChange, placehold
                   {tag}
                 </span>
               ))}
-              {isSelected && <Check size={12} weight="bold" className="shrink-0" style={{ color: c.accent }} />}
+              {isSelected && <Check size={scale.caret + 2} weight="bold" className="shrink-0" style={{ color: c.accent }} />}
             </button>
           )
         })}
@@ -151,20 +164,27 @@ export default function Select({ theme, value, options = [], onChange, placehold
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="listbox"
         aria-expanded={open}
-        className="w-full h-9 px-2.5 rounded-lg flex items-center gap-2 text-left transition-colors disabled:opacity-50"
+        className={`w-full rounded-lg flex items-center gap-2.5 text-left transition-colors disabled:opacity-50 ${scale.trigger}`}
         style={{ background: c.input, border: `1px solid ${open ? 'rgba(167,139,250,0.42)' : c.border}`, color: c.text }}
       >
-        {selectedOption?.icon && (
-          <img src={selectedOption.icon} alt="" className="w-4 h-4 rounded object-contain shrink-0" />
+        {selectedOption?.tone && (
+          <span
+            className="rounded-[3px] shrink-0"
+            style={{ width: 12, height: 12, background: `${selectedOption.tone}33`, border: `2px solid ${selectedOption.tone}` }}
+          />
         )}
-        <span className="text-[11px] font-mono truncate flex-1">{label}</span>
+        {selectedOption?.node && <span className="shrink-0 inline-flex" style={{ color: selectedOption.tone || c.label }}>{selectedOption.node}</span>}
+        {selectedOption?.icon && (
+          <img src={selectedOption.icon} alt="" className="rounded object-contain shrink-0" style={{ width: scale.icon, height: scale.icon }} />
+        )}
+        <span className={`font-mono truncate flex-1 ${scale.label}`}>{label}</span>
         {badgeLabel && (
-          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold shrink-0" style={{ background: c.surface, color: c.label }}>
+          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0" style={{ background: c.surface, color: c.label }}>
             {badgeLabel}
           </span>
         )}
         <CaretDown
-          size={12}
+          size={scale.caret}
           weight="bold"
           className="shrink-0 transition-transform duration-200"
           style={{ color: c.label, transform: open ? 'rotate(180deg)' : 'none' }}

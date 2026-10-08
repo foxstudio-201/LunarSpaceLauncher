@@ -14,7 +14,7 @@ import RichText from '../instance/RichText'
 import {
   Box, Chips, Stat, Leader, Banner, EnvRow, ReleaseChip, gameVersionList, followersOf, bytes, compact,
 } from '../instance/catalogBits'
-import { loaderIcon } from '../../api/client'
+import { loaderIcon, envIcon } from '../../api/client'
 import * as api from '../../api/client.js'
 
 const vn = (lang, vi, en) => (lang === 'vi' ? vi : en)
@@ -82,6 +82,7 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
 
   const [view, setView] = useState('list')
   const [fading, setFading] = useState(false)
+  const [stuck, setStuck] = useState(false)
   const [selected, setSelected] = useState(null)
   const [detail, setDetail] = useState(null)
   const [detailLoading, setDetailLoading] = useState(false)
@@ -141,6 +142,18 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
     setTotal(res.total || 0)
     setHits((prev) => (reset ? res.hits : [...prev, ...res.hits]))
   }, [source, applied, sort, filterGame, filterLoaderOuter, filterTag, filterEnv, envSupported, hits.length])
+
+  const loadMore = useCallback(() => {
+    if (loading || !hits.length || hits.length >= total) return
+    load({ reset: false })
+  }, [loading, hits.length, total, load])
+
+  const onListScroll = useCallback((event) => {
+    const el = event.currentTarget
+    const next = el.scrollTop > 4
+    setStuck((prev) => (prev === next ? prev : next))
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 480) loadMore()
+  }, [loadMore])
 
   useEffect(() => {
     const timer = setTimeout(() => setApplied(query.trim()), 340)
@@ -357,6 +370,100 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
     return list.length ? list.map((l) => LOADERS[l] || l).join(', ') : '—'
   }
 
+  const filters = (vertical) => (
+    <>
+      <div className={vertical ? 'flex flex-col gap-2' : 'flex items-center gap-2 flex-wrap'}>
+        <div className={vertical ? 'w-full' : 'w-[170px]'}>
+          <Select
+            theme={theme}
+            value={filterGame}
+            options={outerGameOptions.map((game) => ({ value: game, label: game, icon: loaderIcon('vanilla') }))}
+            onChange={setFilterGame}
+            placeholder={vn(lang, 'Mọi phiên bản game', 'Any game version')}
+          />
+        </div>
+        <div className={vertical ? 'w-full' : 'w-[140px]'}>
+          <Select
+            theme={theme}
+            value={filterLoaderOuter}
+            options={OUTER_LOADERS.map((item) => ({ value: item, label: item, icon: loaderIcon(item) }))}
+            onChange={setFilterLoaderOuter}
+            placeholder={vn(lang, 'Mọi loader', 'Any loader')}
+          />
+        </div>
+        <div className={vertical ? 'w-full' : 'w-[150px]'}>
+          <Select
+            theme={theme}
+            value={filterTag}
+            options={tagOptions}
+            onChange={setFilterTag}
+            placeholder={vn(lang, 'Mọi thẻ', 'Any tag')}
+          />
+        </div>
+        <div className={vertical ? 'w-full' : 'w-[160px]'}>
+          <Select
+            theme={theme}
+            value={filterEnv}
+            options={ENVS.map((value) => ({ value, label: vn(lang, ENV_LABELS[value][0], ENV_LABELS[value][1]), icon: envIcon(value) }))}
+            onChange={setFilterEnv}
+            disabled={!envSupported}
+            placeholder={vn(lang, 'Mọi môi trường', 'Any environment')}
+          />
+        </div>
+        {(filterGame || filterLoaderOuter || filterTag || filterEnv) && (
+          <button
+            onClick={() => { setFilterGame(''); setFilterLoaderOuter(''); setFilterTag(''); setFilterEnv('') }}
+            className={vertical ? 'h-9 w-full rounded-lg text-[11px] font-semibold' : 'h-9 px-2.5 rounded-lg text-[11px] font-semibold'}
+            style={{ background: c.input, border: `1px solid ${c.border}`, color: c.label }}
+          >
+            {vn(lang, 'Xoá lọc', 'Clear')}
+          </button>
+        )}
+        {!envSupported && (
+          <p className="w-full text-[10px] leading-relaxed" style={{ color: c.faint }}>
+            {vn(
+              lang,
+              'CurseForge không trả về dữ liệu máy khách/máy chủ qua API, nên bộ lọc môi trường chỉ dùng được với Modrinth.',
+              'CurseForge’s API exposes no client/server data, so the environment filter only works with Modrinth.',
+            )}
+          </p>
+        )}
+      </div>
+
+      <div className={vertical ? 'flex flex-col gap-2' : 'flex items-center gap-2.5'}>
+        <label className="relative flex-1 min-w-0 flex items-center">
+          <MagnifyingGlass size={14} className="absolute left-3 pointer-events-none" style={{ color: c.faint }} />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={vn(lang, 'Tìm modpack…', 'Search modpacks…')}
+            className="w-full h-9 pl-9 pr-8 rounded-lg text-[11px] outline-none"
+            style={{ background: c.input, border: `1px solid ${c.border}`, color: c.text }}
+          />
+          {query && (
+            <button onClick={() => setQuery('')} className="absolute right-2.5" style={{ color: c.faint }}>
+              <X size={12} weight="bold" />
+            </button>
+          )}
+        </label>
+        <div className={vertical ? 'w-full' : 'w-[168px] shrink-0'}>
+          <Select
+            theme={theme}
+            value={sort}
+            onChange={setSort}
+            options={(SORTS[source] || SORTS.modrinth).map((value) => ({
+              value,
+              label: vn(lang, SORT_LABELS[value][0], SORT_LABELS[value][1]),
+            }))}
+          />
+        </div>
+        <span className={`${vertical ? '' : 'hidden md:inline '}text-[10px] font-mono tabular-nums shrink-0`} style={{ color: c.faint }}>
+          {loading && !hits.length ? '· · ·' : `${hits.length}/${total}`}
+        </span>
+      </div>
+    </>
+  )
+
   return (
     <div data-surface className="h-full flex flex-col overflow-hidden" style={{ background: c.bg }}>
       {view === 'list' ? (
@@ -438,97 +545,10 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
 
       <div className={`flex-1 min-h-0 transition-opacity duration-200 ${fading ? 'opacity-0' : 'opacity-100'}`}>
         {view === 'list' ? (
-          <div ref={listRef} className="h-full overflow-y-auto">
+          <div className="h-full flex min-h-0">
+            <div ref={listRef} className="flex-1 min-w-0 overflow-y-auto" onScroll={onListScroll}>
             <div className="max-w-5xl mx-auto p-6 flex flex-col gap-4">
-              <div className="flex items-center gap-2 flex-wrap">
-                <div className="w-[170px]">
-                  <Select
-                    theme={theme}
-                    value={filterGame}
-                    options={outerGameOptions.map((game) => ({ value: game, label: game }))}
-                    onChange={setFilterGame}
-                    placeholder={vn(lang, 'Mọi phiên bản game', 'Any game version')}
-                  />
-                </div>
-                <div className="w-[140px]">
-                  <Select
-                    theme={theme}
-                    value={filterLoaderOuter}
-                    options={OUTER_LOADERS.map((item) => ({ value: item, label: item, icon: loaderIcon(item) }))}
-                    onChange={setFilterLoaderOuter}
-                    placeholder={vn(lang, 'Mọi loader', 'Any loader')}
-                  />
-                </div>
-                <div className="w-[150px]">
-                  <Select
-                    theme={theme}
-                    value={filterTag}
-                    options={tagOptions}
-                    onChange={setFilterTag}
-                    placeholder={vn(lang, 'Mọi thẻ', 'Any tag')}
-                  />
-                </div>
-                <div className="w-[160px]">
-                  <Select
-                    theme={theme}
-                    value={filterEnv}
-                    options={ENVS.map((value) => ({ value, label: vn(lang, ENV_LABELS[value][0], ENV_LABELS[value][1]) }))}
-                    onChange={setFilterEnv}
-                    disabled={!envSupported}
-                    placeholder={vn(lang, 'Mọi môi trường', 'Any environment')}
-                  />
-                </div>
-                {(filterGame || filterLoaderOuter || filterTag || filterEnv) && (
-                  <button
-                    onClick={() => { setFilterGame(''); setFilterLoaderOuter(''); setFilterTag(''); setFilterEnv('') }}
-                    className="h-9 px-2.5 rounded-lg text-[11px] font-semibold"
-                    style={{ background: c.input, border: `1px solid ${c.border}`, color: c.label }}
-                  >
-                    {vn(lang, 'Xoá lọc', 'Clear')}
-                  </button>
-                )}
-                {!envSupported && (
-                  <p className="w-full text-[10px] leading-relaxed" style={{ color: c.faint }}>
-                    {vn(
-                      lang,
-                      'CurseForge không trả về dữ liệu máy khách/máy chủ qua API, nên bộ lọc môi trường chỉ dùng được với Modrinth.',
-                      'CurseForge’s API exposes no client/server data, so the environment filter only works with Modrinth.',
-                    )}
-                  </p>
-                )}
-              </div>
-
-              <div className="flex items-center gap-2.5">
-                <label className="relative flex-1 min-w-0 flex items-center">
-                  <MagnifyingGlass size={14} className="absolute left-3 pointer-events-none" style={{ color: c.faint }} />
-                  <input
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    placeholder={vn(lang, 'Tìm modpack…', 'Search modpacks…')}
-                    className="w-full h-9 pl-9 pr-8 rounded-lg text-[11px] outline-none"
-                    style={{ background: c.input, border: `1px solid ${c.border}`, color: c.text }}
-                  />
-                  {query && (
-                    <button onClick={() => setQuery('')} className="absolute right-2.5" style={{ color: c.faint }}>
-                      <X size={12} weight="bold" />
-                    </button>
-                  )}
-                </label>
-                <div className="w-[168px] shrink-0">
-                  <Select
-                    theme={theme}
-                    value={sort}
-                    onChange={setSort}
-                    options={(SORTS[source] || SORTS.modrinth).map((value) => ({
-                      value,
-                      label: vn(lang, SORT_LABELS[value][0], SORT_LABELS[value][1]),
-                    }))}
-                  />
-                </div>
-                <span className="hidden md:inline text-[10px] font-mono tabular-nums shrink-0" style={{ color: c.faint }}>
-                  {loading && !hits.length ? '· · ·' : `${hits.length}/${total}`}
-                </span>
-              </div>
+              <div className="flex flex-col gap-4">{filters(false)}</div>
 
               {listError && <Banner c={c} text={listError} />}
 
@@ -563,6 +583,14 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
                 </>
               )}
             </div>
+            </div>
+            <aside
+              aria-hidden={!stuck}
+              className="shrink-0 overflow-hidden transition-[width] duration-200 ease-out"
+              style={{ width: stuck ? 236 : 0, visibility: stuck ? 'visible' : 'hidden', borderLeft: `1px solid ${stuck ? c.border : 'transparent'}`, background: c.bar }}
+            >
+              <div className="w-[236px] h-full overflow-y-auto p-3 flex flex-col gap-3">{filters(true)}</div>
+            </aside>
           </div>
         ) : (
           <div ref={detailRef} key={selected?.id || imported?.path || 'detail'} className="h-full flex flex-col min-h-0">
@@ -838,7 +866,7 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
                           <Select
                             theme={theme}
                             value={filterMc}
-                            options={mcOptions.map((mc) => ({ value: mc, label: mc }))}
+                            options={mcOptions.map((mc) => ({ value: mc, label: mc, icon: loaderIcon('vanilla') }))}
                             onChange={setFilterMc}
                             placeholder={vn(lang, 'Mọi phiên bản game', 'Any game version')}
                           />

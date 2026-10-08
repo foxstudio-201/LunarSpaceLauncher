@@ -15,6 +15,9 @@ const boost = require('./mc/boost.cjs')
 const presence = require('./presence.cjs')
 const modpack = require('./mc/modpack.cjs')
 const content = require('./mc/content.cjs')
+const contentIcons = require('./mc/icons.cjs')
+const iconRemote = require('./mc/iconremote.cjs')
+const nbt = require('./mc/nbt.cjs')
 const host = require('./host.cjs')
 const profileExport = require('./mc/export.cjs')
 const serverpack = require('./mc/serverpack.cjs')
@@ -1696,7 +1699,7 @@ function hostStop() {
   return host.tunnelStop()
 }
 
-async function contentSearch({ kind, source, query = '', sort = 'relevance', offset = 0, limit = 20, instanceId } = {}) {
+async function contentSearch({ kind, source, query = '', sort = 'relevance', offset = 0, limit = 20, instanceId, game, loader, category = '', environment = '' } = {}) {
   let entry = null
   try {
     entry = instanceId ? findEntry(instanceId) : null
@@ -1711,13 +1714,220 @@ async function contentSearch({ kind, source, query = '', sort = 'relevance', off
       sort,
       offset,
       limit,
-      game: entry?.version || '',
-      loader: entry?.loader || 'vanilla',
+      game: game === undefined ? entry?.version || '' : game,
+      loader: loader === undefined ? entry?.loader || 'vanilla' : loader,
+      category,
+      environment,
     })
     return { ok: true, ...res, target: entry ? { game: entry.version, loader: entry.loader, name: entry.name } : null }
   } catch (err) {
     return { ok: false, error: err.message, hits: [], total: 0 }
   }
+}
+
+async function contentTags({ kind, source } = {}) {
+  try {
+    return { ok: true, ...(await content.contentTags({ kind, source })) }
+  } catch (err) {
+    return { ok: false, error: err.message, options: [], environment: false }
+  }
+}
+
+let contentIconReader = null
+let contentIconDir = ''
+
+async function folderBytes(dir, cap = 40000) {
+  let total = 0
+  let seen = 0
+  const walk = async (current) => {
+    if (seen > cap) return
+    const entries = await fsp.readdir(current, { withFileTypes: true }).catch(() => [])
+    for (const entry of entries) {
+      if (seen > cap) return
+      const full = path.join(current, entry.name)
+      if (entry.isDirectory()) {
+        await walk(full)
+        continue
+      }
+      const st = await fsp.stat(full).catch(() => null)
+      if (st?.isFile()) {
+        total += st.size
+        seen += 1
+      }
+    }
+  }
+  await walk(dir)
+  return { bytes: total, truncated: seen > cap }
+}
+
+function worldDirOf(entry, world) {
+  const name = String(world || '').replace(/[\\/]/g, '').trim()
+  if (!name || name === '.' || name === '..') return null
+  return path.join(entry.dir, 'saves', name)
+}
+
+function worldFileOf(dir, file) {
+  const rel = String(file || '').replace(/\\/g, '/').replace(/^\/+/, '')
+  if (!rel || rel.split('/').some((part) => !part || part === '..' || part === '.')) return null
+  return path.join(dir, ...rel.split('/'))
+}
+
+async function worldTree({ id, world } = {}) {
+  let entry
+  try {
+    entry = findEntry(id)
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+  const dir = worldDirOf(entry, world)
+  if (!dir) return { ok: false, error: 'Tên thế giới không hợp lệ.' }
+  const stat = await fsp.stat(dir).catch(() => null)
+  if (!stat?.isDirectory()) return { ok: false, error: 'Không tìm thấy thế giới này.' }
+
+  const files = []
+  const add = async (rel) => {
+    const full = path.join(dir, ...rel.split('/'))
+    const info = await fsp.stat(full).catch(() => null)
+    if (info?.isFile()) {
+      const backup = await fsp.stat(`${full}.bak`).catch(() => null)
+      files.push({ rel, size: info.size, mtime: info.mtimeMs, bak: backup?.size || 0 })
+    }
+  }
+  await add('level.dat')
+  await add('level.dat_old')
+  for (const sub of ['playerdata', 'data', 'DIM-1/data', 'DIM1/data']) {
+    const list = await fsp.readdir(path.join(dir, ...sub.split('/'))).catch(() => [])
+    for (const name of list.filter((item) => /\.dat$/i.test(item)).sort()) await add(`${sub}/${name}`)
+  }
+
+  const summary = {}
+  try {
+    const root = await nbt.readFile(path.join(dir, 'level.dat'))
+    const data = (root.value || []).find((node) => node.name === 'Data')
+    const pick = (key) => (data?.value || []).find((node) => node.name === key)
+    summary.name = pick('LevelName')?.value || String(world)
+    summary.version = pick('version')?.value ?? null
+    summary.lastPlayed = String(pick('LastPlayed')?.value || '')
+    summary.gameType = pick('GameType')?.value ?? null
+    summary.difficulty = pick('Difficulty')?.value ?? null
+    summary.hardcore = !!pick('hardcore')?.value
+    summary.allowCommands = !!pick('allowCommands')?.value
+    summary.dayTime = pick('DayTime')?.value ?? null
+    summary.seed = String(pick('RandomSeed')?.value ?? '')
+    summary.spawn = ['SpawnX', 'SpawnY', 'SpawnZ'].map((key) => Number(pick(key)?.value ?? 0))
+    summary.hasPlayer = !!(data?.value || []).find((node) => node.name === 'Player')
+  } catch (err) {
+    summary.error = err.message
+  }
+
+  const size = await folderBytes(dir)
+  return {
+    ok: true,
+    world: {
+      name: String(world),
+      dir,
+      files,
+      summary,
+      players: files.filter((file) => file.rel.startsWith('playerdata/')).length,
+      bytes: size.bytes,
+      partial: size.truncated,
+      running: entry.status === 'running',
+    },
+  }
+}
+
+async function worldRead({ id, world, file } = {}) {
+  let entry
+  try {
+    entry = findEntry(id)
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+  const dir = worldDirOf(entry, world)
+  if (!dir) return { ok: false, error: 'Tên thế giới không hợp lệ.' }
+  const full = worldFileOf(dir, file)
+  if (!full) return { ok: false, error: 'Đường dẫn tệp không hợp lệ.' }
+  try {
+    const stat = await fsp.stat(full)
+    const root = await nbt.readFile(full)
+    return { ok: true, file: String(file), bytes: stat.size, root }
+  } catch (err) {
+    return { ok: false, error: `Không đọc được tệp NBT: ${err.message}` }
+  }
+}
+
+async function worldWrite({ id, world, file, root } = {}) {
+  let entry
+  try {
+    entry = findEntry(id)
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+  const dir = worldDirOf(entry, world)
+  if (!dir) return { ok: false, error: 'Tên thế giới không hợp lệ.' }
+  const full = worldFileOf(dir, file)
+  if (!full) return { ok: false, error: 'Đường dẫn tệp không hợp lệ.' }
+  if (!root || !Array.isArray(root.value)) return { ok: false, error: 'Dữ liệu NBT không hợp lệ.' }
+  try {
+    const res = await nbt.writeFile(full, root, { gzip: true, backup: true })
+    return { ok: true, bytes: res.bytes, backup: `${path.basename(full)}.bak` }
+  } catch (err) {
+    return { ok: false, error: `Không ghi được tệp NBT: ${err.message}` }
+  }
+}
+
+async function worldRestore({ id, world, file } = {}) {
+  let entry
+  try {
+    entry = findEntry(id)
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+  const dir = worldDirOf(entry, world)
+  if (!dir) return { ok: false, error: 'Tên thế giới không hợp lệ.' }
+  const full = worldFileOf(dir, file)
+  if (!full) return { ok: false, error: 'Đường dẫn tệp không hợp lệ.' }
+  const backup = `${full}.bak`
+  const info = await fsp.stat(backup).catch(() => null)
+  if (!info?.isFile()) return { ok: false, error: 'Chưa có bản sao .bak cho tệp này.' }
+  try {
+    const parsed = await nbt.readFile(backup)
+    await fsp.copyFile(backup, full)
+    return { ok: true, bytes: info.size, root: parsed }
+  } catch (err) {
+    return { ok: false, error: `Không khôi phục được: ${err.message}` }
+  }
+}
+
+async function folderIcons({ id, folder = 'mods', names = [], remote = true } = {}) {
+  let entry
+  try {
+    entry = findEntry(id)
+  } catch (err) {
+    return { ok: false, error: err.message, icons: {} }
+  }
+  const safe = String(folder || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+  if (!/^[A-Za-z0-9._-]+$/.test(safe)) return { ok: false, error: 'Thư mục không hợp lệ.', icons: {} }
+  const dir = path.join(entry.dir, safe)
+  const cacheDir = path.join(app.getPath('userData'), 'icon-cache')
+  if (!contentIconReader || contentIconDir !== cacheDir) {
+    contentIconReader = contentIcons.iconReader(cacheDir)
+    contentIconDir = cacheDir
+  }
+  const list = (Array.isArray(names) ? names : []).slice(0, 400)
+  const out = {}
+  await Promise.all(
+    list.map(async (name) => {
+      const uri = await contentIconReader(name, dir).catch(() => '')
+      if (uri) out[name] = uri
+    }),
+  )
+  const missing = list.filter((name) => !out[name])
+  if (remote && missing.length) {
+    const extra = await iconRemote.remoteIcons({ dir, names: missing, folder: safe, cacheDir }).catch(() => ({}))
+    Object.assign(out, extra)
+  }
+  return { ok: true, icons: out }
 }
 
 async function contentVersions({ kind, source, id, instanceId } = {}) {
@@ -2262,7 +2472,31 @@ async function contentChangelog({ source, id, versionId } = {}) {
   }
 }
 
-async function contentInstall({ kind, source, id, versionId, instanceId } = {}, emit) {
+async function contentInstalled({ kind, source, id, versionId, file, instanceId } = {}) {
+  let entry
+  try {
+    entry = findEntry(instanceId)
+  } catch (err) {
+    return { ok: false, error: err.message, matches: [] }
+  }
+  try {
+    const res = await content.installed({
+      kind,
+      source,
+      id,
+      versionId,
+      file,
+      game: entry.version,
+      loader: entry.loader,
+      root: entry.dir,
+    })
+    return { ok: true, ...res }
+  } catch (err) {
+    return { ok: false, error: err.message, matches: [] }
+  }
+}
+
+async function contentInstall({ kind, source, id, versionId, instanceId, remove = [] } = {}, emit) {
   let entry
   try {
     entry = findEntry(instanceId)
@@ -2290,8 +2524,20 @@ async function contentInstall({ kind, source, id, versionId, instanceId } = {}, 
       onProgress: (p) => emit?.({ type: 'progress', id: entry.id, phase: 'download', label: 'content', ...p }),
       onLog: log,
     })
+    const removed = []
+    if (Array.isArray(remove) && remove.length) {
+      for (const name of remove) {
+        const base = path.basename(String(name))
+        if (!base || res.failed?.includes(base)) continue
+        try {
+          await fsp.unlink(path.join(entry.dir, prepared.folder, base))
+          removed.push(base)
+        } catch {}
+      }
+      if (removed.length) log(`[LunarSpace] Đã xoá bản cũ: ${removed.join(', ')}`)
+    }
     emit?.({ type: 'progress', id: entry.id, phase: 'done', label: 'content', summary: res })
-    return { ok: true, ...res, folder: prepared.folder }
+    return { ok: true, ...res, folder: prepared.folder, removed }
   } catch (err) {
     emit?.({ type: 'progress', id: entry.id, phase: 'clear' })
     log(`[LunarSpace] Tải nội dung lỗi: ${err.message}`)
@@ -2373,6 +2619,12 @@ module.exports = {
   serverLocalStart,
   setBroadcast,
   contentSearch,
+  contentTags,
+  folderIcons,
+  worldTree,
+  worldRead,
+  worldWrite,
+  worldRestore,
   instanceModEnvs,
   hostStatus,
   hostInstallAgent,
@@ -2382,5 +2634,6 @@ module.exports = {
   contentVersions,
   contentProject,
   contentChangelog,
+  contentInstalled,
   contentInstall,
 }
