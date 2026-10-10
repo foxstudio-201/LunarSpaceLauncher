@@ -6,6 +6,7 @@ import ConsolePage from './ConsolePage'
 import FilesPage from './FilesPage'
 import TrashPage from './TrashPage'
 import SavesPage from './SavesPage'
+import MapPage from './MapPage'
 import InstanceSettingsPage from './InstanceSettingsPage'
 import ServerPackPage from './ServerPackPage'
 
@@ -62,6 +63,9 @@ export default function InstancePanel({
   }
   if (displayPage === 'instance-saves') {
     return <SavesPage instance={instance} theme={theme} lang={lang} />
+  }
+  if (displayPage === 'instance-map') {
+    return <MapPage instance={instance} theme={theme} lang={lang} />
   }
   if (displayPage === 'instance-serverpack') {
     return (

@@ -16,6 +16,7 @@ const presence = require('./presence.cjs')
 const modpack = require('./mc/modpack.cjs')
 const content = require('./mc/content.cjs')
 const contentIcons = require('./mc/icons.cjs')
+const filehash = require('./mc/filehash.cjs')
 const iconRemote = require('./mc/iconremote.cjs')
 const nbt = require('./mc/nbt.cjs')
 const host = require('./host.cjs')
@@ -1899,35 +1900,69 @@ async function worldRestore({ id, world, file } = {}) {
   }
 }
 
-async function folderIcons({ id, folder = 'mods', names = [], remote = true } = {}) {
+async function folderIcons({ id, folder = 'mods', names = [], remote = true, projects = true, cacheDir: given } = {}) {
   let entry
   try {
     entry = findEntry(id)
   } catch (err) {
-    return { ok: false, error: err.message, icons: {} }
+    return { ok: false, error: err.message, icons: {}, projects: {} }
   }
-  const safe = String(folder || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
-  if (!/^[A-Za-z0-9._-]+$/.test(safe)) return { ok: false, error: 'Thư mục không hợp lệ.', icons: {} }
+  const safe = String(folder || '').replace(/[\\/]+/g, '/').replace(/^\/+|\/+$/g, '')
+  if (!/^[A-Za-z0-9._-]+$/.test(safe)) return { ok: false, error: 'Thư mục không hợp lệ.', icons: {}, projects: {} }
   const dir = path.join(entry.dir, safe)
-  const cacheDir = path.join(app.getPath('userData'), 'icon-cache')
+  const cacheDir = given || path.join(app.getPath('userData'), 'icon-cache')
   if (!contentIconReader || contentIconDir !== cacheDir) {
-    contentIconReader = contentIcons.iconReader(cacheDir)
+    contentIconReader = contentIcons.iconUrlReader(cacheDir)
     contentIconDir = cacheDir
   }
   const list = (Array.isArray(names) ? names : []).slice(0, 400)
   const out = {}
-  await Promise.all(
-    list.map(async (name) => {
-      const uri = await contentIconReader(name, dir).catch(() => '')
-      if (uri) out[name] = uri
-    }),
-  )
+  let cursor = 0
+  const worker = async () => {
+    while (cursor < list.length) {
+      const name = list[cursor]
+      cursor += 1
+      const url = await contentIconReader(name, dir).catch(() => '')
+      if (url) out[name] = url
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(6, list.length) }, worker))
+  const titles = {}
+  let hashed = null
+  if (projects) {
+    const byName = await filehash.hashes({ dir, names: list, cacheDir })
+    hashed = byName
+    const shaList = [...byName.values()].filter(Boolean)
+    if (shaList.length) {
+      const known = await filehash.projects({
+        sha1List: shaList,
+        cacheDir,
+        fetcher: async (missing) => {
+          const found = new Map()
+          for (let i = 0; i < missing.length; i += 200) {
+            try {
+              const res = await content.projectHashes({ hashes: missing.slice(i, i + 200) })
+              for (const [hash, row] of res) found.set(hash, row)
+            } catch {}
+          }
+          return found
+        },
+      })
+      const byHash = new Map()
+      for (const [name, hash] of byName) if (hash) byHash.set(hash, name)
+      for (const [hash, row] of known) {
+        const name = byHash.get(hash)
+        if (name && row?.projectId) titles[name] = { source: row.source || 'modrinth', id: row.projectId }
+      }
+    }
+  }
   const missing = list.filter((name) => !out[name])
   if (remote && missing.length) {
-    const extra = await iconRemote.remoteIcons({ dir, names: missing, folder: safe, cacheDir }).catch(() => ({}))
-    Object.assign(out, extra)
+    const extra = await iconRemote.remoteIcons({ dir, names: missing, folder: safe, cacheDir, hashes: hashed || undefined }).catch(() => ({}))
+    Object.assign(out, extra.icons || {})
+    Object.assign(titles, extra.projects || {})
   }
-  return { ok: true, icons: out }
+  return { ok: true, icons: out, projects: titles, missing }
 }
 
 async function contentVersions({ kind, source, id, instanceId } = {}) {
@@ -2464,6 +2499,158 @@ async function serverTestStopAll() {
   return { ok: true, ids: servertest.runningIds() }
 }
 
+const worldmap = require('./mc/worldmap.cjs')
+
+async function mapInfo({ id, serverId } = {}) {
+  let src
+  try {
+    src = serverpackSource({ id, serverId })
+  } catch (err) {
+    return { ok: false, error: err.message, dims: {}, cached: [] }
+  }
+  const cacheDir = path.join(app.getPath('userData'), 'map-cache')
+  const worlds = []
+  const savesDir = path.join(src.dir, 'saves')
+  const names = await fsp.readdir(savesDir).catch(() => [])
+  for (const name of names) {
+    const dir = path.join(savesDir, name)
+    const stat = await fsp.stat(dir).catch(() => null)
+    if (!stat?.isDirectory()) continue
+    const info = await worldmap.mapInfo({ dir, cacheDir })
+    worlds.push({ name, dir, dims: info.dims || {}, cached: info.cached || [], regions: Object.values(info.dims || {}).reduce((sum, row) => sum + (row.regions || 0), 0) })
+  }
+  if (!worlds.length) return { ok: false, error: 'Chưa có thế giới nào trong saves/.', dims: {}, cached: [], worlds: [] }
+  const withData = worlds.filter((item) => item.regions > 0)
+  const first = withData[0] || worlds[0]
+  const info = await worldmap.mapInfo({ dir: first.dir, cacheDir })
+  return { ok: true, worlds, ...info, world: first.name, dir: first.dir }
+}
+
+async function mapWorldInfo({ id, world, serverId } = {}) {
+  let src
+  try {
+    src = serverpackSource({ id, serverId })
+  } catch (err) {
+    return { ok: false, error: err.message, dims: {}, cached: [] }
+  }
+  const dir = path.join(src.dir, 'saves', String(world || '').replace(/[\/]/g, '').trim())
+  const stat = await fsp.stat(dir).catch(() => null)
+  if (!stat?.isDirectory()) return { ok: false, error: 'Không tìm thấy thế giới này.', dims: {}, cached: [] }
+  const cacheDir = path.join(app.getPath('userData'), 'map-cache')
+  const info = await worldmap.mapInfo({ dir, cacheDir })
+  return { ok: true, dir, ...info }
+}
+
+async function surfaceJars(entry, settings = {}) {
+  const shared = settings.sharedDir || path.join(app.getPath('userData'), 'shared')
+  const version = String(entry.version || '').trim()
+  const jars = []
+  for (const id of [entry.versionId, version]) {
+    if (!id) continue
+    const file = path.join(shared, 'versions', id, `${id}.jar`)
+    const stat = await fsp.stat(file).catch(() => null)
+    if (stat?.isFile()) {
+      jars.push(file)
+      break
+    }
+  }
+  for (const folder of ['resourcepacks', 'mods']) {
+    const dir = path.join(entry.dir, folder)
+    const names = await fsp.readdir(dir).catch(() => [])
+    for (const name of names.sort()) {
+      if (!/\.(jar|zip)$/i.test(name)) continue
+      const file = path.join(dir, name)
+      const stat = await fsp.stat(file).catch(() => null)
+      if (stat?.isFile()) jars.push(file)
+    }
+  }
+  return jars
+}
+
+async function mapRender({ id, world, dimension = 'overworld', scale = 0, shading = true, trim = true, fresh = false, style = 'xaero', token, serverId, settings } = {}, emit) {
+  let src
+  try {
+    src = serverpackSource({ id, serverId })
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+  const dir = path.join(src.dir, 'saves', String(world || '').replace(/[\/]/g, '').trim())
+  const stat = await fsp.stat(dir).catch(() => null)
+  if (!stat?.isDirectory()) return { ok: false, error: 'Không tìm thế giới này.' }
+  const cacheDir = path.join(app.getPath('userData'), 'map-cache')
+  const started = Date.now()
+  const useSurface = style !== 'table'
+  const jars = useSurface ? await surfaceJars({ dir: src.dir, version: src.version, versionId: src.versionId }, settings) : []
+  const res = await worldmap.renderMap({
+    dir,
+    dimension,
+    scale: Number(scale) || 0,
+    shading: !!shading,
+    trim: !!trim,
+    fresh: !!fresh,
+    cacheDir,
+    surface: useSurface ? { jars, cacheDir, version: `${src.version || ''}-${jars.length}` } : null,
+    onProgress: (row) => emit?.({ type: 'map', token, phase: 'progress', ...row }),
+  })
+  if (!res?.ok) {
+    emit?.({ type: 'map', token, phase: 'error', error: res?.error || 'error' })
+    return res
+  }
+  emit?.({
+    type: 'map',
+    token,
+    phase: 'done',
+    done: res.meta?.regions || 0,
+    total: res.meta?.regions || 0,
+    chunks: res.meta?.chunks || 0,
+    cached: !!res.cached,
+    ms: Date.now() - started,
+  })
+  return res
+}
+
+async function mapClear({ id, world, all = false, serverId } = {}) {
+  const cacheDir = path.join(app.getPath('userData'), 'map-cache')
+  let dir = null
+  if (world && !all) {
+    try {
+      const src = serverpackSource({ id, serverId })
+      const candidate = path.join(src.dir, 'saves', String(world).replace(/[\/]/g, '').trim())
+      const stat = await fsp.stat(candidate).catch(() => null)
+      if (stat?.isDirectory()) dir = candidate
+    } catch {}
+  }
+  const res = await worldmap.clearCache({ dir, cacheDir, all: !!all || !dir })
+  return res
+}
+
+function mapCancel() {
+  worldmap.setCancel(true)
+  return { ok: true }
+}
+
+async function mapSave({ file, name } = {}) {
+  const cacheDir = path.join(app.getPath('userData'), 'map-cache')
+  const safe = String(file || '').replace(/[^A-Za-z0-9._-]/g, '')
+  if (!safe) return { ok: false, error: 'Không có tệp bản đồ.' }
+  const source = path.join(cacheDir, safe)
+  const stat = await fsp.stat(source).catch(() => null)
+  if (!stat?.isFile()) return { ok: false, error: 'Tệp bản đồ không tồn tại.' }
+  const label = String(name || 'world-map').replace(/[\/:*?"<>|]/g, '_').trim() || 'world-map'
+  return { ok: true, source, suggested: `${label}.png` }
+}
+
+async function mapRevealCache() {
+  const cacheDir = path.join(app.getPath('userData'), 'map-cache')
+  await fsp.mkdir(cacheDir, { recursive: true }).catch(() => {})
+  shell.openPath(cacheDir).catch(() => {})
+  return { ok: true, dir: cacheDir }
+}
+
+async function contentPreview(opts = {}) {
+  return content.projectPreview(opts)
+}
+
 async function contentChangelog({ source, id, versionId } = {}) {
   try {
     return { ok: true, ...(await content.changelog({ source, id, versionId })) }
@@ -2625,6 +2812,14 @@ module.exports = {
   worldRead,
   worldWrite,
   worldRestore,
+  contentPreview,
+  mapInfo,
+  mapWorldInfo,
+  mapRender,
+  mapCancel,
+  mapClear,
+  mapSave,
+  mapRevealCache,
   instanceModEnvs,
   hostStatus,
   hostInstallAgent,

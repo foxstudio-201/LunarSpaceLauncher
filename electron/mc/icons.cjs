@@ -123,4 +123,35 @@ function uriFor(ext, data) {
   return `data:${MIME[ext] || 'image/png'};base64,${data.toString('base64')}`
 }
 
-module.exports = { iconReader, stripSuffix, iconKey, iconPath, resolvePath, readCached, saveIcon, uriFor, MIME, MAX_BYTES }
+
+function iconUrlReader(cacheDir) {
+  const memory = new Map()
+  return async function iconUrl(name, dir) {
+    if (!name || !dir) return ''
+    const file = await resolvePath(name, dir)
+    if (!file) return ''
+    const stat = await fsp.stat(file).catch(() => null)
+    if (!stat || !stat.isFile()) return ''
+    const key = iconKey(file, stat)
+    if (memory.has(key)) return memory.get(key)
+    for (const ext of Object.keys(MIME)) {
+      const hit = await fsp.stat(path.join(cacheDir, `${key}${ext}`)).catch(() => null)
+      if (hit?.isFile()) {
+        const url = `lsicon://i/${key}${ext}`
+        memory.set(key, url)
+        return url
+      }
+    }
+    const found = extract(file)
+    if (!found) {
+      memory.set(key, '')
+      return ''
+    }
+    await saveIcon(cacheDir, key, found.ext, found.data)
+    const url = `lsicon://i/${key}${found.ext}`
+    memory.set(key, url)
+    return url
+  }
+}
+
+module.exports = { iconReader, iconUrlReader, stripSuffix, iconKey, iconPath, resolvePath, readCached, saveIcon, uriFor, MIME, MAX_BYTES }

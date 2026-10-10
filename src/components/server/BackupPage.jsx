@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
+import useProgressive from '../ui/useProgressive'
 import {
   Archive, Plus, Trash, ArrowClockwise, Download, Warning, HardDrive,
   PencilSimple, LockSimple, LockSimpleOpen, DotsThreeVertical, X,
@@ -275,6 +276,7 @@ export default function BackupPage({ server, theme, lang }) {
       String(b.checksum || '').toLowerCase().includes(q)
     )
   }, [backups, search])
+  const progressive = useProgressive(filtered.length, { first: 12 })
 
   const openCreate = () => {
     setCreateForm({ name: generateBackupName(), ignoredFiles: '' })
@@ -453,7 +455,7 @@ export default function BackupPage({ server, theme, lang }) {
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto pr-1">
+      <div className="stream-items flex-1 overflow-y-auto pr-1">
         {filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 gap-2">
             <Archive size={40} weight="duotone" style={{ color: labelColor, opacity: 0.3 }} />
@@ -494,7 +496,7 @@ export default function BackupPage({ server, theme, lang }) {
               <span>{lang === 'vi' ? 'Khóa' : 'Lock'}</span>
               <span />
             </div>
-            {filtered.map((b) => {
+            {filtered.slice(0, progressive).map((b) => {
               const isBusy = busyId === b.uuid
               const prog = progressMap[b.uuid]
               const isRunning = b.status === 'running' || b.status === 'pending' || (!!prog && !b.completed)

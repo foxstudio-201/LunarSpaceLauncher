@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
-import { User, Plus, Check, Trash, Copy, Warning, Info, ArrowsClockwise } from '@phosphor-icons/react'
+import { User, Plus, Check, Trash, Copy, Warning, Info, ArrowsClockwise, DiscordLogo, X } from '@phosphor-icons/react'
 import { t } from '../../i18n/translations'
 import { palette } from '../../lib/palette'
 import PageHeader from '../ui/PageHeader'
 import HeadSkin from '../ui/HeadSkin'
 import AddAccountModal from '../accounts/AddAccountModal.jsx'
+import DiscordLinkModal from '../accounts/DiscordLinkModal.jsx'
 import * as api from '../../api/client.js'
 
 const TYPE_LABELS = {
@@ -19,6 +20,48 @@ export default function AccountsPage({ theme, lang, accounts, activeAccountId, o
   const [error, setError] = useState('')
   const [flash, setFlash] = useState(null)
   const [refreshing, setRefreshing] = useState('')
+  const [links, setLinks] = useState([])
+  const [discord, setDiscord] = useState(null)
+
+  const loadLinks = useCallback(async () => {
+    const res = await api.discordLinkList()
+    setLinks(res?.ok && Array.isArray(res.items) ? res.items : [])
+    return res
+  }, [])
+
+  useEffect(() => {
+    loadLinks()
+  }, [loadLinks])
+
+  useEffect(() => {
+    const off = api.onDiscordEvent((event) => {
+      if (!event) return
+      if (event.type === 'linked') {
+        loadLinks()
+      } else if (event.type === 'unlinked') {
+        loadLinks()
+        notify(t(lang, 'discord.unlinked'))
+      }
+    })
+    api.discordLinkPending().then((res) => {
+      if (res?.event?.type === 'linked') loadLinks()
+    })
+    return off
+  }, [lang, loadLinks])
+
+  const linkOf = (account) => links.find((item) => item.accountUuid === account.uuid || item.accountId === account.id) || null
+
+  const openDiscord = (options) => setDiscord(options || { start: false })
+
+  const unlink = async (account) => {
+    const res = await api.discordLinkUnlink({ accountId: account.id })
+    if (!res?.ok) {
+      notify(res?.error || 'error', 'bad')
+      return
+    }
+    notify(t(lang, 'discord.unlinked'))
+    loadLinks()
+  }
 
   useEffect(() => {
     if (!flash) return undefined
@@ -85,6 +128,14 @@ export default function AccountsPage({ theme, lang, accounts, activeAccountId, o
           {list.length} {t(lang, 'files.items')}
         </span>
         <button
+          onClick={() => openDiscord({ start: false })}
+          className="h-9 px-3 rounded-lg text-xs font-semibold flex items-center gap-2"
+          style={{ background: c.input, border: `1px solid ${c.border}`, color: c.text }}
+        >
+          <DiscordLogo size={14} weight="duotone" style={{ color: '#5865f2' }} />
+          {t(lang, 'discord.link')}
+        </button>
+        <button
           onClick={() => { setAdding(true); setError('') }}
           className="h-9 px-3 rounded-lg text-xs font-semibold flex items-center gap-2"
           style={{ background: c.accent, color: '#12081f' }}
@@ -135,6 +186,16 @@ export default function AccountsPage({ theme, lang, accounts, activeAccountId, o
                         >
                           {t(lang, TYPE_LABELS[account.type] || 'accounts.kind.offline')}
                         </span>
+                        {linkOf(account) && (
+                          <span
+                            className="flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded shrink-0"
+                            style={{ background: 'rgba(88,101,242,0.16)', color: '#8b95f7' }}
+                            data-tip={linkOf(account).discordTag || linkOf(account).discordId}
+                          >
+                            <DiscordLogo size={10} weight="fill" />
+                            {linkOf(account).label || linkOf(account).discordName || linkOf(account).discordTag}
+                          </span>
+                        )}
                       </div>
                       <button
                         onClick={() => copyUuid(account.uuid)}
@@ -145,6 +206,26 @@ export default function AccountsPage({ theme, lang, accounts, activeAccountId, o
                         <Copy size={11} style={{ color: c.faint }} />
                       </button>
                     </div>
+                    {linkOf(account) ? (
+                      <button
+                        onClick={() => unlink(account)}
+                        data-tip={t(lang, 'discord.unlink')}
+                        className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
+                        style={{ background: 'rgba(88,101,242,0.14)', border: '1px solid rgba(88,101,242,0.4)', color: '#8b95f7' }}
+                      >
+                        <X size={12} weight="bold" />
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => openDiscord({ accountId: account.id, name: account.name, start: true })}
+                        data-tip={t(lang, 'discord.link')}
+                        className="h-7 px-2 rounded-md flex items-center gap-1.5 shrink-0 text-[10px] font-bold"
+                        style={{ background: 'rgba(88,101,242,0.12)', border: '1px solid rgba(88,101,242,0.35)', color: '#8b95f7' }}
+                      >
+                        <DiscordLogo size={12} weight="fill" />
+                        {t(lang, 'discord.link')}
+                      </button>
+                    )}
                     {online && (
                       <button
                         onClick={() => refresh(account)}
@@ -192,10 +273,25 @@ export default function AccountsPage({ theme, lang, accounts, activeAccountId, o
           lang={lang}
           notify={notify}
           onClose={() => setAdding(false)}
+          onDiscordLink={({ name }) => openDiscord({ name, start: true })}
           onAdded={async (nextAccounts, nextActive) => {
             setError('')
             onAccountsChanged?.(nextAccounts, nextActive)
           }}
+        />
+      )}
+
+      {discord && (
+        <DiscordLinkModal
+          theme={theme}
+          lang={lang}
+          accounts={list}
+          initialAccountId={discord.accountId}
+          initialName={discord.name || ''}
+          startImmediately={!!discord.start}
+          notify={notify}
+          onChanged={loadLinks}
+          onClose={() => setDiscord(null)}
         />
       )}
     </div>

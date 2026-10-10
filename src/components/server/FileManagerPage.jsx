@@ -4,6 +4,7 @@ import {
   FloppyDisk, Warning, CaretRight, ListBullets, DotsThreeVertical, Download, PencilSimple,
   UploadSimple, MagnifyingGlass, X,
 } from '@phosphor-icons/react'
+import useVirtual from '../ui/useVirtual'
 
 const isElectron = typeof window !== 'undefined' && window.electronAPI
 
@@ -295,6 +296,9 @@ export default function FileManagerPage({ server, theme, lang }) {
     if (!needle) return files
     return files.filter((f) => String(f.name || '').toLowerCase().includes(needle))
   })()
+  const listRef = useRef(null)
+  const rowsRef = useRef(null)
+  const virtual = useVirtual({ containerRef: listRef, wrapRef: rowsRef, count: filteredFiles.length, rowHeight: 41, overscan: 6 })
 
   useEffect(() => {
     if (editingFile) {
@@ -856,6 +860,7 @@ export default function FileManagerPage({ server, theme, lang }) {
 
       {/* File list */}
       <div
+        ref={listRef}
         className="flex-1 overflow-y-auto mx-3 mb-3 rounded-b-lg"
         style={{ background: surface, border: `1px solid ${borderColor}`, borderTop: 'none' }}
       >
@@ -895,7 +900,9 @@ export default function FileManagerPage({ server, theme, lang }) {
             </button>
           </div>
         ) : (
-          filteredFiles.map((f) => {
+          <div ref={rowsRef} className="stream-items">
+          <div style={{ height: virtual.padTop }} aria-hidden />
+          {filteredFiles.slice(virtual.start, virtual.end).map((f) => {
             const isSelected = selected === f.name
             const isDropHot = f.is_dir && dropTarget === f.name
             return (
@@ -976,7 +983,9 @@ export default function FileManagerPage({ server, theme, lang }) {
                 </div>
               </div>
             )
-          })
+          })}
+          <div style={{ height: virtual.padBottom }} aria-hidden />
+          </div>
         )}
       </div>
 

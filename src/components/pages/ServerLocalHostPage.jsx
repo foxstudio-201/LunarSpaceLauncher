@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import useProgressive from '../ui/useProgressive'
 import {
   ChartLineUp, Terminal, Files, Database, Clock, Users, Archive, Network, Play, GearSix,
   ArrowLeft, Plus, Trash, Cube, ArrowClockwise, Stop, X, HardDrives, WarningCircle,
@@ -60,12 +61,14 @@ function statusLabel(status, lang) {
 export default function ServerLocalHostPage({ theme, lang, instances, server, displayPage, onSelect, onUpdate, onDeleted }) {
   const c = palette(theme)
   const [servers, setServers] = useState([])
+  const progressiveServers = useProgressive(servers.length, { first: 8 })
   const [eggs, setEggs] = useState([])
   const [creating, setCreating] = useState(false)
   const [deleting, setDeleting] = useState(null)
   const [busy, setBusy] = useState('')
   const [trashOpen, setTrashOpen] = useState(false)
   const [trashItems, setTrashItems] = useState([])
+  const progressiveTrash = useProgressive(trashItems.length, { first: 12 })
   const [trashBusy, setTrashBusy] = useState('')
   const [purgeAsk, setPurgeAsk] = useState(null)
 
@@ -224,8 +227,8 @@ export default function ServerLocalHostPage({ theme, lang, instances, server, di
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-            {servers.map((srv) => {
+          <div className="stream-items grid grid-cols-1 xl:grid-cols-2 gap-3">
+            {servers.slice(0, progressiveServers).map((srv) => {
               const color = statusColor(srv.status)
               const running = srv.status === 'running'
               return (
@@ -319,7 +322,7 @@ export default function ServerLocalHostPage({ theme, lang, instances, server, di
                 <X size={13} weight="bold" />
               </button>
             </div>
-            <div className="max-h-[60vh] overflow-y-auto p-3 flex flex-col gap-2">
+            <div className="stream-items max-h-[60vh] overflow-y-auto p-3 flex flex-col gap-2">
               <p className="px-1 text-[10px] leading-relaxed" style={{ color: c.faint }}>
                 {vn(
                   lang,
@@ -332,7 +335,7 @@ export default function ServerLocalHostPage({ theme, lang, instances, server, di
                   {vn(lang, 'Thùng rác trống', 'Trash is empty')}
                 </p>
               )}
-              {trashItems.map((item) => (
+              {trashItems.slice(0, progressiveTrash).map((item) => (
                 <div key={item.trashId} className="rounded-xl px-3 py-2.5 flex items-center gap-3" style={{ background: c.input, border: `1px solid ${c.border}` }}>
                   <Cube size={18} weight="duotone" style={{ color: c.accent }} />
                   <div className="flex-1 min-w-0">

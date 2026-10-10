@@ -18,7 +18,7 @@ export function TypeChip({ type, size = 10 }) {
 export function Section({ c, title, icon: Icon, right, children, defaultOpen = true }) {
   const [on, setOn] = useState(defaultOpen)
   return (
-    <div className="rounded-lg overflow-hidden" style={{ background: c.input, border: `1px solid ${c.border}` }}>
+    <div className="rounded-lg overflow-hidden shrink-0" style={{ background: c.input, border: `1px solid ${c.border}` }}>
       <button
         onClick={() => setOn((prev) => !prev)}
         className="w-full flex items-center gap-2 px-3 h-9"

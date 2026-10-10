@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
   Play, Stop, Clock, CalendarBlank, Cube, Memory, FolderOpen, Terminal, ArrowsClockwise,
-  PuzzlePiece, Archive, Image, PaintBrush, CaretRight,
-} from '@phosphor-icons/react'
+  PuzzlePiece, Archive, Image, PaintBrush, CaretRight, MapTrifold } from '@phosphor-icons/react'
 import { t } from '../../i18n/translations'
 import { palette } from '../../lib/palette'
 import { statusColor, statusKey, formatPlaytime, formatDate, timeAgo } from '../../lib/status'
@@ -180,6 +179,7 @@ export default function OverviewPage({
                 {[
                   { key: 'mods', page: 'instance-mods', icon: <PuzzlePiece size={13} weight="duotone" />, label: vn(lang, 'Mod', 'Mods') },
                   { key: 'saves', page: 'instance-saves', icon: <Archive size={13} weight="duotone" />, label: vn(lang, 'Bản lưu thế giới', 'World saves') },
+                  { key: 'map', page: 'instance-map', icon: <MapTrifold size={13} weight="duotone" />, label: vn(lang, 'Bản đồ thế giới', 'World map') },
                   { key: 'resourcepacks', page: 'instance-resourcepacks', icon: <Image size={13} weight="duotone" />, label: vn(lang, 'Gói tài nguyên', 'Resource packs') },
                   { key: 'shaderpacks', page: 'instance-shaderpacks', icon: <PaintBrush size={13} weight="duotone" />, label: vn(lang, 'Shader', 'Shaders') },
                 ].map((row) => (

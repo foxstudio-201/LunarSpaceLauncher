@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Check, DotsThreeVertical, FolderOpen, Trash, UploadSimple,
   ArrowsClockwise, Warning, Power, ProhibitInset, DownloadSimple,
 } from '@phosphor-icons/react'
 import { t } from '../../i18n/translations'
+import HoverPreview from '../ui/HoverPreview'
+import useVirtual from '../ui/useVirtual'
 import { palette } from '../../lib/palette'
 import { sizeLabel, stampLabel } from '../../lib/files'
 import ProgressBar from '../ui/ProgressBar'
@@ -46,29 +48,70 @@ export default function ContentFolderPage({
   const [busy, setBusy] = useState(0)
   const [envs, setEnvs] = useState({})
   const [icons, setIcons] = useState({})
+  const [projects, setProjects] = useState({})
   const [iconFail, setIconFail] = useState(() => new Set())
+  const requested = useRef(new Set())
+  const listRef = useRef(null)
+  const rowsRef = useRef(null)
   const isMods = folder === 'mods'
   const grid = isMods ? GRID_MODS : GRID
 
   const entryKey = entries.map((e) => e.name).join('|')
 
+  const iconNames = useMemo(() => entries.filter((item) => !item.dir).map((item) => item.name), [entryKey])
+  const iconKey = iconNames.join('|')
+
   useEffect(() => {
-    if (!instance) return undefined
-    const names = entries.filter((e) => !e.dir).map((e) => e.name)
-    if (!names.length) {
-      setIcons({})
-      return undefined
-    }
+    requested.current = new Set()
+    setIcons({})
+    setProjects({})
+    setIconFail(new Set())
+  }, [folder, instance?.id, entryKey])
+
+  useEffect(() => {
+    if (!instance || !iconNames.length) return undefined
     let alive = true
-    api.folderIcons({ id: instance.id, folder, names })
-      .then((res) => {
-        if (!alive || !res?.ok) return
-        setIcons(res.icons || {})
-        setIconFail(new Set())
-      })
-      .catch(() => {})
+    const collected = {}
+    const run = async () => {
+      for (let i = 0; i < iconNames.length && alive; i += 24) {
+        const batch = iconNames.slice(i, i + 24).filter((name) => !requested.current.has(name))
+        if (!batch.length) continue
+        batch.forEach((name) => requested.current.add(name))
+        const res = await api.folderIcons({ id: instance.id, folder, names: batch, projects: false, remote: false }).catch(() => null)
+        if (!alive) return
+        const next = res?.ok ? res.icons : null
+        if (next && Object.keys(next).length) {
+          Object.assign(collected, next)
+          setIcons((prev) => ({ ...prev, ...next }))
+        }
+      }
+      for (let i = 0; i < iconNames.length && alive; i += 40) {
+        const batch = iconNames.slice(i, i + 40)
+        const res = await api.folderIcons({ id: instance.id, folder, names: batch }).catch(() => null)
+        if (!alive) return
+        if (res?.ok) {
+          Object.assign(collected, res.icons || {})
+          const meta = res.projects || {}
+          if (Object.keys(res.icons || {}).length) setIcons((prev) => ({ ...prev, ...res.icons }))
+          if (Object.keys(meta).length) setProjects((prev) => ({ ...prev, ...meta }))
+        }
+      }
+      const retry = iconNames.filter((name) => !collected[name])
+      for (let i = 0; i < retry.length && alive; i += 12) {
+        const batch = retry.slice(i, i + 12)
+        const res = await api.folderIcons({ id: instance.id, folder, names: batch }).catch(() => null)
+        if (!alive) return
+        if (res?.ok) {
+          Object.assign(collected, res.icons || {})
+          const meta = res.projects || {}
+          if (Object.keys(res.icons || {}).length) setIcons((prev) => ({ ...prev, ...res.icons }))
+          if (Object.keys(meta).length) setProjects((prev) => ({ ...prev, ...meta }))
+        }
+      }
+    }
+    run()
     return () => { alive = false }
-  }, [instance?.id, folder, entryKey])
+  }, [instance?.id, folder, iconKey])
 
   useEffect(() => {
     if (!isMods || !instance) {
@@ -228,6 +271,7 @@ export default function ContentFolderPage({
 
   const needle = query.trim().toLowerCase()
   const shown = needle ? entries.filter((entry) => String(entry.name || '').toLowerCase().includes(needle)) : entries
+  const virtual = useVirtual({ containerRef: listRef, wrapRef: rowsRef, count: shown.length, rowHeight: 41, overscan: 6 })
   const allSelected = shown.length > 0 && selected.every((name) => shown.some((entry) => entry.name === name))
   const toggleAll = () => setSelected(allSelected ? [] : entries.map((e) => e.name))
 
@@ -461,6 +505,7 @@ export default function ContentFolderPage({
       </div>
 
       <div
+        ref={listRef}
         className="flex-1 min-h-0 overflow-y-auto mx-3 mb-3 rounded-b-lg"
         style={{ background: c.surface, borderLeft: `1px solid ${c.border}`, borderRight: `1px solid ${c.border}`, borderBottom: `1px solid ${c.border}`, borderTop: 'none' }}
         onDragOver={(e) => {
@@ -480,13 +525,24 @@ export default function ContentFolderPage({
             <span className="text-[12px]" style={{ color: c.label }}>{emptyHint}</span>
           </div>
         ) : (
-          shown.map((entry) => {
+          <div ref={rowsRef} className="stream-items">
+          <div style={{ height: virtual.padTop }} aria-hidden />
+          {shown.slice(virtual.start, virtual.end).map((entry) => {
             const isSelected = selected.includes(entry.name)
             const isMenu = menu?.name === entry.name
             const enabled = !entry.disabled
+            const meta = projects[entry.name]
             return (
-              <div
+              <HoverPreview
                 key={entry.name}
+                theme={theme}
+                lang={lang}
+                kind={folder}
+                hit={{ name: entry.name.replace(/\.disabled$/, '').replace(/\.txt$/, ''), icon: icons[entry.name], source: meta?.source }}
+                disabled={!meta}
+                load={meta ? () => api.contentPreview({ source: meta.source, id: meta.id }) : null}
+              >
+              <div
                 onClick={() => onRowClick(entry)}
                 className="grid items-center px-3 cursor-pointer group"
                 style={{
@@ -562,8 +618,11 @@ export default function ContentFolderPage({
                   )}
                 </div>
               </div>
+              </HoverPreview>
             )
-          })
+          })}
+          <div style={{ height: virtual.padBottom }} aria-hidden />
+          </div>
         )}
       </div>
 

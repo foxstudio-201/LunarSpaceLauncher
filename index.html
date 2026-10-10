@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="vi">
+<html lang="vi" data-skin="pixel">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta
     http-equiv="Content-Security-Policy"
-    content="default-src 'self' file:; script-src 'self' file: 'unsafe-inline'; style-src 'self' file: 'unsafe-inline'; img-src 'self' file: data: blob: https:; font-src 'self' file: data:; connect-src 'self' file: http://localhost:* ws://localhost:* wss://localhost:* http://127.0.0.1:* ws://127.0.0.1:* https:; object-src 'none'; base-uri 'self'; form-action 'none'"
+    content="default-src 'self' file:; script-src 'self' file: 'unsafe-inline'; style-src 'self' file: 'unsafe-inline'; img-src 'self' file: data: blob: https: lsicon: lsmap:; font-src 'self' file: data:; connect-src 'self' file: http://localhost:* ws://localhost:* wss://localhost:* http://127.0.0.1:* ws://127.0.0.1:* https:; object-src 'none'; base-uri 'self'; form-action 'none'"
   />
   <title>LunarSpace Launcher</title>
   <link rel="icon" type="image/png" href="/favicon.png" />
@@ -14,10 +14,9 @@
       var q = new URLSearchParams(location.search)
       var theme = q.get('theme') === 'light' ? 'light' : q.get('theme') === 'dark' ? 'dark' : ''
       var lang = q.get('lang') === 'en' ? 'en' : q.get('lang') === 'vi' ? 'vi' : ''
-      var skin = q.get('skin') === 'pixel' ? 'pixel' : 'default'
       if (theme) document.documentElement.setAttribute('data-theme', theme)
-      document.documentElement.setAttribute('data-skin', skin)
-      window.__boot = { theme: theme || 'dark', lang: lang || 'vi', skin: skin }
+      document.documentElement.setAttribute('data-skin', 'pixel')
+      window.__boot = { theme: theme || 'dark', lang: lang || 'vi' }
     })()
   </script>
   <style>

@@ -67,8 +67,9 @@ async function pool(items, limit, worker) {
   return out
 }
 
-async function remoteIcons({ dir, names = [], folder = 'mods', cacheDir, limit = 120 }) {
+async function remoteIcons({ dir, names = [], folder = 'mods', cacheDir, limit = 120, hashes: given }) {
   const out = {}
+  const titles = {}
   const targets = []
   const store = await loadUrls(cacheDir)
   for (const name of names.slice(0, limit)) {
@@ -88,10 +89,17 @@ async function remoteIcons({ dir, names = [], folder = 'mods', cacheDir, limit =
     }
     targets.push({ name, file, key, stat })
   }
-  if (!targets.length) return out
+  if (!targets.length) return { icons: out, projects: titles }
 
   const hashes = new Map()
+  if (given && given.size) {
+    for (const item of targets) {
+      const hash = given.get(item.name)
+      if (hash) hashes.set(item.key, hash)
+    }
+  }
   for (const item of targets) {
+    if (hashes.has(item.key)) continue
     const hash = await sha1File(item.file)
     if (hash) hashes.set(item.key, hash)
   }
@@ -131,6 +139,7 @@ async function remoteIcons({ dir, names = [], folder = 'mods', cacheDir, limit =
   for (const item of targets) {
     const projectId = byHash.get(hashes.get(item.key))
     const url = projectId ? projectIcons.get(projectId) : ''
+    if (projectId) titles[item.name] = { source: 'modrinth', id: projectId }
     if (url) urls.set(item.name, url)
     else unresolved.push(item)
   }
@@ -144,12 +153,12 @@ async function remoteIcons({ dir, names = [], folder = 'mods', cacheDir, limit =
       try {
         const res = await content.search({ kind, source: 'modrinth', query, limit: 6 })
         const hit = (res.hits || []).find((h) => matches(query, h.name) || matches(query, h.slug))
-        if (hit?.icon) return { name: item.name, key: item.key, url: hit.icon }
+        if (hit?.icon) return { name: item.name, key: item.key, url: hit.icon, source: 'modrinth', id: hit.id }
       } catch {}
       try {
         const res = await content.search({ kind, source: 'curseforge', query, limit: 6 })
         const hit = (res.hits || []).find((h) => matches(query, h.name) || matches(query, h.slug))
-        return hit?.icon ? { name: item.name, key: item.key, url: hit.icon } : null
+        return hit?.icon ? { name: item.name, key: item.key, url: hit.icon, source: 'curseforge', id: hit.id } : null
       } catch {
         return null
       }
@@ -158,12 +167,13 @@ async function remoteIcons({ dir, names = [], folder = 'mods', cacheDir, limit =
       if (!item) continue
       urls.set(item.name, item.url)
       store.urls[item.key] = item.url
+      if (item.id) titles[item.name] = { source: item.source, id: String(item.id) }
     }
   }
 
   for (const [name, url] of urls) out[name] = url
   await saveUrls(cacheDir, store)
-  return out
+  return { icons: out, projects: titles }
 }
 
 const urlStorePath = (cacheDir) => path.join(cacheDir, 'remote-urls.json')

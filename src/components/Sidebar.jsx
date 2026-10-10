@@ -2,8 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import {
   House, Gear, List, Terminal, Files, Archive, User, Trash,
   Cube, PuzzlePiece, Stack, GearSix, ArrowLeft, ChartLineUp, SidebarSimple, Image, PaintBrush, Plus, Cloud, HardDrives,
-  Database, Clock, Users, Network, Play,
-} from '@phosphor-icons/react'
+  Database, Clock, Users, Network, Play, MapTrifold } from '@phosphor-icons/react'
 import { t } from '../i18n/translations'
 import { statusColor } from '../lib/status'
 import { palette } from '../lib/palette'
@@ -43,6 +42,7 @@ const INSTANCE_PAGES = [
   { key: 'instance-files', icon: Files, label: 'Files', labelVi: 'Tệp tin' },
   { key: 'instance-trash', icon: Trash, label: 'Trash', labelVi: 'Thùng rác' },
   { key: 'instance-saves', icon: Archive, label: 'Saves', labelVi: 'Bản lưu' },
+  { key: 'instance-map', icon: MapTrifold, label: 'World map', labelVi: 'Bản đồ' },
   { key: 'instance-settings', icon: GearSix, label: 'Settings', labelVi: 'Cài đặt' },
 ]
 

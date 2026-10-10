@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, clipboard, safeStorage, dialog } = require('electron')
+const { app, BrowserWindow, ipcMain, shell, clipboard, safeStorage, dialog, protocol } = require('electron')
 const path = require('path')
 const fs = require('fs')
 
@@ -6,6 +6,49 @@ const isDev = process.env.NODE_ENV === 'development'
 
 let mainWindow = null
 let settingsCache = null
+
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'lsicon', privileges: { standard: true, secure: true, supportFetchAPI: true, bypassCSP: false } },
+  { scheme: 'lsmap', privileges: { standard: true, secure: true, supportFetchAPI: true, bypassCSP: false } },
+])
+
+const ICON_MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' }
+
+function serveCache(request, folder) {
+  let name = ''
+  try {
+    name = decodeURIComponent(new URL(request.url).pathname).replace(/^\/+/, '').replace(/[^A-Za-z0-9._-]/g, '')
+  } catch {
+    name = ''
+  }
+  const ext = path.extname(name).toLowerCase()
+  if (!name || !ICON_MIME[ext]) return new Response('', { status: 404 })
+  const file = path.join(app.getPath('userData'), folder, name)
+  try {
+    const data = fs.readFileSync(file)
+    return new Response(data, { status: 200, headers: { 'Content-Type': ICON_MIME[ext], 'Cache-Control': 'no-cache' } })
+  } catch {
+    return new Response('', { status: 404 })
+  }
+}
+
+function serveIcon(request) {
+  let key = ''
+  try {
+    key = decodeURIComponent(new URL(request.url).pathname).replace(/^\/+/, '').replace(/[^A-Za-z0-9._-]/g, '')
+  } catch {
+    key = ''
+  }
+  const ext = path.extname(key).toLowerCase()
+  if (!key || !ICON_MIME[ext]) return new Response('', { status: 404 })
+  const file = path.join(app.getPath('userData'), 'icon-cache', key)
+  try {
+    const data = fs.readFileSync(file)
+    return new Response(data, { status: 200, headers: { 'Content-Type': ICON_MIME[ext], 'Cache-Control': 'no-cache' } })
+  } catch {
+    return new Response('', { status: 404 })
+  }
+}
 
 const settingsFile = () => path.join(app.getPath('userData'), 'settings.json')
 
@@ -57,8 +100,11 @@ const installer = require('./installer.cjs')
 const tokenStore = require('./auth.cjs')
 const skins = require('./skins.cjs')
 const tray = require('./tray.cjs')
+const discordLink = require('./discordlink.cjs')
+const discordPage = require('./discordpage.cjs')
 
 let hiddenForGame = false
+let lastDiscordEvent = null
 
 function showWindow() {
   if (!mainWindow || mainWindow.isDestroyed()) return
@@ -90,6 +136,243 @@ function syncGameWindow(payload) {
 function emitLauncher(payload) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('luns:launcher-event', payload)
   syncGameWindow(payload)
+}
+
+const DISCORD_PENDING_TTL = 20 * 60 * 1000
+
+function discordCredentials() {
+  const current = readSettings()
+  return {
+    apiUrl: current.discord?.apiUrl || discordLink.DEFAULT_API_URL,
+    apiKey: decrypt(current.secrets?.discordApiKey) || discordLink.DEFAULT_API_KEY,
+  }
+}
+
+function readPendingLink() {
+  const pending = readSettings().discordPending
+  if (!pending?.state) return null
+  if (Date.now() - Number(pending.at || 0) > DISCORD_PENDING_TTL) return null
+  return pending
+}
+
+function writePendingLink(pending) {
+  writeSettings({ discordPending: pending })
+}
+
+function findAccount(id) {
+  const current = readSettings()
+  return (Array.isArray(current.accounts) ? current.accounts : []).find((item) => item.id === id) || null
+}
+
+function findAccountByName(name) {
+  const wanted = String(name || '').trim().toLowerCase()
+  if (!wanted) return null
+  const current = readSettings()
+  return (Array.isArray(current.accounts) ? current.accounts : []).find((item) => String(item.name || '').toLowerCase() === wanted) || null
+}
+
+function accountPayload(account) {
+  return { id: account.id, name: account.name, uuid: account.uuid, type: account.type }
+}
+
+async function resolveLinkAccount(pending, token) {
+  const chosen = pending.accountId ? findAccount(pending.accountId) : null
+  if (chosen) return { ok: true, account: chosen, created: false }
+
+  let name = discordLink.accountName(pending.name)
+  if (!name) {
+    const identity = await discordLink.verify(discordCredentials(), token)
+    if (!identity.ok) return identity
+    name = discordLink.accountName(pending.name || identity.discord?.name, identity.discord?.id)
+  }
+  if (!name) return { ok: false, error: 'Tên Discord không hợp lệ cho tài khoản Minecraft. Hãy nhập tên tài khoản rồi liên kết lại.' }
+
+  const existing = findAccountByName(name)
+  if (existing) return { ok: true, account: existing, created: false }
+
+  const current = readSettings()
+  const res = launcher.accountAdd({ name, accounts: current.accounts, activeAccountId: current.activeAccountId })
+  if (!res.ok) return res
+  writeSettings({ accounts: res.accounts, activeAccountId: res.activeAccountId })
+  return { ok: true, account: res.added, created: true }
+}
+
+function pushDiscordEvent(payload) {
+  lastDiscordEvent = { ...payload, at: Date.now() }
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('luns:discord-event', lastDiscordEvent)
+}
+
+async function completeDiscordLink({ token, state }) {
+  const pending = readPendingLink()
+  if (!pending) {
+    pushDiscordEvent({ type: 'token', token, state })
+    return { ok: true, type: 'token' }
+  }
+  if (state && state !== pending.state) {
+    pushDiscordEvent({ type: 'failed', error: 'Phiên liên kết không khớp. Hãy bắt đầu lại trong trang Tài khoản.' })
+    return { ok: false, error: 'State không khớp.' }
+  }
+
+  const resolved = await resolveLinkAccount(pending, token)
+  if (!resolved.ok) {
+    writePendingLink(null)
+    stopLoopback()
+    pushDiscordEvent({ type: 'failed', error: resolved.error })
+    return resolved
+  }
+  const account = resolved.account
+
+  const res = await discordLink.linkAccount(discordCredentials(), {
+    token,
+    linkId: pending.linkId || undefined,
+    name: '',
+    force: !!pending.force,
+    account: accountPayload(account),
+  })
+  writePendingLink(null)
+  stopLoopback()
+  if (!res.ok) {
+    pushDiscordEvent({ type: 'failed', error: res.error, conflict: res.conflict, holder: res.holder, account, created: resolved.created })
+    return res
+  }
+  pushDiscordEvent({
+    type: 'linked',
+    link: res.link,
+    account,
+    created: resolved.created,
+    embed: res.embed,
+    reopen: res.reopen,
+    jumpUrl: res.jumpUrl,
+    dm: res.dm,
+    role: res.role,
+  })
+  showWindow()
+  return { ok: true, type: 'linked', link: res.link, account }
+}
+
+let loopbackServer = null
+let loopbackPort = 0
+let loopbackTimer = null
+
+function stopLoopback() {
+  if (loopbackTimer) {
+    clearTimeout(loopbackTimer)
+    loopbackTimer = null
+  }
+  if (loopbackServer) {
+    try {
+      loopbackServer.close()
+    } catch {}
+    loopbackServer = null
+  }
+  loopbackPort = 0
+}
+
+function startLoopback(port) {
+  if (loopbackServer && loopbackPort === port) return Promise.resolve({ ok: true, port })
+  stopLoopback()
+  return new Promise((resolve) => {
+    const server = require('http').createServer((req, res) => {
+      const url = String(req.url || '')
+      if (req.method === 'POST' && url.startsWith('/discord/token')) {
+        const chunks = []
+        let size = 0
+        req.on('data', (chunk) => {
+          size += chunk.length
+          if (size > 16384) {
+            req.destroy()
+            return
+          }
+          chunks.push(chunk)
+        })
+        req.on('end', async () => {
+          let body = {}
+          try {
+            body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')
+          } catch {}
+          console.log(`[liên kết] nhận token từ trình duyệt (${body.access_token ? 'có token' : 'KHÔNG có token'}, state ${body.state ? 'khớp' : 'trống'})`)
+          const out = body.error
+            ? { ok: false, error: body.error === 'access_denied' ? 'Đã huỷ uỷ quyền Discord.' : `Discord báo lỗi: ${body.error}` }
+            : await completeDiscordLink({ token: body.access_token, state: body.state })
+          if (!out.ok && !body.error) pushDiscordEvent({ type: 'failed', error: out.error || 'Không hoàn tất được liên kết.' })
+          console.log(out.ok ? '[liên kết] hoàn tất ✓' : `[liên kết] thất bại: ${out.error}`)
+          const linked = out.link || null
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(
+            JSON.stringify({
+              ok: !!out.ok,
+              error: out.error || '',
+              discord: linked ? { name: linked.discordName, tag: linked.discordTag, avatar: linked.discordAvatar } : null,
+              account: linked?.accountName || '',
+            }),
+          )
+        })
+        return
+      }
+      if (req.method === 'GET' && url.startsWith('/font/')) {
+        const file = discordPage.fontPath(path.basename(decodeURIComponent(url.split('?')[0])))
+        if (!file) {
+          res.writeHead(404, { 'content-type': 'text/plain' })
+          res.end('')
+          return
+        }
+        res.writeHead(200, { 'content-type': 'font/woff2', 'cache-control': 'max-age=86400' })
+        res.end(fs.readFileSync(file))
+        return
+      }
+      if (req.method === 'GET') {
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+        res.end(discordPage.loopbackHtml())
+        return
+      }
+      res.writeHead(404, { 'content-type': 'text/plain' })
+      res.end('')
+    })
+    server.on('error', (err) => {
+      loopbackServer = null
+      loopbackPort = 0
+      const busy = err.code === 'EADDRINUSE'
+      resolve({
+        ok: false,
+        error: busy
+          ? `Cổng ${port} đang bị chiếm (còn một launcher khác đang chạy). Thoát hẳn launcher — kể cả ở khay hệ thống — rồi mở lại và thử lại.`
+          : `Không mở được cổng ${port} để nhận uỷ quyền: ${err.message}`,
+      })
+    })
+    server.listen(port, '127.0.0.1', () => {
+      loopbackServer = server
+      loopbackPort = port
+      loopbackTimer = setTimeout(() => stopLoopback(), DISCORD_PENDING_TTL)
+      resolve({ ok: true, port })
+    })
+  })
+}
+
+async function handleDeepLink(raw) {
+  const parsed = discordLink.parseDeepLink(raw)
+  if (!parsed) return { ok: false, error: 'Liên kết lunarspace:// không hợp lệ.' }
+  showWindow()
+
+  if (parsed.kind === 'reopen' || parsed.kind === 'open') {
+    pushDiscordEvent({ type: 'open' })
+    return { ok: true, type: 'open' }
+  }
+
+  if (parsed.kind !== 'discord') {
+    pushDiscordEvent({ type: 'failed', error: `Không hỗ trợ liên kết lunarspace://${parsed.kind}.` })
+    return { ok: false, error: 'Không hỗ trợ liên kết này.' }
+  }
+
+  if (parsed.error) {
+    pushDiscordEvent({ type: 'failed', error: parsed.error === 'access_denied' ? 'Đã huỷ uỷ quyền Discord.' : `Discord báo lỗi: ${parsed.error}` })
+    return { ok: false, error: parsed.error }
+  }
+  if (!parsed.token) {
+    pushDiscordEvent({ type: 'failed', error: 'Discord không trả về access token.' })
+    return { ok: false, error: 'Thiếu access token.' }
+  }
+
+  return completeDiscordLink({ token: parsed.token, state: parsed.state })
 }
 
 launcher.setBroadcast(emitLauncher)
@@ -126,6 +409,84 @@ function registerIpc() {
   ipcMain.handle('discord:state', () => presence.status())
   ipcMain.handle('discord:select', (_e, instance) => {
     presence.selecting(instance || null)
+    return { ok: true }
+  })
+
+  ipcMain.handle('discordlink:links', () => discordLink.links(discordCredentials()))
+  ipcMain.handle('discordlink:pending', () => {
+    const event = lastDiscordEvent
+    lastDiscordEvent = null
+    return { ok: true, event, pending: readPendingLink() }
+  })
+  ipcMain.handle('discordlink:start', async (_e, opts) => {
+    const wanted = String((opts || {}).accountId || '')
+    const account = wanted ? findAccount(wanted) : null
+    if (wanted && !account) return { ok: false, error: 'Không tìm thấy tài khoản cần liên kết.' }
+    const name = String((opts || {}).name || '').trim()
+    if (!account && !name) return { ok: false, error: 'Nhập tên tài khoản hoặc chọn tài khoản có sẵn trước khi liên kết.' }
+    const info = await discordLink.botInfo(discordCredentials())
+    if (!info.ok) return info
+    if (!info.clientId || !info.redirectUri) return { ok: false, error: 'Bot chưa cấu hình CLIENT_ID hoặc redirect URI.' }
+    const state = discordLink.newState()
+    const authorizeUrl = discordLink.authorizeUrl({ clientId: info.clientId, redirectUri: info.redirectUri, state })
+    if (!authorizeUrl) return { ok: false, error: 'Không tạo được liên kết uỷ quyền Discord.' }
+    writePendingLink({
+      state,
+      accountId: account?.id || '',
+      accountName: account?.name || '',
+      name,
+      linkId: String((opts || {}).linkId || ''),
+      force: !!(opts || {}).force,
+      at: Date.now(),
+    })
+    let loopback = null
+    console.log(`[liên kết] chế độ ${info.mode || 'hosted'}${info.mode === 'loopback' ? ` · cổng ${info.loopbackPort || 53682}` : ''}`)
+    if (info.mode === 'loopback') {
+      loopback = await startLoopback(info.loopbackPort || 53682)
+      if (!loopback.ok) {
+        writePendingLink(null)
+        return loopback
+      }
+    }
+    return {
+      ok: true,
+      authorizeUrl,
+      state,
+      mode: info.mode || 'hosted',
+      brand: info.brand,
+      redirectUri: info.redirectUri,
+      willCreate: !account,
+    }
+  })
+  ipcMain.handle('discordlink:cancel', () => {
+    writePendingLink(null)
+    stopLoopback()
+    return { ok: true }
+  })
+  ipcMain.handle('discordlink:status', async (_e, opts) => {
+    const account = findAccount((opts || {}).accountId)
+    if (!account) return { ok: false, error: 'Không tìm thấy tài khoản.' }
+    const res = await discordLink.links(discordCredentials())
+    if (!res.ok) return res
+    const items = Array.isArray(res.items) ? res.items : []
+    const link = items.find((item) => item.accountUuid === account.uuid || item.accountId === account.id) || null
+    return { ok: true, link }
+  })
+  ipcMain.handle('discordlink:unlink', async (_e, opts) => {
+    const account = findAccount((opts || {}).accountId)
+    if (!account) return { ok: false, error: 'Không tìm thấy tài khoản.' }
+    const credentials = discordCredentials()
+    const list = await discordLink.links(credentials)
+    if (!list.ok) return list
+    const items = Array.isArray(list.items) ? list.items : []
+    const found = items.find((item) => item.accountUuid === account.uuid || item.accountId === account.id)
+    if (!found) return { ok: false, error: 'Tài khoản này chưa liên kết Discord.' }
+    const res = await discordLink.unlink(credentials, found.id)
+    if (res.ok) pushDiscordEvent({ type: 'unlinked', link: found, account })
+    return res
+  })
+  ipcMain.handle('app:focus', () => {
+    showWindow()
     return { ok: true }
   })
 
@@ -298,6 +659,30 @@ function registerIpc() {
   ipcMain.handle('launcher:world-read', (_e, opts) => launcher.worldRead(opts || {}))
   ipcMain.handle('launcher:world-write', (_e, opts) => launcher.worldWrite(opts || {}))
   ipcMain.handle('launcher:world-restore', (_e, opts) => launcher.worldRestore(opts || {}))
+  ipcMain.handle('launcher:map-info', (_e, opts) => launcher.mapInfo({ ...(opts || {}), settings: readSettings() }))
+  ipcMain.handle('launcher:map-world-info', (_e, opts) => launcher.mapWorldInfo({ ...(opts || {}), settings: readSettings() }))
+  ipcMain.handle('launcher:map-render', (_e, opts) => launcher.mapRender({ ...(opts || {}), settings: readSettings() }, emitLauncher))
+  ipcMain.handle('launcher:map-cancel', () => launcher.mapCancel())
+  ipcMain.handle('launcher:map-clear', (_e, opts) => launcher.mapClear({ ...(opts || {}), settings: readSettings() }))
+  ipcMain.handle('launcher:map-reveal', () => launcher.mapRevealCache())
+  ipcMain.handle('launcher:map-save', async (_e, { file, name } = {}) => {
+    const prep = await launcher.mapSave({ file, name })
+    if (!prep.ok) return prep
+    const picked = await dialog.showSaveDialog(mainWindow, {
+      title: 'Lưu ảnh bản đồ',
+      defaultPath: path.join(app.getPath('pictures'), prep.suggested),
+      filters: [{ name: 'PNG', extensions: ['png'] }],
+      buttonLabel: 'Lưu',
+    })
+    if (picked.canceled || !picked.filePath) return { ok: false, canceled: true }
+    try {
+      fs.copyFileSync(prep.source, picked.filePath)
+      return { ok: true, path: picked.filePath }
+    } catch (err) {
+      return { ok: false, error: err.message }
+    }
+  })
+  ipcMain.handle('launcher:content-preview', (_e, opts) => launcher.contentPreview(opts || {}))
   ipcMain.handle('launcher:content-changelog', (_e, opts) => launcher.contentChangelog(opts || {}))
   ipcMain.handle('launcher:content-installed', (_e, opts) => launcher.contentInstalled(opts || {}))
   ipcMain.handle('launcher:content-install', (_e, opts) => launcher.contentInstall(opts || {}, emitLauncher))
@@ -399,18 +784,11 @@ function createWindow() {
   const saved = readSettings()
   const bootTheme = saved.theme === 'light' ? 'light' : 'dark'
   const bootLang = saved.language === 'en' ? 'en' : 'vi'
-  const bootSkin = saved.skin === 'pixel' ? 'pixel' : 'default'
-  const BOOT_BG = {
-    'dark-default': '#0a0a0a',
-    'light-default': '#f5f5f5',
-    'dark-pixel': '#0a0d12',
-    'light-pixel': '#edf2f9',
-  }
+  const BOOT_BG = { dark: '#0a0d12', light: '#edf2f9' }
   const withBootParams = (raw) => {
     const url = new URL(raw)
     url.searchParams.set('theme', bootTheme)
     url.searchParams.set('lang', bootLang)
-    url.searchParams.set('skin', bootSkin)
     return url.toString()
   }
 
@@ -420,7 +798,7 @@ function createWindow() {
     resizable: false,
     maximizable: false,
     show: false,
-    backgroundColor: BOOT_BG[`${bootTheme}-${bootSkin}`] || '#0a0a0a',
+    backgroundColor: BOOT_BG[bootTheme] || '#0a0d12',
     frame: false,
     titleBarStyle: 'hidden',
     autoHideMenuBar: true,
@@ -435,6 +813,10 @@ function createWindow() {
   })
 
   mainWindow.once('ready-to-show', () => mainWindow.show())
+
+  mainWindow.webContents.on('did-finish-load', () => {
+    if (lastDiscordEvent) mainWindow.webContents.send('luns:discord-event', lastDiscordEvent)
+  })
 
   if (isDev && process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(withBootParams(process.env.VITE_DEV_SERVER_URL))
@@ -459,10 +841,36 @@ function createWindow() {
 
 const MODE = installer.detectMode()
 
+function registerProtocolClient() {
+  try {
+    if (isDev) app.setAsDefaultProtocolClient(discordLink.SCHEME, process.execPath, [path.resolve(process.argv[1] || '.')])
+    else app.setAsDefaultProtocolClient(discordLink.SCHEME)
+  } catch (err) {
+    console.error('[lunaspace] không đăng ký được protocol lunarspace://', err)
+  }
+}
+
 if (MODE !== 'app') {
   installer.run(MODE)
+} else if (!app.requestSingleInstanceLock()) {
+  app.quit()
 } else {
+  registerProtocolClient()
+
+  app.on('second-instance', (_event, argv) => {
+    const deep = discordLink.extractDeepLink(argv)
+    if (deep) handleDeepLink(deep)
+    else showWindow()
+  })
+
+  app.on('open-url', (event, url) => {
+    event.preventDefault()
+    handleDeepLink(url)
+  })
+
   app.whenReady().then(() => {
+    protocol.handle('lsicon', serveIcon)
+    protocol.handle('lsmap', (request) => serveCache(request, 'map-cache'))
     registerIpc()
     createWindow()
     tray.create({
@@ -483,6 +891,9 @@ if (MODE !== 'app') {
     updater.init({ settings: readSettings(), onEvent: emitLauncher })
     launcher.syncProfiles(readSettings()).catch(() => {})
 
+    const bootDeep = discordLink.extractDeepLink(process.argv)
+    if (bootDeep) setTimeout(() => handleDeepLink(bootDeep), 1200)
+
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
     })
@@ -493,6 +904,7 @@ if (MODE !== 'app') {
     updater.shutdown()
     presence.shutdown()
     tray.destroy()
+    stopLoopback()
     try {
       launcher.hostStop()
     } catch {}

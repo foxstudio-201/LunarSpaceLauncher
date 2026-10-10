@@ -382,6 +382,36 @@ function AppContent() {
     navigateTo('home')
   }, [navigateTo])
 
+  useEffect(() => {
+    const off = api.onDiscordEvent((ev) => {
+      if (!ev) return
+      if (ev.type === 'linked') {
+        navigateTo('accounts')
+        api.listAccounts().then((res) => {
+          if (!res?.ok) return
+          setAccounts(res.accounts || [])
+          setActiveAccountId(res.activeAccountId || null)
+        }).catch(() => {})
+        toast.notify({
+          tone: 'ok',
+          title: vn(langRef.current, 'Đã liên kết Discord', 'Discord linked'),
+          message: [ev.link?.discordTag, ev.link?.accountName].filter(Boolean).join(' → '),
+          duration: 6000,
+        })
+        return
+      }
+      if (ev.type === 'failed' && ev.error) {
+        toast.notify({
+          tone: 'warn',
+          title: vn(langRef.current, 'Liên kết Discord thất bại', 'Discord link failed'),
+          message: ev.error,
+          duration: 8000,
+        })
+      }
+    })
+    return off
+  }, [navigateTo, toast])
+
   const handleCreate = useCallback(async (payload) => {
     const res = await api.createInstance(payload)
     if (!res?.ok) return res

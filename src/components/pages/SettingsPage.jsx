@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   Translate, MoonStars, Sun, Coffee, DownloadSimple, Trash, ArrowsClockwise,
   SpinnerGap, CheckCircle, FloppyDisk, HardDrive, WarningCircle, DiscordLogo,
-  SquaresFour, Tray,
+  Tray,
 } from '@phosphor-icons/react'
 import { useApp } from '../../i18n/AppContext'
 import { t } from '../../i18n/translations'
@@ -64,7 +64,7 @@ function Segmented({ c, value, onChange, options }) {
 const smallBtn = (c) => ({ background: c.input, border: `1px solid ${c.border}`, color: c.label })
 
 export default function SettingsPage({ theme, lang, version, system, storage, onSave, update: updateEvent }) {
-  const { setLang, setTheme, skin, setSkin } = useApp()
+  const { setLang, setTheme } = useApp()
   const c = palette(theme)
   const [javaPath, setJavaPath] = useState(storage?.javaPath || '')
   const [saved, setSaved] = useState(false)
@@ -264,11 +264,6 @@ export default function SettingsPage({ theme, lang, version, system, storage, on
                   c={c}
                   icon={theme === 'light' ? <Sun size={15} weight="duotone" /> : <MoonStars size={15} weight="duotone" />}
                   title={t(lang, 'settings.theme')}
-                  desc={
-                    skin === 'pixel'
-                      ? vn(lang, 'Pixel dùng nền giấy + mực đậm để nổi khối', 'Pixel uses paper + heavy ink for contrast')
-                      : undefined
-                  }
                 >
                   <Segmented
                     c={c}
@@ -277,26 +272,6 @@ export default function SettingsPage({ theme, lang, version, system, storage, on
                     options={[
                       { value: 'dark', label: t(lang, 'settings.theme.dark') },
                       { value: 'light', label: t(lang, 'settings.theme.light') },
-                    ]}
-                  />
-                </Row>
-                <Row
-                  c={c}
-                  icon={<SquaresFour size={15} weight="duotone" />}
-                  title={t(lang, 'settings.skin')}
-                  desc={
-                    skin === 'pixel'
-                      ? vn(lang, '8-bit: viền đậm 2px, bóng cứng, chữ pixel', '8-bit: 2px heavy borders, hard shadows, pixel type')
-                      : vn(lang, 'Giao diện phẳng, bo góc như hiện tại', 'Flat rounded interface, as now')
-                  }
-                >
-                  <Segmented
-                    c={c}
-                    value={skin}
-                    onChange={setSkin}
-                    options={[
-                      { value: 'default', label: t(lang, 'settings.skin.default') },
-                      { value: 'pixel', label: t(lang, 'settings.skin.pixel') },
                     ]}
                   />
                 </Row>

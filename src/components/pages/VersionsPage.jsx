@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import useProgressive from '../ui/useProgressive'
 import {
   ArrowsClockwise, Globe, Check, MagnifyingGlass, FolderOpen, WarningCircle, SpinnerGap, PlayCircle,
   FileArrowUp, X, CheckCircle,
@@ -235,6 +236,7 @@ export default function VersionsPage({
     const rows = q ? versions.filter((v) => v.id.toLowerCase().includes(q)) : versions
     return rows
   }, [versions, query])
+  const progressive = useProgressive(Math.min(filtered.length, visible), { first: 12 })
 
   const slug = String(name || (picked ? `${activeLoader.name}-${picked}` : 'instance')).replace(/[^\w.-]+/g, '-')
   const targetDir = dir || (defaultInstanceDir ? `${defaultInstanceDir}\\${slug}` : '')
@@ -344,7 +346,7 @@ export default function VersionsPage({
             )}
           </div>
 
-          <div className="flex-1 min-h-0 overflow-y-auto pr-1" style={{ outline: 'none' }}>
+          <div className="stream-list flex-1 min-h-0 overflow-y-auto pr-1" style={{ outline: 'none' }}>
             {loading && versions.length === 0 ? (
               <p className="text-xs text-center py-16" style={{ color: c.label }}>{t(lang, 'versions.loading')}</p>
             ) : error && versions.length === 0 ? (
@@ -355,8 +357,8 @@ export default function VersionsPage({
                 </button>
               </div>
             ) : (
-              <div className="flex flex-col gap-1">
-                {filtered.slice(0, visible).map((v) => {
+              <div className="stream-items flex flex-col gap-1">
+                {filtered.slice(0, Math.min(visible, progressive)).map((v) => {
                   const active = picked === v.id
                   const isLatest = v.id === latest?.release
                   const unsupported = !!supported && !supported.has(v.id)

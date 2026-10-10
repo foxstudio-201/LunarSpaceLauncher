@@ -76,29 +76,14 @@ const SURFACE_COLOR = {
   'pixel-light': PIXEL_LIGHT.bg,
 }
 
-let currentSkin = 'default'
+const SKIN = 'pixel'
 
-const domSkin = () => {
-  if (typeof document === 'undefined') return currentSkin
-  return document.documentElement.getAttribute('data-skin') === 'pixel' ? 'pixel' : 'default'
-}
+export const currentPaletteSkin = () => SKIN
 
-export function setPaletteSkin(skin) {
-  currentSkin = skin === 'pixel' ? 'pixel' : 'default'
-  if (typeof document !== 'undefined') {
-    document.documentElement.setAttribute('data-skin', currentSkin)
-  }
-}
-
-export function currentPaletteSkin() {
-  return domSkin()
-}
-
-export function surfaceColor(theme, skin = domSkin()) {
-  return SURFACE_COLOR[`${skin}-${theme === 'light' ? 'light' : 'dark'}`] || DARK.bg
+export function surfaceColor(theme) {
+  return SURFACE_COLOR[`${SKIN}-${theme === 'light' ? 'light' : 'dark'}`] || PIXEL_DARK.bg
 }
 
 export function palette(theme) {
-  if (domSkin() === 'pixel') return theme === 'light' ? PIXEL_LIGHT : PIXEL_DARK
-  return theme === 'light' ? LIGHT : DARK
+  return theme === 'light' ? PIXEL_LIGHT : PIXEL_DARK
 }

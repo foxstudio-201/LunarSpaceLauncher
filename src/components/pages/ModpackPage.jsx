@@ -9,6 +9,9 @@ import { palette } from '../../lib/palette'
 import { timeAgo, formatDate } from '../../lib/status'
 import PageHeader from '../ui/PageHeader'
 import Select from '../ui/Select'
+import HoverPreview from '../ui/HoverPreview'
+import useVirtual from '../ui/useVirtual'
+import useProgressive from '../ui/useProgressive'
 import ProgressBar from '../ui/ProgressBar'
 import RichText from '../instance/RichText'
 import {
@@ -89,6 +92,7 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
   const [tab, setTab] = useState('about')
   const [versions, setVersions] = useState([])
   const [versionsLoading, setVersionsLoading] = useState(false)
+  const progressiveVersions = useProgressive(versions.length, { first: 12 })
   const [filterMc, setFilterMc] = useState('')
   const [filterLoader, setFilterLoader] = useState('')
   const [versionId, setVersionId] = useState('')
@@ -111,6 +115,8 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
 
   const reqRef = useRef(0)
   const listRef = useRef(null)
+  const gridWrapRef = useRef(null)
+  const gridRef = useRef(null)
   const detailRef = useRef(null)
 
   const load = useCallback(async ({ reset = true } = {}) => {
@@ -147,6 +153,17 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
     if (loading || !hits.length || hits.length >= total) return
     load({ reset: false })
   }, [loading, hits.length, total, load])
+
+  const virtual = useVirtual({
+    containerRef: listRef,
+    wrapRef: gridWrapRef,
+    contentRef: gridRef,
+    count: hits.length,
+    mode: 'grid',
+    rowHeight: 176,
+    gap: 12,
+    overscan: 3,
+  })
 
   const onListScroll = useCallback((event) => {
     const el = event.currentTarget
@@ -565,10 +582,23 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
                 </div>
               ) : (
                 <>
-                  <div className="grid gap-3 grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
-                    {hits.map((hit) => (
-                      <PackCard key={`${hit.source}-${hit.id}`} c={c} lang={lang} hit={hit} onOpen={() => openHit(hit)} />
+                  <div ref={gridWrapRef}>
+                  <div style={{ height: virtual.padTop }} aria-hidden />
+                  <div ref={gridRef} className="stream-items grid gap-3 grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
+                    {hits.slice(virtual.start, virtual.end).map((hit) => (
+                      <HoverPreview
+                        key={`${hit.source}-${hit.id}`}
+                        theme={theme}
+                        lang={lang}
+                        hit={hit}
+                        kind="modpacks"
+                        load={() => api.contentPreview({ source: hit.source, id: hit.id })}
+                      >
+                        <PackCard c={c} lang={lang} hit={hit} onOpen={() => openHit(hit)} />
+                      </HoverPreview>
                     ))}
+                  </div>
+                  <div style={{ height: virtual.padBottom }} aria-hidden />
                   </div>
                   {hits.length < total && (
                     <button
@@ -673,7 +703,7 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
               )}
             </div>
 
-            <div className="flex-1 min-h-0 overflow-y-auto">
+            <div className="stream-items flex-1 min-h-0 overflow-y-auto">
               <div className="max-w-5xl mx-auto p-5">
                 {imported ? (
                   <div className="flex flex-col gap-4">
@@ -933,7 +963,7 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
                       <p className="text-[11px] py-6" style={{ color: c.faint }}>{vn(lang, 'Chưa có bản phát hành nào để xem.', 'No builds to show.')}</p>
                     ) : (
                       <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${c.border}` }}>
-                        {versions.map((v, i) => {
+                        {versions.slice(0, progressiveVersions).map((v, i) => {
                           const on = openLog === v.id
                           const log = logs[v.id]
                           return (
@@ -1224,7 +1254,7 @@ function PackCard({ c, lang, hit, onOpen }) {
   return (
     <button
       onClick={onOpen}
-      className="group relative overflow-hidden text-left rounded-xl p-3 flex flex-col gap-2.5 transition-all duration-200 hover:-translate-y-0.5"
+      className="group relative overflow-hidden text-left rounded-xl p-3 flex flex-col gap-2.5 transition-all duration-200 hover:-translate-y-0.5 h-full w-full"
       style={{ background: c.surface, border: `1px solid ${c.border}` }}
     >
       <span className="absolute left-0 top-3 bottom-3 w-[2px] rounded-full opacity-0 group-hover:opacity-40 transition-opacity" style={{ background: c.accent }} />

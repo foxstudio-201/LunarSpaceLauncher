@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import useProgressive from '../ui/useProgressive'
 import { Trash, ArrowCounterClockwise, ListBullets, Warning, CaretRight } from '@phosphor-icons/react'
 import { t } from '../../i18n/translations'
 import { palette } from '../../lib/palette'
@@ -16,6 +17,7 @@ const GRID = '1fr 90px 140px 176px'
 export default function TrashPage({ instance, theme, lang }) {
   const c = palette(theme)
   const [entries, setEntries] = useState([])
+  const progressive = useProgressive(entries.length, { first: 12 })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [flash, setFlash] = useState(null)
@@ -167,7 +169,7 @@ export default function TrashPage({ instance, theme, lang }) {
         <span />
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto mx-3 mb-3 rounded-b-lg" style={{ background: c.surface, borderLeft: `1px solid ${c.border}`, borderRight: `1px solid ${c.border}`, borderBottom: `1px solid ${c.border}`, borderTop: 'none' }}>
+      <div className="stream-items flex-1 min-h-0 overflow-y-auto mx-3 mb-3 rounded-b-lg" style={{ background: c.surface, borderLeft: `1px solid ${c.border}`, borderRight: `1px solid ${c.border}`, borderBottom: `1px solid ${c.border}`, borderTop: 'none' }}>
         {error ? (
           <div className="px-3 py-4 text-[11px]" style={{ color: '#ef4444' }}>{error}</div>
         ) : loading ? (
@@ -181,7 +183,7 @@ export default function TrashPage({ instance, theme, lang }) {
             <span className="text-[11px]" style={{ color: c.label, opacity: 0.7 }}>{t(lang, 'trash.hint')}</span>
           </div>
         ) : (
-          entries.map((entry) => (
+          entries.slice(0, progressive).map((entry) => (
             <div
               key={entry.id}
               className="grid items-center px-3 transition-colors"

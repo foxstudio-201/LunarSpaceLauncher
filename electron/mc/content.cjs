@@ -1,6 +1,7 @@
 const path = require('path')
 const fsp = require('fs').promises
 const { downloadAll, fetchJson, sha1File, UA } = require('./net.cjs')
+const filehash = require('./filehash.cjs')
 const {
   MODRINTH,
   CF,
@@ -24,6 +25,8 @@ const ENV_FACETS = {
 }
 
 const contentTagsCache = { modrinth: {}, curseforge: {} }
+const previewCache = new Map()
+const PREVIEW_CAP = 300
 
 const KINDS = {
   mods: { mr: 'mod', cf: 6, folder: 'mods', loaderFilter: true },
@@ -74,35 +77,64 @@ async function postJson(url, body) {
   return res.json()
 }
 
-async function localOwners({ dir, names } = {}) {
-  const list = (names || []).filter((name) => MOD_JAR_RE.test(name))
+async function projectHashes({ hashes: list = [] } = {}) {
   const out = new Map()
-  if (!dir || !list.length) return out
-  const hashes = new Map()
-  for (const name of list) {
-    const hash = await sha1File(path.join(dir, name))
-    if (hash) hashes.set(hash, name)
-  }
-  if (!hashes.size) return out
-  const keys = [...hashes.keys()]
+  const keys = (list || []).filter(Boolean)
+  if (!keys.length) return out
   for (let i = 0; i < keys.length; i += 200) {
     try {
       const res = await postJson(`${MODRINTH}/version_files`, { hashes: keys.slice(i, i + 200), algorithm: 'sha1' })
       for (const [hash, version] of Object.entries(res || {})) {
-        const name = hashes.get(hash)
-        if (name && version?.project_id) {
-          out.set(name, { projectId: version.project_id, versionId: version.id, version: version.version_number || '' })
-        }
+        if (!version?.project_id) continue
+        out.set(hash, {
+          projectId: version.project_id,
+          versionId: version.id || '',
+          version: version.version_number || '',
+          source: 'modrinth',
+        })
       }
     } catch {}
   }
   return out
 }
 
-async function modEnvs({ dir, names } = {}) {
+async function localOwners({ dir, names, cacheDir } = {}) {
+  const list = (names || []).filter((name) => MOD_JAR_RE.test(name))
+  const out = new Map()
+  if (!dir || !list.length) return out
+  const byName = await filehash.hashes({ dir, names: list, cacheDir })
+  const byHash = new Map()
+  for (const [name, hash] of byName) if (hash) byHash.set(hash, name)
+  if (!byHash.size) return out
+  const known = await filehash.projects({
+    sha1List: [...byHash.keys()],
+    cacheDir,
+    fetcher: async (missing) => {
+      const found = new Map()
+      for (let i = 0; i < missing.length; i += 200) {
+        try {
+          const res = await postJson(`${MODRINTH}/version_files`, { hashes: missing.slice(i, i + 200), algorithm: 'sha1' })
+          for (const [hash, version] of Object.entries(res || {})) {
+            if (version?.project_id) {
+              found.set(hash, { projectId: version.project_id, versionId: version.id, version: version.version_number || '' })
+            }
+          }
+        } catch {}
+      }
+      return found
+    },
+  })
+  for (const [hash, row] of known) {
+    const name = byHash.get(hash)
+    if (name) out.set(name, row)
+  }
+  return out
+}
+
+async function modEnvs({ dir, names, cacheDir } = {}) {
   const list = (names || []).filter((name) => MOD_JAR_RE.test(name))
   if (!dir || !list.length) return {}
-  const owner = await localOwners({ dir, names: list })
+  const owner = await localOwners({ dir, names: list, cacheDir })
   if (!owner.size) return {}
   const ids = [...new Set([...owner.values()].map((row) => row.projectId))]
   const sides = new Map()
@@ -121,7 +153,7 @@ async function modEnvs({ dir, names } = {}) {
   return out
 }
 
-async function installed({ kind, source, id, versionId, file, game, loader, root } = {}) {
+async function installed({ kind, source, id, versionId, file, game, loader, root, cacheDir } = {}) {
   const entry = spec(kind)
   const dir = path.join(root, entry.folder)
   const bare = (name) => String(name || '').replace(/\.disabled$/i, '')
@@ -133,7 +165,7 @@ async function installed({ kind, source, id, versionId, file, game, loader, root
   }
   if (!names.length) return { matches: [] }
   if (source !== 'curseforge') {
-    const owner = await localOwners({ dir, names })
+    const owner = await localOwners({ dir, names, cacheDir })
     const matches = []
     for (const name of names) {
       const row = owner.get(name)
@@ -652,4 +684,82 @@ async function install({ plan: prepared, root, onProgress, onLog }) {
   return { added: Math.max(0, added), existed: existing, failed, total: targets.length }
 }
 
-module.exports = { KINDS, spec, search, contentTags, versions, project, changelog, plan, install, installed, modEnvs, normName, cfLoaderName }
+async function mrPreview(id) {
+  const project = await fetchJson(`${MODRINTH}/project/${encodeURIComponent(id)}`)
+  return {
+    source: 'modrinth',
+    id: project.id,
+    slug: project.slug || '',
+    name: project.title || '',
+    icon: project.icon_url || '',
+    summary: stripCodes(project.description || ''),
+    downloads: project.downloads || 0,
+    followers: project.followers || 0,
+    published: iso(project.published),
+    updated: iso(project.updated),
+    license: project.license?.name || project.license?.id || '',
+    categories: (project.categories || []).filter((tag) => !TAG_NOISE.has(String(tag).toLowerCase())).map(prettifyTag),
+    loaders: project.loaders || [],
+    gameVersions: project.game_versions || [],
+    gallery: (project.gallery || [])
+      .map((item) => ({ url: item.url, title: stripCodes(item.title || ''), featured: !!item.featured }))
+      .slice(0, 8),
+    links: {
+      source: project.source_url || '',
+      issues: project.issues_url || '',
+      wiki: project.wiki_url || '',
+      discord: project.discord_url || '',
+    },
+  }
+}
+
+async function cfPreview(id) {
+  const data = await cfJson(`${CF}/mods/${encodeURIComponent(id)}`)
+  const mod = data?.data
+  if (!mod) throw new Error('Không tìm thấy dự án này trên CurseForge.')
+  const indexes = mod.latestFilesIndexes || []
+  return {
+    source: 'curseforge',
+    id: String(mod.id),
+    slug: String(mod.slug || ''),
+    name: mod.name || '',
+    icon: mod.logo?.thumbnailUrl || '',
+    summary: stripCodes(mod.summary || ''),
+    downloads: mod.downloadCount || 0,
+    followers: 0,
+    published: iso(mod.dateCreated),
+    updated: iso(mod.dateModified),
+    license: '',
+    categories: (mod.categories || []).map((cat) => cat.name || prettifyTag(cat.slug)),
+    loaders: loadersOf(indexes.map((file) => cfLoaderName(file.modLoader))),
+    gameVersions: [...new Set(indexes.map((file) => file.gameVersion).filter(Boolean))],
+    gallery: (mod.screenshots || [])
+      .map((shot) => ({ url: shot.thumbnailUrl || shot.url, title: stripCodes(shot.title || '') }))
+      .slice(0, 8),
+    links: {
+      source: mod.links?.websiteUrl || '',
+      issues: mod.links?.issuesUrl || '',
+      wiki: mod.links?.wikiUrl || '',
+      discord: '',
+    },
+  }
+}
+
+async function projectPreview({ source = 'modrinth', id } = {}) {
+  if (!id) return { ok: false, error: 'Thiếu mã dự án.' }
+  const key = `${source}:${String(id)}`
+  if (previewCache.has(key)) return { ok: true, preview: previewCache.get(key) }
+  try {
+    const preview = source === 'curseforge' ? await cfPreview(id) : await mrPreview(id)
+    if (previewCache.size >= PREVIEW_CAP) previewCache.delete(previewCache.keys().next().value)
+    previewCache.set(key, preview)
+    return { ok: true, preview }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+}
+
+module.exports = {
+  KINDS, spec, search, contentTags, versions, project, changelog, plan, install, installed, modEnvs,
+  normName, cfLoaderName, projectPreview, projectHashes,
+}

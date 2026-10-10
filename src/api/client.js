@@ -283,6 +283,46 @@ export async function discordSelect(instance) {
   return { ok: false }
 }
 
+export async function discordLinkList() {
+  if (bridge?.discordLinkList) return bridge.discordLinkList()
+  return { ok: false, items: [] }
+}
+
+export async function discordLinkStart(opts) {
+  if (bridge?.discordLinkStart) return bridge.discordLinkStart(opts)
+  return { ok: false, error: 'Chưa chạy trong ứng dụng.' }
+}
+
+export async function discordLinkCancel() {
+  if (bridge?.discordLinkCancel) return bridge.discordLinkCancel()
+  return { ok: true }
+}
+
+export async function discordLinkStatus(opts) {
+  if (bridge?.discordLinkStatus) return bridge.discordLinkStatus(opts)
+  return { ok: false, link: null }
+}
+
+export async function discordLinkUnlink(opts) {
+  if (bridge?.discordLinkUnlink) return bridge.discordLinkUnlink(opts)
+  return { ok: false }
+}
+
+export async function discordLinkPending() {
+  if (bridge?.discordLinkPending) return bridge.discordLinkPending()
+  return { ok: true, event: null, pending: null }
+}
+
+export async function appFocus() {
+  if (bridge?.appFocus) return bridge.appFocus()
+  return { ok: false }
+}
+
+export function onDiscordEvent(callback) {
+  if (bridge?.onDiscordEvent) return bridge.onDiscordEvent(callback)
+  return () => {}
+}
+
 export async function systemInfo() {
   if (bridge?.systemInfo) return bridge.systemInfo()
   return { ok: false, reason: 'web' }
@@ -817,6 +857,46 @@ export async function worldWrite(opts = {}) {
 
 export async function worldRestore(opts = {}) {
   if (bridge?.worldRestore) return bridge.worldRestore(opts)
+  return { ok: false, error: NEEDS_APP }
+}
+
+export async function mapInfo(opts = {}) {
+  if (bridge?.mapInfo) return bridge.mapInfo(opts)
+  return { ok: false, error: NEEDS_APP, dims: {}, cached: [], worlds: [] }
+}
+
+export async function mapWorldInfo(opts = {}) {
+  if (bridge?.mapWorldInfo) return bridge.mapWorldInfo(opts)
+  return { ok: false, error: NEEDS_APP, dims: {}, cached: [] }
+}
+
+export async function mapRender(opts = {}) {
+  if (bridge?.mapRender) return bridge.mapRender(opts)
+  return { ok: false, error: NEEDS_APP }
+}
+
+export async function mapClear(opts = {}) {
+  if (bridge?.mapClear) return bridge.mapClear(opts)
+  return { ok: false, error: NEEDS_APP }
+}
+
+export async function mapCancel() {
+  if (bridge?.mapCancel) return bridge.mapCancel()
+  return { ok: false }
+}
+
+export async function mapReveal() {
+  if (bridge?.mapReveal) return bridge.mapReveal()
+  return { ok: false }
+}
+
+export async function mapSave(opts = {}) {
+  if (bridge?.mapSave) return bridge.mapSave(opts)
+  return { ok: false, error: NEEDS_APP }
+}
+
+export async function contentPreview(opts = {}) {
+  if (bridge?.contentPreview) return bridge.contentPreview(opts)
   return { ok: false, error: NEEDS_APP }
 }
 
