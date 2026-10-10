@@ -617,14 +617,18 @@ async function renderMap({ dir, dimension = 'overworld', scale: requested, shadi
     const oz = Math.round((region.z * REGION_BLOCKS - originZ) / scale)
     const source = Buffer.from(new Uint8Array(message.rgb))
     const hview = new Int16Array(message.heights)
-    const spanX = Math.max(0, Math.min(slot, width - ox))
-    if (ox >= 0 && spanX) {
+    const fromX = Math.max(0, -ox)
+    const toX = Math.min(slot, width - ox)
+    const spanX = Math.max(0, toX - fromX)
+    if (spanX) {
+      const destX = ox + fromX
       for (let y = 0; y < slot; y += 1) {
         const ty = oz + y
         if (ty < 0 || ty >= height) continue
-        const from = y * slot
-        source.copy(rgb, (ty * width + ox) * 4, from * 4, (from + spanX) * 4)
-        heights.set(hview.subarray(from, from + spanX), ty * width + ox)
+        const from = y * slot + fromX
+        const dest = ty * width + destX
+        source.copy(rgb, dest * 4, from * 4, (from + spanX) * 4)
+        heights.set(hview.subarray(from, from + spanX), dest)
       }
     }
     chunks += message.chunks || 0
@@ -712,7 +716,7 @@ async function renderMap({ dir, dimension = 'overworld', scale: requested, shadi
 }
 
 const safeName = (value) => String(value).replace(/[^A-Za-z0-9._-]+/g, '_').slice(-60)
-const cacheName = (dir, dimension, scale, sig, trim, style = 'x') => `map__${safeName(path.basename(dir))}__${originKey(dir)}__${dimension}__s${scale}__${sig}${trim ? '' : '_full'}_v4${style}`
+const cacheName = (dir, dimension, scale, sig, trim, style = 'x') => `map__${safeName(path.basename(dir))}__${originKey(dir)}__${dimension}__s${scale}__${sig}${trim ? '' : '_full'}_v5${style}`
 
 function pngIsSound(buffer) {
   if (!buffer || buffer.length < 60) return false

@@ -1,7 +1,7 @@
 {
   "name": "lunaspace-launcher",
   "private": true,
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "LunarSpace Launcher - Minecraft launcher client",
   "author": {
     "name": "LunarSpace",
