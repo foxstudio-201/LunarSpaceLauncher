@@ -6,6 +6,7 @@ import SplashScreen from './components/SplashScreen'
 import TooltipProvider from './components/ui/TooltipProvider'
 import CrashModal from './components/ui/CrashModal'
 import { ToastProvider, useToast } from './components/ui/Toast'
+import ReleaseNotesModal from './components/ui/ReleaseNotesModal.jsx'
 import { progressLabel, progressPercent } from './components/ui/ProgressBar'
 import HomePage from './components/pages/HomePage'
 import VersionsPage from './components/pages/VersionsPage'
@@ -64,6 +65,7 @@ function AppContent() {
   const [crashes, setCrashes] = useState({})
   const [update, setUpdate] = useState({ phase: 'idle', current: '' })
   const [openCrash, setOpenCrash] = useState(null)
+  const [whatsNew, setWhatsNew] = useState(null)
 
   const [boot, setBoot] = useState('splash')
   const [bootStatus, setBootStatus] = useState('boot')
@@ -371,6 +373,26 @@ function AppContent() {
     }, PAGE_FADE_MS)
   }, [])
 
+  useEffect(() => {
+    if (!version) return
+    let alive = true
+    api
+      .whatsNew()
+      .then((res) => {
+        if (alive && res?.show) setWhatsNew({ version: res.version, previous: res.previous })
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [version])
+
+  const closeWhatsNew = useCallback(() => {
+    const target = whatsNew
+    setWhatsNew(null)
+    if (target?.version) api.whatsNewSeen({ version: target.version }).catch(() => {})
+  }, [whatsNew])
+
   const handleSelectInstance = useCallback((inst) => {
     setSelectedInstance(inst)
     setShowDropdown(false)
@@ -616,6 +638,7 @@ function AppContent() {
                 version={version}
                 storage={storage}
                 onSave={handleSaveSettings}
+                onShowWhatsNew={() => setWhatsNew({ version, manual: true })}
               />
             )}
             {isInInstance && (
@@ -637,6 +660,10 @@ function AppContent() {
 
       {boot !== 'done' && (
         <SplashScreen lang={lang} leaving={boot === 'leaving'} status={bootStatus} version={version} />
+      )}
+
+      {whatsNew && (
+        <ReleaseNotesModal theme={theme} lang={lang} version={whatsNew.version || version} onClose={closeWhatsNew} />
       )}
 
       {openCrash && crashes[openCrash] && (

@@ -1,6 +1,7 @@
 const { app } = require('electron')
 const { spawn } = require('child_process')
 const fs = require('fs')
+const path = require('path')
 
 let updater = null
 let loadError = null
@@ -206,4 +207,80 @@ function shutdown() {
   bootTimer = null
 }
 
-module.exports = { init, configure, check, download, install, autoInstall, status: snapshot, shutdown }
+
+const RELEASE_REPO = { owner: 'foxstudio-201', repo: 'LunarSpaceLauncher' }
+
+function releaseCacheFile(version) {
+  return path.join(app.getPath('userData'), 'release-notes', `${version}.json`)
+}
+
+function readReleaseCache(version) {
+  try {
+    return JSON.parse(fs.readFileSync(releaseCacheFile(version), 'utf8'))
+  } catch {
+    return null
+  }
+}
+
+function writeReleaseCache(payload) {
+  try {
+    const file = releaseCacheFile(payload.version)
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, JSON.stringify(payload, null, 2), 'utf8')
+  } catch {}
+}
+
+function shapeRelease(data, version) {
+  const assets = Array.isArray(data?.assets) ? data.assets : []
+  return {
+    version,
+    name: data?.name || `v${version}`,
+    body: data?.body || '',
+    publishedAt: data?.published_at || '',
+    htmlUrl: data?.html_url || '',
+    assets: assets.map((asset) => ({
+      name: asset.name,
+      url: asset.browser_download_url,
+      size: asset.size || 0,
+      image: /\.(png|jpe?g|gif|webp)$/i.test(asset.name || ''),
+    })),
+    fetchedAt: new Date().toISOString(),
+  }
+}
+
+async function githubJson(url) {
+  const res = await fetch(url, {
+    headers: { 'User-Agent': 'LunarSpace-Launcher', Accept: 'application/vnd.github+json' },
+    signal: AbortSignal.timeout(15000),
+  })
+  if (!res.ok) throw new Error(`GitHub trả về ${res.status}`)
+  return res.json()
+}
+
+async function releaseNotes({ version, force = false } = {}) {
+  const wanted = String(version || app.getVersion()).replace(/^v/, '')
+  if (!force) {
+    const cached = readReleaseCache(wanted)
+    if (cached) return { ok: true, cached: true, ...cached }
+  }
+  const base = `https://api.github.com/repos/${RELEASE_REPO.owner}/${RELEASE_REPO.repo}/releases`
+  let data = null
+  for (const tag of [`v${wanted}`, wanted]) {
+    try {
+      data = await githubJson(`${base}/tags/${tag}`)
+      break
+    } catch {}
+  }
+  if (!data) {
+    try {
+      const list = await githubJson(`${base}?per_page=30`)
+      data = (Array.isArray(list) ? list : []).find((row) => String(row.tag_name || '').replace(/^v/, '') === wanted) || null
+    } catch {}
+  }
+  if (!data) return { ok: false, error: `Không tìm thấy bản phát hành v${wanted} trên GitHub.` }
+  const payload = shapeRelease(data, wanted)
+  writeReleaseCache(payload)
+  return { ok: true, cached: false, ...payload }
+}
+
+module.exports = { init, configure, check, download, install, autoInstall, status: snapshot, shutdown, releaseNotes }

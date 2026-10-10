@@ -338,6 +338,11 @@ export async function createInstance() {
   throw new Error(NEEDS_APP)
 }
 
+export async function changeLoaderVersion(opts) {
+  if (bridge?.changeLoaderVersion) return bridge.changeLoaderVersion(opts)
+  throw new Error(NEEDS_APP)
+}
+
 export async function removeInstance() {
   if (bridge?.removeInstance) return bridge.removeInstance(...arguments)
   throw new Error(NEEDS_APP)
@@ -445,6 +450,21 @@ export async function installJavaRuntime({ component } = {}) {
 
 export async function removeJavaRuntime({ component } = {}) {
   if (bridge?.removeJavaRuntime) return bridge.removeJavaRuntime({ component })
+  throw new Error(NEEDS_APP)
+}
+
+export async function javaOptions() {
+  if (bridge?.javaOptions) return bridge.javaOptions()
+  return { ok: false, managed: [], zulu: [], external: [], selected: '' }
+}
+
+export async function installZuluRuntime({ major, kind } = {}) {
+  if (bridge?.installZulu) return bridge.installZulu({ major, kind })
+  throw new Error(NEEDS_APP)
+}
+
+export async function removeZuluRuntime({ dir } = {}) {
+  if (bridge?.removeZulu) return bridge.removeZulu({ dir })
   throw new Error(NEEDS_APP)
 }
 
@@ -612,6 +632,21 @@ export async function updateDownload() {
 export async function updateInstall() {
   if (bridge?.updateInstall) return bridge.updateInstall()
   return { ok: false, error: NEEDS_APP }
+}
+
+export async function releaseNotes(opts) {
+  if (bridge?.releaseNotes) return bridge.releaseNotes(opts)
+  return { ok: false, error: 'Chưa chạy trong ứng dụng.' }
+}
+
+export async function whatsNew() {
+  if (bridge?.whatsNew) return bridge.whatsNew()
+  return { ok: true, show: false }
+}
+
+export async function whatsNewSeen(opts) {
+  if (bridge?.whatsNewSeen) return bridge.whatsNewSeen(opts)
+  return { ok: true }
 }
 
 export async function exportProfile(opts = {}) {

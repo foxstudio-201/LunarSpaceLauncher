@@ -3,16 +3,15 @@ const fsp = fs.promises
 const path = require('path')
 const { UA } = require('./net.cjs')
 
-const AIKAR_FLAGS = [
+const CLIENT_FLAGS = [
   '-XX:+UseG1GC',
   '-XX:+ParallelRefProcEnabled',
-  '-XX:MaxGCPauseMillis=200',
-  '-XX:+UnlockExperimentalVMOptions',
+  '-XX:MaxGCPauseMillis=37',
   '-XX:+DisableExplicitGC',
   '-XX:+AlwaysPreTouch',
-  '-XX:G1NewSizePercent=30',
+  '-XX:G1NewSizePercent=20',
   '-XX:G1MaxNewSizePercent=40',
-  '-XX:G1HeapRegionSize=8M',
+  '-XX:G1HeapRegionSize=32M',
   '-XX:G1ReservePercent=20',
   '-XX:G1HeapWastePercent=5',
   '-XX:G1MixedGCCountTarget=4',
@@ -20,15 +19,14 @@ const AIKAR_FLAGS = [
   '-XX:G1MixedGCLiveThresholdPercent=90',
   '-XX:G1RSetUpdatingPauseTimePercent=5',
   '-XX:SurvivorRatio=32',
-  '-XX:+PerfDisableSharedMem',
   '-XX:MaxTenuringThreshold=1',
-  '-Dusing.aikars.flags=https://mcflags.emc.gs',
-  '-Daikars.new.flags=true',
+  '-XX:+PerfDisableSharedMem',
+  '-Dfile.encoding=UTF-8',
 ]
 
 function jvmFlags(memoryMb) {
   const mem = Math.max(512, Number(memoryMb) || 2048)
-  return [`-Xms${mem}M`, ...AIKAR_FLAGS]
+  return [`-Xms${mem}M`, ...CLIENT_FLAGS]
 }
 
 const PERF_MODS = {
@@ -36,19 +34,35 @@ const PERF_MODS = {
     { slug: 'sodium', name: 'Sodium' },
     { slug: 'lithium', name: 'Lithium' },
     { slug: 'ferrite-core', name: 'FerriteCore' },
+    { slug: 'modernfix', name: 'ModernFix' },
+    { slug: 'entityculling', name: 'EntityCulling' },
+    { slug: 'immediatelyfast', name: 'ImmediatelyFast' },
+    { slug: 'dynamic-fps', name: 'Dynamic FPS' },
   ],
   quilt: [
     { slug: 'sodium', name: 'Sodium' },
     { slug: 'lithium', name: 'Lithium' },
     { slug: 'ferrite-core', name: 'FerriteCore' },
+    { slug: 'modernfix', name: 'ModernFix' },
+    { slug: 'entityculling', name: 'EntityCulling' },
+    { slug: 'immediatelyfast', name: 'ImmediatelyFast' },
+    { slug: 'dynamic-fps', name: 'Dynamic FPS' },
   ],
   forge: [
     { slug: 'embeddium', name: 'Embeddium' },
     { slug: 'ferrite-core', name: 'FerriteCore' },
+    { slug: 'modernfix', name: 'ModernFix' },
+    { slug: 'entityculling', name: 'EntityCulling' },
+    { slug: 'immediatelyfast', name: 'ImmediatelyFast' },
+    { slug: 'clumps', name: 'Clumps' },
   ],
   neoforge: [
     { slug: 'embeddium', name: 'Embeddium' },
     { slug: 'ferrite-core', name: 'FerriteCore' },
+    { slug: 'modernfix', name: 'ModernFix' },
+    { slug: 'entityculling', name: 'EntityCulling' },
+    { slug: 'immediatelyfast', name: 'ImmediatelyFast' },
+    { slug: 'clumps', name: 'Clumps' },
   ],
 }
 
@@ -132,4 +146,4 @@ async function setHighPriority(pid) {
   }
 }
 
-module.exports = { jvmFlags, AIKAR_FLAGS, installPerfMods, PERF_MODS, setHighPriority }
+module.exports = { jvmFlags, CLIENT_FLAGS, installPerfMods, PERF_MODS, setHighPriority }

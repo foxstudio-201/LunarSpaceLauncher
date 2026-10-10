@@ -391,6 +391,28 @@ function registerIpc() {
   ipcMain.handle('update:check', () => ({ ...updater.check() }))
   ipcMain.handle('update:download', () => ({ ...updater.download() }))
   ipcMain.handle('update:install', () => ({ ...updater.install() }))
+  ipcMain.handle('update:release-notes', (_e, opts) => updater.releaseNotes(opts || {}))
+  ipcMain.handle('update:whats-new', () => {
+    const current = app.getVersion()
+    const stored = readSettings()
+    const previous = String(stored.lastVersion || '')
+    const seen = String(stored.releaseNotesSeen || '')
+    if (!previous) {
+      writeSettings({ lastVersion: current, releaseNotesSeen: current })
+      return { ok: true, show: false }
+    }
+    if (previous === current) return { ok: true, show: false }
+    if (seen === current) {
+      writeSettings({ lastVersion: current })
+      return { ok: true, show: false }
+    }
+    return { ok: true, show: true, version: current, previous }
+  })
+  ipcMain.handle('update:whats-new-seen', (_e, opts) => {
+    const current = app.getVersion()
+    writeSettings({ lastVersion: current, releaseNotesSeen: String((opts || {}).version || current) })
+    return { ok: true }
+  })
 
   ipcMain.handle('secret:set', (_e, { name, value }) => {
     if (!name) return { ok: false, error: 'Missing secret name.' }
@@ -552,6 +574,7 @@ function registerIpc() {
   })
   ipcMain.handle('launcher:create', (_e, opts) => launcher.createInstance({ ...(opts || {}), settings: readSettings() }, emitLauncher))
   ipcMain.handle('launcher:update', (_e, opts) => launcher.updateInstance({ ...(opts || {}), settings: readSettings(), emit: emitLauncher }))
+  ipcMain.handle('launcher:loader-version', (_e, opts) => launcher.changeLoaderVersion({ ...(opts || {}), settings: readSettings() }, emitLauncher))
   ipcMain.handle('launcher:remove', (_e, opts) => launcher.removeInstance({ ...(opts || {}), settings: readSettings() }))
   ipcMain.handle('launcher:launch', (_e, opts) => launcher.launchInstance({ ...(opts || {}), settings: readSettings() }, emitLauncher))
   ipcMain.handle('launcher:stop', (_e, opts) => launcher.stopInstance(opts || {}, emitLauncher))
@@ -573,6 +596,9 @@ function registerIpc() {
   ipcMain.handle('launcher:runtimes', (_e, opts) => launcher.listJavaRuntimes(readSettings(), !!(opts || {}).force))
   ipcMain.handle('launcher:runtime-install', (_e, opts) => launcher.installJavaRuntime({ ...(opts || {}), settings: readSettings() }))
   ipcMain.handle('launcher:runtime-remove', (_e, opts) => launcher.removeJavaRuntime({ ...(opts || {}), settings: readSettings() }))
+  ipcMain.handle('launcher:java-options', () => launcher.javaOptions(readSettings()))
+  ipcMain.handle('launcher:java-zulu-install', (_e, opts) => launcher.installZuluRuntime({ ...(opts || {}), settings: readSettings() }, emitLauncher))
+  ipcMain.handle('launcher:java-zulu-remove', (_e, opts) => launcher.removeZuluRuntime({ ...(opts || {}), settings: readSettings() }))
 
   ipcMain.handle('launcher:modpack-search', (_e, opts) => launcher.modpackSearch(opts || {}))
   ipcMain.handle('launcher:modpack-tags', (_e, opts) => launcher.modpackTags(opts || {}))

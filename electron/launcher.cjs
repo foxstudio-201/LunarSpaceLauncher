@@ -273,7 +273,7 @@ async function installForge({ entry, paths, settings, emit }) {
   })
 
   const chain = await resolveChain(game, { paths, dryRun: true })
-  const resolved = await resolveJavaFor({ instanceId: entry.id, chain, paths, settings, emit })
+  const resolved = await resolveJavaFor({ instanceId: entry.id, chain, paths, settings, emit, preferred: entry.javaPath })
   if (!resolved.ok) throw new Error(resolved.error)
 
   const forgeDir = path.join(paths.shared, 'forge-installer')
@@ -1036,6 +1036,7 @@ async function updateInstance({ id, patch = {}, settings, emit } = {}) {
   if (patch.demo !== undefined) allowed.demo = !!patch.demo
   if (patch.boost !== undefined) allowed.boost = !!patch.boost
   if (patch.boostMods !== undefined) allowed.boostMods = !!patch.boostMods
+  if (patch.javaPath !== undefined) allowed.javaPath = String(patch.javaPath || '').trim()
   const next = updateEntry(id, allowed)
   try {
     await fsp.writeFile(path.join(entry.dir, 'instance.json'), JSON.stringify(next, null, 2), 'utf8')
@@ -1068,6 +1069,43 @@ async function updateInstance({ id, patch = {}, settings, emit } = {}) {
   return { ok: true, instance: next }
 }
 
+async function changeLoaderVersion({ id, loaderVersion, settings } = {}, emit) {
+  const entry = readIndex().find((i) => i.id === id)
+  if (!entry) return { ok: false, error: 'Không tìm thấy instance.' }
+  if (entry.loader === 'vanilla') return { ok: false, error: 'Phiên bản này không dùng loader.' }
+  const wanted = String(loaderVersion || '').trim()
+  if (!wanted) return { ok: false, error: 'Thiếu phiên bản loader.' }
+  if (wanted === (entry.loaderVersion || '')) return { ok: true, instance: entry, unchanged: true }
+  if (installingIds.has(entry.id)) return { ok: false, error: 'Instance đang cài, chờ cho xong đã.' }
+
+  let versionId = null
+  if (entry.loader === 'fabric' || entry.loader === 'quilt') {
+    try {
+      const target = await resolveTarget({ version: entry.version, loader: entry.loader, loaderVersion: wanted, settings })
+      versionId = target.versionId
+    } catch (err) {
+      return { ok: false, error: `Không lấy được loader: ${err.message}` }
+    }
+  }
+
+  const patch = { loaderVersion: wanted, versionId, status: 'installing', error: null, boostResult: null }
+  if (entry.loader === 'forge' || entry.loader === 'neoforge') patch.forgeVersion = wanted
+  const next = updateEntry(entry.id, patch)
+  try {
+    await fsp.writeFile(path.join(entry.dir, 'instance.json'), JSON.stringify(next, null, 2), 'utf8')
+  } catch {}
+
+  emit?.({ type: 'progress', id: entry.id, phase: 'start', label: 'loader' })
+  await runInstall(next, settings, emit)
+  await syncProfiles(settings)
+  const after = readIndex().find((i) => i.id === entry.id) || next
+  try {
+    await fsp.writeFile(path.join(entry.dir, 'instance.json'), JSON.stringify(after, null, 2), 'utf8')
+  } catch {}
+  if (after.status === 'error') return { ok: false, error: after.error || 'Cài loader thất bại.', instance: after }
+  return { ok: true, instance: after }
+}
+
 async function removeInstance({ id, deleteFiles = false, settings } = {}) {
   const entry = readIndex().find((i) => i.id === id)
   if (!entry) return { ok: false, error: 'Không tìm thấy instance.' }
@@ -1086,9 +1124,15 @@ async function removeInstance({ id, deleteFiles = false, settings } = {}) {
   return { ok: true, instances: list, profiles }
 }
 
-async function resolveJavaFor({ instanceId, chain, paths, settings, emit }) {
+async function resolveJavaFor({ instanceId, chain, paths, settings, emit, preferred }) {
   const required = chain.javaVersion?.majorVersion || 8
   let component = chain.javaVersion?.component || null
+
+  if (preferred) {
+    const chosen = await findJava({ explicit: preferred, required })
+    if (chosen.ok) return { ok: true, java: chosen.java, source: 'instance' }
+    emit?.({ type: 'log', id: instanceId, line: `[LunarSpace] Java đã chọn cho phiên bản không dùng được (${chosen.error}). Chuyển sang Java tự động.` })
+  }
 
   if (settings?.javaPath) {
     const manual = await findJava({ explicit: settings.javaPath, required })
@@ -1202,7 +1246,7 @@ async function runLaunch({ id, username, demo: demoOverride, settings }, emit) {
   }
 
   const required = chain.javaVersion?.majorVersion || 8
-  const resolved = await resolveJavaFor({ instanceId: entry.id, chain, paths, settings, emit })
+  const resolved = await resolveJavaFor({ instanceId: entry.id, chain, paths, settings, emit, preferred: entry.javaPath })
   if (!resolved.ok) return { ok: false, error: resolved.error }
   const found = { java: resolved.java }
 
@@ -1362,6 +1406,54 @@ async function installJavaRuntime({ component, settings }) {
 async function removeJavaRuntime({ component, settings }) {
   const { paths } = storageFor(settings)
   return javaModule.removeRuntime({ paths, component })
+}
+
+async function javaOptions(settings) {
+  const { paths } = storageFor(settings)
+  const [managed, zulu] = await Promise.all([
+    javaModule.listRuntimes({ paths, metaDir: paths.meta }).catch(() => []),
+    javaModule.listZulu({ paths }).catch(() => []),
+  ])
+  const external = []
+  try {
+    const probe = await findJava({ required: 0 })
+    for (const item of probe.all || []) {
+      const dir = path.dirname(path.dirname(item.path))
+      if (zulu.some((z) => path.resolve(z.javaPath) === path.resolve(item.path))) continue
+      external.push({ id: `ext-${path.resolve(item.path)}`, javaPath: item.path, major: item.major, name: item.raw || item.path, dir })
+    }
+  } catch {}
+  return {
+    ok: true,
+    selected: settings?.javaPath || '',
+    managed: managed.filter((r) => r.installed).map((r) => ({ id: `managed-${r.component}`, component: r.component, javaPath: r.javaPath, major: r.major, name: `Java ${r.name || r.major}`, dir: r.dir, bytes: r.bytes })),
+    zulu,
+    external,
+  }
+}
+
+async function installZuluRuntime({ major, kind = 'jre', settings }, emit) {
+  const { paths } = storageFor(settings)
+  const id = 'zulu'
+  emit?.({ type: 'progress', id, phase: 'download', label: 'zulu', major: Number(major) || 21, done: 0, total: 0, totalBytes: 0, bytesDone: 0 })
+  try {
+    const installed = await javaModule.installZulu({
+      paths,
+      major: Number(major) || 21,
+      kind,
+      onProgress: (p) => emit?.({ type: 'progress', id, phase: 'download', ...p }),
+    })
+    emit?.({ type: 'progress', id, phase: 'clear' })
+    return { ok: true, runtime: installed }
+  } catch (err) {
+    emit?.({ type: 'progress', id, phase: 'clear' })
+    return { ok: false, error: err.message }
+  }
+}
+
+async function removeZuluRuntime({ dir, settings }) {
+  const { paths } = storageFor(settings)
+  return javaModule.removeZulu({ paths, dir })
 }
 
 function rememberPack(plan) {
@@ -2757,6 +2849,7 @@ module.exports = {
   moveEntry,
   accountsList,
   accountAdd,
+  changeLoaderVersion,
   accountRemove,
   accountSetActive,
   accountAuth,
@@ -2774,6 +2867,9 @@ module.exports = {
   listJavaRuntimes,
   installJavaRuntime,
   removeJavaRuntime,
+  javaOptions,
+  installZuluRuntime,
+  removeZuluRuntime,
   modpackSearch,
   modpackTags,
   modpackVersions,

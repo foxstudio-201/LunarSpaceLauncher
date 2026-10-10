@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { GearSix, FolderOpen, Trash, Terminal, FloppyDisk, CheckCircle, WarningCircle, PlayCircle, UserCircle, RocketLaunch, Lightning, Package, X, FileArrowUp, ArrowsClockwise } from '@phosphor-icons/react'
+import { GearSix, FolderOpen, Trash, Terminal, FloppyDisk, CheckCircle, WarningCircle, PlayCircle, UserCircle, RocketLaunch, Lightning, Package, X, FileArrowUp, ArrowsClockwise, SpinnerGap, Coffee } from '@phosphor-icons/react'
 import { t } from '../../i18n/translations'
 import { palette } from '../../lib/palette'
 import HeadSkin from '../ui/HeadSkin'
+import Select from '../ui/Select'
 import * as api from '../../api/client.js'
 
 const EXPORT_FORMATS = [
@@ -53,18 +54,22 @@ function Switch({ on, onClick, c, tip }) {
   )
 }
 
-function boostModsHint(t, lang, loader) {
-  if (loader === 'fabric' || loader === 'quilt') {
+function boostModsHint(lang, loader, game) {
+  const set = BOOST_MODS[loader]
+  if (!set) {
     return lang === 'vi'
-      ? 'Cài Sodium + Lithium + FerriteCore từ Modrinth vào thư mục mods — đây là phần tăng FPS mạnh nhất.'
-      : 'Installs Sodium + Lithium + FerriteCore from Modrinth into mods/ — the biggest FPS win.'
+      ? 'Loader này chưa có bộ mod tăng FPS phù hợp.'
+      : 'No FPS mod set for this loader yet.'
   }
-  if (loader === 'forge') {
-    return lang === 'vi'
-      ? 'Cài Embeddium + FerriteCore từ Modrinth vào thư mục mods (Forge 1.18 trở lên mới có bản phù hợp).'
-      : 'Installs Embeddium + FerriteCore from Modrinth into mods/ (Forge 1.18+ only).'
-  }
-  return t(lang, 'instance.settings.boostModsNa')
+  const head = lang === 'vi' ? 'Cài từ Modrinth vào thư mục mods' : 'Installs from Modrinth into mods/'
+  return `${head}: ${set.join(' + ')} — ${lang === 'vi' ? 'đây mới là phần tăng FPS thật' : 'this is what actually raises FPS'}${game ? ` (${loader} ${game})` : ''}.`
+}
+
+const BOOST_MODS = {
+  fabric: ['Sodium', 'Lithium', 'FerriteCore', 'ModernFix', 'EntityCulling', 'ImmediatelyFast', 'Dynamic FPS'],
+  quilt: ['Sodium', 'Lithium', 'FerriteCore', 'ModernFix', 'EntityCulling', 'ImmediatelyFast', 'Dynamic FPS'],
+  forge: ['Embeddium', 'FerriteCore', 'ModernFix', 'EntityCulling', 'ImmediatelyFast', 'Clumps'],
+  neoforge: ['Embeddium', 'FerriteCore', 'ModernFix', 'EntityCulling', 'ImmediatelyFast', 'Clumps'],
 }
 
 const JVM_DEFAULT = '-XX:+UseG1GC -XX:MaxGCPauseMillis=50'
@@ -87,6 +92,58 @@ export default function InstanceSettingsPage({ instance, theme, lang, account, o
   const [error, setError] = useState('')
   const [confirming, setConfirming] = useState(false)
   const [deleteFiles, setDeleteFiles] = useState(true)
+  const [builds, setBuilds] = useState([])
+  const [build, setBuild] = useState(instance.loaderVersion || '')
+  const [buildsLoading, setBuildsLoading] = useState(false)
+  const [loaderAsk, setLoaderAsk] = useState(false)
+  const [loaderBusy, setLoaderBusy] = useState(false)
+  const [loaderNote, setLoaderNote] = useState('')
+  const [javaPath, setJavaPath] = useState(instance.javaPath || '')
+  const [javaList, setJavaList] = useState([])
+
+  useEffect(() => {
+    if (!instance.loader || instance.loader === 'vanilla') return undefined
+    let alive = true
+    setBuildsLoading(true)
+    api
+      .listLoaderVersions({ kind: instance.loader, game: instance.version })
+      .then((res) => {
+        if (!alive) return
+        setBuilds(res?.versions || [])
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (alive) setBuildsLoading(false)
+      })
+    return () => {
+      alive = false
+    }
+  }, [instance.id, instance.loader, instance.version])
+
+  useEffect(() => {
+    setBuild(instance.loaderVersion || '')
+  }, [instance.id, instance.loaderVersion])
+
+  useEffect(() => {
+    setJavaPath(instance.javaPath || '')
+  }, [instance.id, instance.javaPath])
+
+  useEffect(() => {
+    let alive = true
+    api
+      .javaOptions()
+      .then((res) => {
+        if (!alive) return
+        const zulu = (res?.zulu || []).map((item) => ({ value: item.javaPath, label: item.name }))
+        const managed = (res?.managed || []).map((item) => ({ value: item.javaPath, label: item.name }))
+        const external = (res?.external || []).map((item) => ({ value: item.javaPath, label: `Java ${item.major} (máy này) · ${item.name}` }))
+        setJavaList([...zulu, ...managed, ...external])
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [instance.id])
 
   useEffect(() => {
     setName(instance.name)
@@ -99,7 +156,7 @@ export default function InstanceSettingsPage({ instance, theme, lang, account, o
   const save = async () => {
     setError('')
     try {
-      const res = await api.updateInstance({ id: instance.id, patch: { name, memoryMb: memory, jvmArgs: jvm, boost: boostOn, boostMods } })
+      const res = await api.updateInstance({ id: instance.id, patch: { name, memoryMb: memory, jvmArgs: jvm, boost: boostOn, boostMods, javaPath } })
       if (!res?.ok) return setError(res?.error || 'error')
       onSaveInstance?.(res.instance)
       setSaved(true)
@@ -107,6 +164,21 @@ export default function InstanceSettingsPage({ instance, theme, lang, account, o
     } catch (err) {
       setError(err.message)
     }
+  }
+
+  const changeLoader = async () => {
+    setLoaderAsk(false)
+    setLoaderBusy(true)
+    setLoaderNote('')
+    const res = await api.changeLoaderVersion({ id: instance.id, loaderVersion: build }).catch((err) => ({ ok: false, error: err.message }))
+    setLoaderBusy(false)
+    if (!res?.ok) {
+      setError(res?.error || 'error')
+      return
+    }
+    onSaveInstance?.(res.instance)
+    setLoaderNote(t(lang, 'instance.settings.loaderDone'))
+    setTimeout(() => setLoaderNote(''), 2600)
   }
 
   const remove = async () => {
@@ -118,6 +190,21 @@ export default function InstanceSettingsPage({ instance, theme, lang, account, o
   }
 
   const rowStyle = { borderTop: `1px solid ${c.border}` }
+  const javaOptions = [
+    { value: '', label: t(lang, 'instance.settings.javaAuto') },
+    ...javaList,
+  ]
+
+  const buildOptions = builds.map((row) => {
+    const marks = []
+    if (row.version === instance.loaderVersion) marks.push(t(lang, 'instance.settings.loaderCurrent'))
+    else if (row.latest) marks.push(t(lang, 'instance.settings.loaderLatest'))
+    return {
+      value: row.version,
+      label: marks.length ? `${row.version} · ${marks.join(', ')}` : row.version,
+      node: <img src={`./${loader.image}`} alt="" className="w-4 h-4 object-contain" />,
+    }
+  })
 
   const runExport = async () => {
     if (exporting) return
@@ -177,6 +264,90 @@ export default function InstanceSettingsPage({ instance, theme, lang, account, o
                 </p>
               </div>
               <span className="text-[10px] font-mono" style={{ color: c.label }}>{instance.created?.slice(0, 10)}</span>
+            </div>
+
+            {instance.loader !== 'vanilla' && (
+              <div className="flex items-center gap-4 px-4 py-3.5" style={rowStyle}>
+                <ArrowsClockwise size={16} weight="duotone" className="shrink-0" style={{ color: c.accent }} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold" style={{ color: c.text }}>{t(lang, 'instance.settings.loaderVersion')}</p>
+                  <p className="text-[10px]" style={{ color: loaderNote ? c.accent : c.faint }}>
+                    {loaderNote || (buildsLoading ? t(lang, 'instance.settings.loaderLoading') : t(lang, 'instance.settings.loaderHint'))}
+                  </p>
+                </div>
+                <div className="w-60 shrink-0">
+                  <Select
+                    theme={theme}
+                    value={build}
+                    options={buildOptions}
+                    onChange={setBuild}
+                    placeholder={buildsLoading ? t(lang, 'instance.settings.loaderLoading') : '—'}
+                    disabled={loaderBusy || buildsLoading || !builds.length}
+                  />
+                </div>
+                <button
+                  onClick={() => setLoaderAsk(true)}
+                  disabled={loaderBusy || !build || build === (instance.loaderVersion || '')}
+                  className="h-8 px-3 rounded-lg text-[11px] font-bold shrink-0 flex items-center gap-1.5 disabled:opacity-40"
+                  style={{ background: c.accent, color: '#0a0a0a' }}
+                >
+                  {loaderBusy ? (
+                    <SpinnerGap size={13} weight="bold" className="animate-spin" />
+                  ) : (
+                    <ArrowsClockwise size={13} weight="bold" />
+                  )}
+                  {loaderBusy ? t(lang, 'instance.settings.loaderBusy') : t(lang, 'instance.settings.loaderChange')}
+                </button>
+              </div>
+            )}
+
+            {loaderAsk && (
+              <div className="px-4 py-3" style={rowStyle}>
+                <div className="rounded-lg p-3 flex flex-col gap-3" style={{ background: c.input, border: `1px solid ${c.border}` }}>
+                  <p className="text-[11px] leading-relaxed" style={{ color: c.text }}>
+                    {t(lang, 'instance.settings.loaderConfirmBody')}
+                  </p>
+                  <p className="text-[10px] font-mono" style={{ color: c.label }}>
+                    {loader.name} {instance.loaderVersion || '—'} → {build}
+                  </p>
+                  <p className="text-[10px] leading-relaxed" style={{ color: c.faint }}>
+                    {t(lang, 'instance.settings.loaderConfirmHint')}
+                  </p>
+                  <div className="flex items-center gap-2 justify-end">
+                    <button
+                      onClick={() => setLoaderAsk(false)}
+                      className="h-8 px-3 rounded-lg text-[11px] font-semibold"
+                      style={{ background: c.input, border: `1px solid ${c.border}`, color: c.label }}
+                    >
+                      {t(lang, 'files.cancel')}
+                    </button>
+                    <button
+                      onClick={changeLoader}
+                      className="h-8 px-3.5 rounded-lg text-[11px] font-bold"
+                      style={{ background: c.accent, color: '#0a0a0a' }}
+                    >
+                      {t(lang, 'instance.settings.loaderApply')}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center gap-4 px-4 py-3.5" style={rowStyle}>
+              <Coffee size={16} weight="duotone" className="shrink-0" style={{ color: c.accent }} />
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-semibold" style={{ color: c.text }}>{t(lang, 'instance.settings.java')}</p>
+                <p className="text-[10px]" style={{ color: c.faint }}>{t(lang, 'instance.settings.javaHint')}</p>
+              </div>
+              <div className="w-72 shrink-0">
+                <Select
+                  theme={theme}
+                  value={javaPath}
+                  options={javaOptions}
+                  onChange={setJavaPath}
+                  placeholder={t(lang, 'instance.settings.javaAuto')}
+                />
+              </div>
             </div>
 
             <div className="flex items-center gap-4 px-4 py-3.5" style={rowStyle}>
@@ -281,7 +452,7 @@ export default function InstanceSettingsPage({ instance, theme, lang, account, o
                   {t(lang, 'instance.settings.boostMods')}
                 </p>
                 <p className="mt-0.5 text-[10px] leading-relaxed" style={{ color: c.faint }}>
-                  {boostModsHint(t, lang, instance.loader)}
+                  {boostModsHint(lang, instance.loader, instance.version)}
                 </p>
               </div>
               <Switch on={boostMods} onClick={() => setBoostMods((v) => !v)} c={c} tip={t(lang, 'instance.settings.boostMods')} />

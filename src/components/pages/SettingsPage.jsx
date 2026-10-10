@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   Translate, MoonStars, Sun, Coffee, DownloadSimple, Trash, ArrowsClockwise,
   SpinnerGap, CheckCircle, FloppyDisk, HardDrive, WarningCircle, DiscordLogo,
-  Tray,
+  Tray, Sparkle,
 } from '@phosphor-icons/react'
 import { useApp } from '../../i18n/AppContext'
 import { t } from '../../i18n/translations'
@@ -10,6 +10,7 @@ import { palette } from '../../lib/palette'
 import { formatBytes, formatDate } from '../../lib/status'
 import PageHeader from '../ui/PageHeader'
 import Switch from '../ui/Switch'
+import Select from '../ui/Select'
 import { Card, Fact, Meter, Section, Skeleton } from '../ui/Panel'
 import * as api from '../../api/client.js'
 
@@ -63,13 +64,18 @@ function Segmented({ c, value, onChange, options }) {
 
 const smallBtn = (c) => ({ background: c.input, border: `1px solid ${c.border}`, color: c.label })
 
-export default function SettingsPage({ theme, lang, version, system, storage, onSave, update: updateEvent }) {
+export default function SettingsPage({ theme, lang, version, system, storage, onSave, onShowWhatsNew, update: updateEvent }) {
   const { setLang, setTheme } = useApp()
   const c = palette(theme)
   const [javaPath, setJavaPath] = useState(storage?.javaPath || '')
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
   const [runtimes, setRuntimes] = useState([])
+  const [javaOpts, setJavaOpts] = useState({ managed: [], zulu: [], external: [], selected: '' })
+  const [zuluMajor, setZuluMajor] = useState('21')
+  const [zuluKind, setZuluKind] = useState('jre')
+  const [zuluBusy, setZuluBusy] = useState('')
+  const [zuluRemove, setZuluRemove] = useState('')
   const [platform, setPlatform] = useState('')
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState('')
@@ -183,6 +189,45 @@ export default function SettingsPage({ theme, lang, version, system, storage, on
     } catch (err) {
       setError(err.message)
     }
+  }
+
+  const loadJavaOpts = useCallback(async () => {
+    try {
+      const res = await api.javaOptions()
+      if (res?.ok) {
+        setJavaOpts({ managed: res.managed || [], zulu: res.zulu || [], external: res.external || [], selected: res.selected || '' })
+      }
+    } catch {}
+  }, [])
+
+  useEffect(() => {
+    loadJavaOpts()
+  }, [loadJavaOpts])
+
+  const downloadZulu = async () => {
+    setZuluBusy('install')
+    setError('')
+    const res = await api.installZuluRuntime({ major: Number(zuluMajor), kind: zuluKind }).catch((err) => ({ ok: false, error: err.message }))
+    setZuluBusy('')
+    if (!res?.ok) setError(res?.error || 'error')
+    await loadJavaOpts()
+  }
+
+  const removeZulu = async (dir) => {
+    setZuluBusy(dir)
+    const res = await api.removeZuluRuntime({ dir }).catch((err) => ({ ok: false, error: err.message }))
+    setZuluBusy('')
+    setZuluRemove('')
+    if (!res?.ok) setError(res?.error || 'error')
+    await loadJavaOpts()
+  }
+
+  const useJava = async (pathValue) => {
+    setJavaPath(pathValue)
+    await onSave({ javaPath: pathValue })
+    setSaved(true)
+    setTimeout(() => setSaved(false), 1800)
+    loadJavaOpts()
   }
 
   const installRuntime = async (component) => {
@@ -457,6 +502,138 @@ export default function SettingsPage({ theme, lang, version, system, storage, on
               <div style={{ marginTop: -1 }}>
                 <Row
                   c={c}
+                  icon={<Coffee size={15} weight="duotone" />}
+                  title={vn(lang, 'Tải Java từ Azul Zulu', 'Download Java from Azul Zulu')}
+                  desc={vn(lang, 'Zulu là bản OpenJDK miễn phí của Azul — chọn phiên bản rồi tải thẳng vào thư mục runtime của launcher.', 'Zulu is the free Azul OpenJDK build — pick a version and download it into the launcher runtime folder.')}
+                >
+                  <div className="flex items-center gap-2">
+                    <div className="w-24">
+                      <Select
+                        theme={theme}
+                        value={zuluMajor}
+                        options={[
+                          { value: '8', label: 'Java 8' },
+                          { value: '11', label: 'Java 11' },
+                          { value: '17', label: 'Java 17' },
+                          { value: '21', label: 'Java 21' },
+                          { value: '25', label: 'Java 25' },
+                        ]}
+                        onChange={setZuluMajor}
+                        disabled={!!zuluBusy}
+                      />
+                    </div>
+                    <div className="w-20">
+                      <Select
+                        theme={theme}
+                        value={zuluKind}
+                        options={[
+                          { value: 'jre', label: 'JRE' },
+                          { value: 'jdk', label: 'JDK' },
+                        ]}
+                        onChange={setZuluKind}
+                        disabled={!!zuluBusy}
+                      />
+                    </div>
+                    <button
+                      disabled={!!zuluBusy}
+                      onClick={downloadZulu}
+                      className="h-8 px-3 rounded-lg text-[11px] font-bold flex items-center gap-1.5 disabled:opacity-50"
+                      style={{ background: c.accent, color: '#0a0a0a' }}
+                    >
+                      {zuluBusy === 'install' ? <SpinnerGap size={12} weight="bold" className="animate-spin" /> : <DownloadSimple size={12} weight="bold" />}
+                      {zuluBusy === 'install' ? vn(lang, 'đang tải…', 'downloading…') : vn(lang, 'Tải', 'Download')}
+                    </button>
+                  </div>
+                </Row>
+
+                {javaOpts.zulu.map((item) => (
+                  <div key={item.id} className="flex items-center gap-4 px-4 py-3" style={{ borderTop: `1px solid ${c.border}` }}>
+                    <Coffee size={15} weight="duotone" style={{ color: '#22c55e' }} />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[11px] font-semibold truncate" style={{ color: c.text }}>
+                        {item.name}
+                        <span className="ml-2 px-1.5 py-0.5 rounded text-[9px] font-bold" style={{ background: c.input, color: c.label }}>Zulu</span>
+                      </p>
+                      <p className="text-[10px] font-mono truncate" style={{ color: c.faint }}>
+                        {formatBytes(item.bytes)}{item.installedAt ? ` · ${formatDate(item.installedAt, lang)}` : ''} · {item.javaPath}
+                      </p>
+                    </div>
+                    {javaOpts.selected === item.javaPath ? (
+                      <span className="text-[10px] font-bold shrink-0" style={{ color: c.accent }}>{vn(lang, 'đang dùng', 'in use')}</span>
+                    ) : (
+                      <button
+                        onClick={() => useJava(item.javaPath)}
+                        className="h-7 px-2.5 rounded-lg text-[10px] font-bold shrink-0"
+                        style={{ background: c.input, border: `1px solid ${c.border}`, color: c.label }}
+                      >
+                        {vn(lang, 'Dùng', 'Use')}
+                      </button>
+                    )}
+                    {zuluRemove === item.dir ? (
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button onClick={() => setZuluRemove('')} className="h-7 px-2 rounded-md text-[10px] font-semibold" style={smallBtn(c)}>
+                          {vn(lang, 'Huỷ', 'Cancel')}
+                        </button>
+                        <button
+                          onClick={() => removeZulu(item.dir)}
+                          disabled={!!zuluBusy}
+                          className="h-7 px-2 rounded-md text-[10px] font-bold disabled:opacity-50"
+                          style={{ background: '#ef4444', color: '#fff' }}
+                        >
+                          {vn(lang, 'Xoá', 'Delete')}
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        disabled={!!zuluBusy}
+                        onClick={() => setZuluRemove(item.dir)}
+                        data-tip={vn(lang, 'Xoá Java này', 'Delete this runtime')}
+                        className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 disabled:opacity-50"
+                        style={{ color: '#ef4444' }}
+                      >
+                        <Trash size={13} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+
+                {javaOpts.external.length > 0 && (
+                  <div className="px-4 pt-3 pb-1 text-[10px]" style={{ borderTop: `1px solid ${c.border}`, color: c.faint }}>
+                    {vn(lang, 'Java khác trên máy', 'Other Java installs on this PC')}
+                  </div>
+                )}
+                {javaOpts.external.map((item) => (
+                  <div key={item.id} className="flex items-center gap-4 px-4 py-3" style={{ borderTop: `1px solid ${c.border}` }}>
+                    <Coffee size={15} weight="duotone" style={{ color: c.label }} />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[11px] font-semibold truncate" style={{ color: c.text }}>
+                        Java {item.major}
+                        <span className="ml-2 px-1.5 py-0.5 rounded text-[9px] font-bold" style={{ background: c.input, color: c.label }}>
+                          {vn(lang, 'có sẵn', 'installed')}
+                        </span>
+                      </p>
+                      <p className="text-[10px] font-mono truncate" style={{ color: c.faint }}>{item.javaPath}</p>
+                    </div>
+                    {javaOpts.selected === item.javaPath ? (
+                      <span className="text-[10px] font-bold shrink-0" style={{ color: c.accent }}>{vn(lang, 'đang dùng', 'in use')}</span>
+                    ) : (
+                      <button
+                        onClick={() => useJava(item.javaPath)}
+                        className="h-7 px-2.5 rounded-lg text-[10px] font-bold shrink-0"
+                        style={{ background: c.input, border: `1px solid ${c.border}`, color: c.label }}
+                      >
+                        {vn(lang, 'Dùng', 'Use')}
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </Card>
+
+            <Card c={c}>
+              <div style={{ marginTop: -1 }}>
+                <Row
+                  c={c}
                   icon={<HardDrive size={15} weight="duotone" />}
                   title={vn(lang, 'Ghi đè Java (nâng cao)', 'Java override (advanced)')}
                   desc={javaPath || vn(lang, 'Để trống = dùng Java tải kèm ở trên', 'Empty = use the bundled runtime above')}
@@ -490,6 +667,20 @@ export default function SettingsPage({ theme, lang, version, system, storage, on
                   desc={t(lang, 'settings.autoUpdateHint')}
                 >
                   <Switch c={c} checked={upd.enabled !== false} onChange={toggleAutoUpdate} />
+                </Row>
+                <Row
+                  c={c}
+                  icon={<Sparkle size={15} weight="duotone" />}
+                  title={t(lang, 'settings.whatsNew')}
+                  desc={t(lang, 'settings.whatsNewHint')}
+                >
+                  <button
+                    onClick={() => onShowWhatsNew?.()}
+                    className="h-8 px-3 rounded-lg text-[11px] font-bold"
+                    style={{ background: c.input, border: `1px solid ${c.border}`, color: c.text }}
+                  >
+                    {t(lang, 'settings.whatsNewOpen')}
+                  </button>
                 </Row>
                 <Row
                   c={c}

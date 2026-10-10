@@ -1,7 +1,8 @@
 const fs = require('fs')
 const fsp = fs.promises
 const path = require('path')
-const { fetchJson, downloadAll, sha1File } = require('./net.cjs')
+const { execFile } = require('child_process')
+const { fetchJson, downloadAll, downloadOne, sha1File } = require('./net.cjs')
 
 const INDEX_URL = 'https://launchermeta.mojang.com/v1/products/java-runtime/2ec0cc96c44e5a76b9c8b7c39df7210883d12871/all.json'
 const MARKER = 'lunaspace-runtime.json'
@@ -249,6 +250,163 @@ async function verifyRuntime(dir, manifestSha1) {
   return isReady(dir, manifestSha1)
 }
 
+
+const ZULU_API = 'https://api.azul.com/metadata/v1/zulu/packages/'
+const ZULU_OS = { win32: 'windows', darwin: 'macos', linux: 'linux' }
+const zuluArch = () => (process.arch === 'arm64' ? 'arm64' : process.arch === 'ia32' ? 'i686' : 'x64')
+const zuluDir = (paths, major, kind) => path.join(paths.runtime, `zulu-${major}-${kind}-${platformKey()}`)
+
+async function zuluPackages({ major, kind = 'jre' } = {}) {
+  const params = new URLSearchParams({
+    java_version: String(major),
+    os: ZULU_OS[process.platform] || 'linux',
+    arch: zuluArch(),
+    archive_type: process.platform === 'win32' ? 'zip' : 'tar.gz',
+    java_package_type: kind === 'jdk' ? 'jdk' : 'jre',
+    release_status: 'ga',
+    availability_types: 'CA',
+    latest: 'true',
+    page_size: '40',
+  })
+  const rows = await fetchJson(`${ZULU_API}?${params.toString()}`)
+  const list = (Array.isArray(rows) ? rows : [])
+    .filter((row) => row?.download_url && !/-fx|-crac/i.test(row.name || ''))
+    .map((row) => {
+      const parts = Array.isArray(row.java_version) ? row.java_version : []
+      return {
+        name: row.name,
+        url: row.download_url,
+        version: parts.slice(0, 3).join('.') || String(major),
+        major: parts[0] || Number(major),
+      }
+    })
+  list.sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }))
+  return list
+}
+
+const quotePs = (value) => String(value).replace(/'/g, "''")
+
+function run(command, args, timeout = 300000) {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, { timeout, windowsHide: true }, (err, stdout, stderr) => {
+      if (err) {
+        const text = String(stderr || err.message || '')
+        const line = text ? text.split(String.fromCharCode(10))[0].trim() : ''
+        reject(new Error(line || 'lệnh thất bại'))
+      } else resolve(true)
+    })
+  })
+}
+
+function extractArchive(archive, dest) {
+  if (archive.toLowerCase().endsWith('.zip')) {
+    return run('powershell', [
+      '-NoProfile',
+      '-Command',
+      `Expand-Archive -LiteralPath '${quotePs(archive)}' -DestinationPath '${quotePs(dest)}' -Force`,
+    ])
+  }
+  return run('tar', ['-xzf', archive, '-C', dest])
+}
+
+async function findJavaInTree(root, depth = 2) {
+  const exe = javaExeName()
+  const tryDir = async (dir, left) => {
+    try {
+      await fsp.access(path.join(dir, 'bin', exe))
+      return path.join(dir, 'bin', exe)
+    } catch {}
+    if (left <= 0) return null
+    let entries = []
+    try {
+      entries = await fsp.readdir(dir, { withFileTypes: true })
+    } catch {
+      return null
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      const hit = await tryDir(path.join(dir, entry.name), left - 1)
+      if (hit) return hit
+    }
+    return null
+  }
+  return tryDir(root, depth)
+}
+
+async function installZulu({ paths, major, kind = 'jre', onProgress } = {}) {
+  const wanted = Number(major) || 21
+  const type = kind === 'jdk' ? 'jdk' : 'jre'
+  const list = await zuluPackages({ major: wanted, kind: type })
+  const pkg = list[0]
+  if (!pkg) throw new Error(`Không tìm thấy bản Zulu ${wanted} ${type.toUpperCase()} cho nền tảng này.`)
+  await fsp.mkdir(paths.runtime, { recursive: true })
+  const dir = zuluDir(paths, wanted, type)
+  await fsp.rm(dir, { recursive: true, force: true })
+  await fsp.mkdir(dir, { recursive: true })
+  const archive = path.join(paths.runtime, pkg.name)
+  let bytes = 0
+  await downloadOne({ url: pkg.url, dest: archive, timeout: 600000 }, (delta) => {
+    bytes += delta || 0
+    onProgress?.({ phase: 'download', label: 'zulu', major: wanted, bytesDone: bytes })
+  })
+  await extractArchive(archive, dir)
+  await fsp.rm(archive, { force: true })
+  const javaPath = await findJavaInTree(dir)
+  if (!javaPath) throw new Error('Không tìm thấy java trong gói Zulu vừa tải.')
+  await fsp.writeFile(
+    path.join(dir, MARKER),
+    JSON.stringify({ kind: 'zulu', packageType: type, major: wanted, package: pkg.name, version: pkg.version, installedAt: new Date().toISOString() }, null, 2),
+    'utf8',
+  )
+  return { dir, javaPath, major: wanted, kind: type, name: `Zulu ${type.toUpperCase()} ${pkg.version}`, bytes }
+}
+
+async function listZulu({ paths } = {}) {
+  let entries = []
+  try {
+    entries = await fsp.readdir(paths.runtime, { withFileTypes: true })
+  } catch {
+    return []
+  }
+  const out = []
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !entry.name.startsWith('zulu-')) continue
+    const dir = path.join(paths.runtime, entry.name)
+    const marker = await readMarker(dir)
+    if (marker?.kind !== 'zulu') continue
+    const javaPath = await findJavaInTree(dir)
+    if (!javaPath) continue
+    const packageType = marker.packageType || (/jre/i.test(marker.package || '') ? 'jre' : 'jdk')
+    out.push({
+      id: entry.name,
+      dir,
+      javaPath,
+      major: marker.major,
+      kind: 'zulu',
+      packageType,
+      name: marker.version ? `Zulu ${packageType.toUpperCase()} ${marker.version}` : entry.name,
+      bytes: await dirSize(dir),
+      installedAt: marker.installedAt || null,
+    })
+  }
+  out.sort((a, b) => (b.major || 0) - (a.major || 0) || a.name.localeCompare(b.name))
+  return out
+}
+
+async function removeZulu({ paths, dir } = {}) {
+  if (!dir) return { ok: false, error: 'Thiếu thư mục.' }
+  const target = path.resolve(dir)
+  if (!target.startsWith(path.resolve(paths.runtime) + path.sep)) return { ok: false, error: 'Thư mục ngoài runtime.' }
+  const marker = await readMarker(target)
+  if (marker?.kind !== 'zulu') return { ok: false, error: 'Java này không do LunarSpace tải.' }
+  try {
+    await fsp.rm(target, { recursive: true, force: true })
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+}
+
 module.exports = {
   INDEX_URL,
   platformKey,
@@ -264,4 +422,8 @@ module.exports = {
   removeRuntime,
   verifyRuntime,
   sha1File,
+  zuluPackages,
+  installZulu,
+  listZulu,
+  removeZulu,
 }
