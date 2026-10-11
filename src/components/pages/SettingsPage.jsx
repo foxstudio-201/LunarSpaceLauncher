@@ -84,10 +84,37 @@ export default function SettingsPage({ theme, lang, version, system, storage, on
   const [hideOnLaunch, setHideOnLaunch] = useState(true)
   const [discord, setDiscord] = useState({ enabled: true, connected: false, user: null })
   const [upd, setUpd] = useState({ enabled: true, phase: 'idle', current: version || '', version: '', percent: 0, error: '' })
+  const [watching, setWatching] = useState(false)
 
   useEffect(() => {
     api.updateStatus().then((res) => { if (res?.ok) setUpd((u) => ({ ...u, ...res })) }).catch(() => {})
   }, [])
+
+  useEffect(() => {
+    if (!watching) return undefined
+    let cancelled = false
+    const tick = async () => {
+      const res = await api.updateStatus().catch(() => null)
+      if (cancelled || !res?.ok) return
+      setUpd((u) => ({ ...u, ...res }))
+      if (res.phase !== 'checking' && res.phase !== 'downloading') {
+        clearInterval(timer)
+        setWatching(false)
+      }
+    }
+    const timer = setInterval(tick, 1200)
+    tick()
+    const bail = setTimeout(async () => {
+      clearInterval(timer)
+      const res = await api.updateStatus().catch(() => null)
+      setWatching(false)
+      if (res?.ok) setUpd((u) => ({ ...u, ...res }))
+      if (!res?.ok || res.phase === 'checking') {
+        setUpd((u) => (u.phase === 'checking' ? { ...u, phase: 'error', error: vn(lang, 'Quá hạn kiểm tra — thử lại sau.', 'Check timed out — try again.') } : u))
+      }
+    }, 45000)
+    return () => { cancelled = true; clearInterval(timer); clearTimeout(bail) }
+  }, [watching, lang])
 
   useEffect(() => {
     if (updateEvent?.type === 'update') setUpd((u) => ({ ...u, ...updateEvent }))
@@ -95,6 +122,7 @@ export default function SettingsPage({ theme, lang, version, system, storage, on
 
   const updateState = upd.phase || 'idle'
   const updateBusy = updateState === 'checking' || updateState === 'downloading'
+  const mb = (value) => (Number(value) > 0 ? `${Math.round(Number(value) / 104857.6) / 10} MB` : '')
   const toggleHideOnLaunch = async (next) => {
     setHideOnLaunch(next)
     await onSave({ hideOnLaunch: next })
@@ -105,15 +133,31 @@ export default function SettingsPage({ theme, lang, version, system, storage, on
   }
   const runUpdateCheck = async () => {
     setUpd((u) => ({ ...u, phase: 'checking', error: '' }))
+    setWatching(true)
     const res = await api.updateCheck().catch((err) => ({ ok: false, error: err.message }))
-    if (!res?.ok) setUpd((u) => ({ ...u, phase: 'error', error: res?.error || 'error' }))
+    if (!res?.ok) {
+      setWatching(false)
+      setUpd((u) => ({ ...u, phase: 'error', error: res?.error || 'error' }))
+    }
+  }
+  const runUpdateDownload = async () => {
+    setUpd((u) => ({ ...u, phase: 'downloading', percent: 0, bytesDone: 0, totalBytes: 0, error: '' }))
+    setWatching(true)
+    const res = await api.updateDownload().catch((err) => ({ ok: false, error: err.message }))
+    if (!res?.ok && !res?.phase) {
+      setWatching(false)
+      setUpd((u) => ({ ...u, phase: 'error', error: res?.error || 'error' }))
+    }
   }
   const runUpdateInstall = async () => { await api.updateInstall().catch(() => {}) }
   const updateStatusText = () => {
     if (updateState === 'unsupported') return vn(lang, 'Chỉ tự cập nhật ở bản đã cài (Setup), không áp dụng khi chạy mã nguồn.', 'Auto-update only works in the installed build (Setup), not from source.')
     if (updateState === 'checking') return vn(lang, 'Đang kiểm tra bản mới…', 'Checking for updates…')
-    if (updateState === 'available') return vn(lang, `Có bản mới v${upd.version} — đang tải…`, `v${upd.version} available — downloading…`)
-    if (updateState === 'downloading') return vn(lang, `Đang tải v${upd.version} · ${Math.round(upd.percent || 0)}%`, `Downloading v${upd.version} · ${Math.round(upd.percent || 0)}%`)
+    if (updateState === 'available') return vn(lang, `Có bản mới v${upd.version} — bấm “Tải bản mới”.`, `v${upd.version} available — press “Download”.`)
+    if (updateState === 'downloading') {
+      const size = upd.totalBytes ? ` (${mb(upd.bytesDone)}/${mb(upd.totalBytes)})` : ''
+      return vn(lang, `Đang tải v${upd.version} · ${Math.round(upd.percent || 0)}%${size}`, `Downloading v${upd.version} · ${Math.round(upd.percent || 0)}%${size}`)
+    }
     if (updateState === 'ready') return vn(lang, `Đã tải v${upd.version} — sẽ tự cài khi bạn thoát launcher.`, `v${upd.version} downloaded — installs when you quit the launcher.`)
     if (updateState === 'error') return upd.error || vn(lang, 'Cập nhật lỗi.', 'Update failed.')
     if (updateState === 'current') return vn(lang, 'Bạn đang dùng bản mới nhất.', 'You are on the latest version.')
@@ -696,15 +740,26 @@ export default function SettingsPage({ theme, lang, version, system, storage, on
                     >
                       {vn(lang, 'Cài & khởi động lại', 'Install & restart')}
                     </button>
+                  ) : updateState === 'available' ? (
+                    <button
+                      onClick={runUpdateDownload}
+                      className="h-8 px-3 rounded-lg text-[11px] font-bold flex items-center gap-1.5"
+                      style={{ background: c.accent, color: '#0a0a0a' }}
+                    >
+                      <DownloadSimple size={12} weight="bold" />
+                      {vn(lang, 'Tải bản mới', 'Download')}
+                    </button>
                   ) : (
                     <button
                       onClick={runUpdateCheck}
                       disabled={updateBusy || updateState === 'unsupported'}
-                      className="h-8 px-3 rounded-lg text-[11px] font-semibold flex items-center gap-1.5 disabled:opacity-50"
+                      className="h-8 px-3 rounded-lg text-[11px] font-semibold flex items-center gap-1.5 disabled:opacity-50 tabular-nums"
                       style={{ background: c.input, border: `1px solid ${c.border}`, color: c.label }}
                     >
                       <ArrowsClockwise size={12} weight="bold" className={updateBusy ? 'animate-spin' : ''} />
-                      {vn(lang, 'Kiểm tra', 'Check')}
+                      {updateState === 'downloading'
+                        ? vn(lang, `Đang tải ${Math.round(upd.percent || 0)}%`, `Downloading ${Math.round(upd.percent || 0)}%`)
+                        : vn(lang, 'Kiểm tra', 'Check')}
                     </button>
                   )}
                 </Row>

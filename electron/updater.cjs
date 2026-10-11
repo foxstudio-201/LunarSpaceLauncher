@@ -43,7 +43,7 @@ function setState(patch, event) {
   else emit({ type: 'update', ...snapshot() })
 }
 
-function releaseNotes(info) {
+function notesOf(info) {
   const notes = info?.releaseNotes
   if (!notes) return ''
   if (typeof notes === 'string') return notes.slice(0, 4000)
@@ -65,7 +65,7 @@ function attach() {
   })
   updater.on('update-available', (info) => {
     setState(
-      { phase: 'available', version: info?.version || '', releaseNotes: releaseNotes(info), error: '' },
+      { phase: 'available', version: info?.version || '', releaseNotes: notesOf(info), error: '' },
       { event: 'available' },
     )
     if (state.enabled) download()
