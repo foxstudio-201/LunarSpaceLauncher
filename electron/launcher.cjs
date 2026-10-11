@@ -2862,17 +2862,20 @@ async function contentInstall({ kind, source, id, versionId, version = '', insta
       const failed = new Set((res.failed || []).map((name) => path.basename(String(name))))
       const entries = prepared.tasks
         .filter((task) => !failed.has(path.basename(task.name || task.rel)))
-        .map((task) => ({
-          kind,
-          source,
-          projectId: String(id || ''),
-          versionId: String(versionId || ''),
-          version: String(version || ''),
-          file: path.basename(task.rel || task.name || ''),
-          rel: task.rel,
-          url: task.url || '',
-          at: new Date().toISOString(),
-        }))
+        .map((task) => {
+          const own = Boolean(task.projectId)
+          return {
+            kind,
+            source: task.requirement || source,
+            projectId: String(task.projectId || id || ''),
+            versionId: String(task.versionId || (own ? '' : versionId) || ''),
+            version: String(task.version || (own ? '' : version) || ''),
+            file: path.basename(task.rel || task.name || ''),
+            rel: task.rel,
+            url: task.url || '',
+            at: new Date().toISOString(),
+          }
+        })
         .filter((row) => row.file)
       if (entries.length) {
         const settings = readSettings()

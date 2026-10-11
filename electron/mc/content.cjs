@@ -64,7 +64,7 @@ const envKind = (clientSide, serverSide) => {
   return ''
 }
 
-const MOD_JAR_RE = /\.jar(\.disabled)?$/i
+const MOD_JAR_RE = /\.(jar|zip)(\.disabled)?$/i
 
 async function postJson(url, body) {
   const res = await fetch(url, {
@@ -199,11 +199,15 @@ async function inventory({ kind, root, cacheDir, records = [] } = {}) {
     return { items: [] }
   }
   if (!names.length) return { items: [] }
+  const bareName = (name) => String(name || '').replace(/\.disabled$/i, '')
+  const byBare = new Map(names.map((name) => [bareName(name), name]))
   const byName = new Map()
   for (const row of records || []) {
-    if (!row?.file || row.kind !== kind || !names.includes(row.file)) continue
-    byName.set(row.file, {
-      file: row.file,
+    if (!row?.file || row.kind !== kind) continue
+    const name = byBare.get(bareName(row.file))
+    if (!name) continue
+    byName.set(name, {
+      file: name,
       projectId: row.projectId || '',
       versionId: row.versionId || '',
       version: row.version || '',
@@ -346,6 +350,7 @@ async function contentTags({ kind, source } = {}) {
 function mrVersion(v) {
   return {
     id: v.id,
+    projectId: v.project_id || '',
     name: v.name,
     versionNumber: v.version_number,
     releaseType: v.version_type || '',
@@ -410,6 +415,9 @@ function cfFileToTask({ kind, file }) {
     sha1: cfSha1(file),
     size: file.fileLength || 0,
     name: file.fileName,
+    projectId: file.modId ? String(file.modId) : '',
+    versionId: file.id ? String(file.id) : '',
+    version: stripCodes(file.displayName || '') || file.fileName || '',
   }
 }
 
@@ -423,6 +431,9 @@ function mrFileToTask({ kind, version }) {
     sha1: file.sha1,
     size: file.size || 0,
     name: file.filename,
+    projectId: version.projectId || '',
+    versionId: version.id || '',
+    version: version.versionNumber || '',
   }
 }
 
