@@ -1886,12 +1886,21 @@ async function worldTree({ id, world } = {}) {
       files.push({ rel, size: info.size, mtime: info.mtimeMs, bak: backup?.size || 0 })
     }
   }
-  await add('level.dat')
-  await add('level.dat_old')
-  for (const sub of ['playerdata', 'data', 'DIM-1/data', 'DIM1/data']) {
-    const list = await fsp.readdir(path.join(dir, ...sub.split('/'))).catch(() => [])
-    for (const name of list.filter((item) => /\.dat$/i.test(item)).sort()) await add(`${sub}/${name}`)
+  const SKIP_DIRS = new Set(['voxy', 'xaero', 'cache', 'dynamic-resource-pack-cache', '.mixin.out'])
+  const walk = async (rel, depth) => {
+    const full = path.join(dir, ...(rel ? rel.split('/') : []))
+    const list = await fsp.readdir(full, { withFileTypes: true }).catch(() => [])
+    const items = [...list].sort((a, b) => a.name.localeCompare(b.name))
+    for (const item of items) {
+      if (item.isDirectory()) {
+        if (depth >= 6 || SKIP_DIRS.has(item.name)) continue
+        await walk(rel ? `${rel}/${item.name}` : item.name, depth + 1)
+      } else if (/\.dat$/i.test(item.name) || item.name === 'level.dat_old') {
+        await add(rel ? `${rel}/${item.name}` : item.name)
+      }
+    }
   }
+  await walk('', 0)
 
   const summary = {}
   try {
@@ -1921,7 +1930,7 @@ async function worldTree({ id, world } = {}) {
       dir,
       files,
       summary,
-      players: files.filter((file) => file.rel.startsWith('playerdata/')).length,
+      players: files.filter((file) => file.rel.startsWith('playerdata/') || file.rel.startsWith('players/')).length,
       bytes: size.bytes,
       partial: size.truncated,
       running: entry.status === 'running',

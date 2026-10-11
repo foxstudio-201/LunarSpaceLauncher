@@ -10,6 +10,15 @@ const { SurfacePalette } = require('./mapsurface.cjs')
 const WORKER = path.join(__dirname, 'mapworker.cjs')
 const REGION_BLOCKS = 512
 const DIMS = { overworld: '', nether: 'DIM-1', end: 'DIM1' }
+const DIMS_MODERN = { overworld: 'overworld', nether: 'the_nether', end: 'the_end' }
+
+async function dimensionRegionDir(dir, dimension) {
+  const sub = DIMS[dimension] || ''
+  const modern = path.join(dir, 'dimensions', 'minecraft', DIMS_MODERN[dimension] || dimension, 'region')
+  const legacy = path.join(dir, ...(sub ? [sub] : []), 'region')
+  const isDir = await fsp.stat(modern).then((stat) => stat.isDirectory()).catch(() => false)
+  return isDir ? modern : legacy
+}
 const MAX_PX = 6000
 const SCALES = [1, 2, 4, 8, 16, 32, 64]
 
@@ -566,8 +575,7 @@ function primeIndex(surface) {
 
 async function renderMap({ dir, dimension = 'overworld', scale: requested, shading = true, trim = true, fresh = false, cacheDir, surface = null, onProgress, concurrency = 4 }) {
   setCancel(false)
-  const sub = DIMS[dimension] || ''
-  const regionDir = path.join(dir, ...(sub ? [sub] : []), 'region')
+  const regionDir = await dimensionRegionDir(dir, dimension)
   const regions = await regionFiles(regionDir)
   if (!regions.length) return { ok: false, error: 'Thế giới này chưa có vùng nào được tạo (thư mục region trống).' }
   const grid = chunkGrid(regions)
@@ -774,8 +782,7 @@ async function clearCache({ dir, cacheDir, all = false }) {
 async function mapInfo({ dir, cacheDir }) {
   const dims = {}
   for (const dimension of Object.keys(DIMS)) {
-    const sub = DIMS[dimension]
-    const regionDir = path.join(dir, ...(sub ? [sub] : []), 'region')
+    const regionDir = await dimensionRegionDir(dir, dimension)
     const regions = await regionFiles(regionDir)
     if (!regions.length) continue
     const grid = chunkGrid(regions)

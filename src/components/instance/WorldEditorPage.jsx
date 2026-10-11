@@ -21,8 +21,8 @@ const join = (base, key) => (base ? stepPath(base, key) : key)
 
 const GROUPS = [
   { key: 'level', label: 'Cấp thế giới', labelEn: 'Level', icon: Cube, test: (rel) => rel.startsWith('level.dat') },
-  { key: 'playerdata', label: 'Người chơi', labelEn: 'Players', icon: Users, test: (rel) => rel.startsWith('playerdata/') },
-  { key: 'data', label: 'Dữ liệu', labelEn: 'Data', icon: Database, test: (rel) => rel.startsWith('data/') || rel.includes('/data/') },
+  { key: 'playerdata', label: 'Người chơi', labelEn: 'Players', icon: Users, test: (rel) => /(^|\/)(players|playerdata)\//.test(rel) },
+  { key: 'data', label: 'Dữ liệu', labelEn: 'Data', icon: Database, test: (rel) => (rel.startsWith('data/') || rel.includes('/data/')) && !/(^|\/)(players|playerdata)\//.test(rel) },
 ]
 
 const QUICK_PATHS = [
@@ -765,7 +765,7 @@ export default function WorldEditorPage({ instance, world, theme, lang, onClose 
                   >
                     <FileArrowDown size={13} weight="duotone" style={{ color: on ? c.accent : c.faint }} />
                     <span className="text-[11.5px] font-mono truncate flex-1" style={{ color: on ? c.text : c.label }} title={item.rel}>
-                      {item.rel.replace(/^playerdata\//, '')}
+                      {item.rel.replace(/^(playerdata|players)\//, '')}
                     </span>
                     {hasBackup ? <ShieldCheck size={12} weight="duotone" style={{ color: '#4ade80' }} title={vn(lang, 'Có bản sao .bak', 'Has .bak backup')} /> : null}
                     <span className="text-[10px] font-mono shrink-0" style={{ color: c.faint }}>{formatBytes(item.size)}</span>
