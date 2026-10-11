@@ -102,6 +102,7 @@ function rewriteInstallScript(script, serverDir) {
   const shim = [
     'apt() { if command -v curl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then echo "[basic] skip apt (curl/jq present): $*"; return 0; fi; echo "[basic] apt not available (need root or preinstall curl/jq): $*"; return 1; }',
     'apt-get() { apt "$@"; }',
+    'wget() { local out="" url=""; while [ $# -gt 0 ]; do case "$1" in -O|--output-document) out="$2"; shift 2;; -o|-P|--directory-prefix) shift 2;; -*) shift;; *) url="$1"; shift;; esac; done; if [ -z "$url" ]; then echo "[basic] wget: thiếu URL" >&2; return 1; fi; echo "[basic] wget -> curl: $url"; if [ -n "$out" ]; then curl -fsSL -o "$out" "$url"; else curl -fsSLO "$url"; fi; }',
     'export DEBIAN_FRONTEND=noninteractive',
     'export DISPLAY=',
     'export CI=true',
@@ -389,6 +390,10 @@ async function installServer({ dir, eggId, vars, root, onLog, onProgress }) {
     } catch (err) {
       onLog?.(`[Install] WARNING: post-process args: ${err.message}`)
     }
+  }
+
+  if (!fs.existsSync(path.join(dir, jarFile))) {
+    throw new Error(`Cài đặt không tạo ra ${jarFile}. Xem log cài đặt ở trên để biết bước nào lỗi (thường do thiếu công cụ tải hoặc mạng).`)
   }
 
   await writeEula(dir)
