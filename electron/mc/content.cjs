@@ -189,7 +189,7 @@ async function installed({ kind, source, id, versionId, file, game, loader, root
   }
 }
 
-async function inventory({ kind, root, cacheDir } = {}) {
+async function inventory({ kind, root, cacheDir, records = [] } = {}) {
   const entry = spec(kind)
   const dir = path.join(root, entry.folder)
   let names = []
@@ -199,10 +199,28 @@ async function inventory({ kind, root, cacheDir } = {}) {
     return { items: [] }
   }
   if (!names.length) return { items: [] }
-  const owner = await localOwners({ dir, names, cacheDir })
-  if (!owner.size) return { items: [] }
+  const byName = new Map()
+  for (const row of records || []) {
+    if (!row?.file || row.kind !== kind || !names.includes(row.file)) continue
+    byName.set(row.file, {
+      file: row.file,
+      projectId: row.projectId || '',
+      versionId: row.versionId || '',
+      version: row.version || '',
+      source: row.source || 'modrinth',
+    })
+  }
+  const rest = names.filter((name) => !byName.has(name))
+  if (rest.length) {
+    const owner = await localOwners({ dir, names: rest, cacheDir })
+    for (const [name, row] of owner) {
+      if (!row?.projectId) continue
+      byName.set(name, { file: name, projectId: row.projectId, versionId: row.versionId, version: row.version, source: 'modrinth' })
+    }
+  }
+  if (!byName.size) return { items: [] }
   const meta = new Map()
-  const ids = [...new Set([...owner.values()].map((row) => row.projectId).filter(Boolean))]
+  const ids = [...new Set([...byName.values()].filter((row) => row.source === 'modrinth').map((row) => row.projectId).filter(Boolean))]
   for (let i = 0; i < ids.length; i += 100) {
     try {
       const res = await fetchJson(`${MODRINTH}/projects?ids=${encodeURIComponent(JSON.stringify(ids.slice(i, i + 100)))}`)
@@ -211,17 +229,10 @@ async function inventory({ kind, root, cacheDir } = {}) {
   }
   const items = []
   for (const name of names) {
-    const row = owner.get(name)
-    if (!row?.projectId) continue
+    const row = byName.get(name)
+    if (!row) continue
     const extra = meta.get(row.projectId) || {}
-    items.push({
-      file: name,
-      projectId: row.projectId,
-      versionId: row.versionId,
-      version: row.version,
-      slug: extra.slug || '',
-      title: extra.title || '',
-    })
+    items.push({ ...row, slug: extra.slug || '', title: extra.title || '' })
   }
   return { items }
 }

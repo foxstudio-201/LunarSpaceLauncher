@@ -128,10 +128,9 @@ export default function ContentDownloadPage({ instance, theme, lang, kind, progr
     const res = await api.contentInventory({ kind, instanceId: instance.id }).catch(() => null)
     const map = {}
     for (const row of res?.items || []) {
-      if (!row.projectId) continue
-      map[row.projectId] = row
       const slug = ownedKey(row.slug)
       const title = ownedKey(row.title)
+      if (row.projectId) map[`${row.source || 'modrinth'}:${row.projectId}`] = row
       if (slug) map[slug] = row
       if (title) map[title] = row
     }
@@ -140,7 +139,8 @@ export default function ContentDownloadPage({ instance, theme, lang, kind, progr
 
   useEffect(() => { loadOwned() }, [loadOwned])
 
-  const ownedOf = (hit) => owned[hit?.id] || owned[ownedKey(hit?.slug)] || owned[ownedKey(hit?.name)] || null
+  const ownedOf = (hit) =>
+    owned[`${hit?.source || 'modrinth'}:${hit?.id}`] || owned[ownedKey(hit?.slug)] || owned[ownedKey(hit?.name)] || null
 
   const load = useCallback(async ({ reset = true } = {}) => {
     const id = ++reqRef.current
@@ -285,15 +285,24 @@ export default function ContentDownloadPage({ instance, theme, lang, kind, progr
     setInstallError('')
     setDone(null)
     setInstalling(which)
+    const target = versions.find((v) => v.id === targetId)
     const res = await api
-      .contentInstall({ kind, source: active.source, id: active.id, versionId: targetId, instanceId: instance.id, remove })
+      .contentInstall({
+        kind,
+        source: active.source,
+        id: active.id,
+        versionId: targetId,
+        version: target?.versionNumber || target?.name || '',
+        instanceId: instance.id,
+        remove,
+      })
       .catch((err) => ({ ok: false, error: err.message }))
     setInstalling('')
     if (!res?.ok) return setInstallError(res?.error || 'error')
     setDone(res)
     onInstalled?.()
     loadOwned()
-  }, [kind, active, instance.id, onInstalled, loadOwned])
+  }, [kind, active, versions, instance.id, onInstalled, loadOwned])
 
   const install = useCallback(async (targetId, which) => {
     if (!active || !targetId) return

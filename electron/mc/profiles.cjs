@@ -5,6 +5,7 @@ const crypto = require('crypto')
 
 const FILE_NAME = 'launcher_profiles.json'
 const MANAGED_KEY = 'lunarSpaceManaged'
+const CONTENT_KEY = 'lunarSpaceContent'
 const PROFILES_FORMAT = 2
 const LAUNCHER_FORMAT = 21
 const PROFILE_ICON = 'data:image/png;base64,'
@@ -67,11 +68,62 @@ async function read(file) {
 
 function scopedTo(data, instanceId) {
   const profile = data.profiles?.[instanceId]
+  const content = data[CONTENT_KEY]?.[instanceId]
   return {
     ...data,
     profiles: profile ? { [instanceId]: profile } : {},
     [MANAGED_KEY]: profile ? [instanceId] : [],
+    [CONTENT_KEY]: content ? { [instanceId]: content } : {},
   }
+}
+
+async function updateContent({ shared, dir, instanceId, edit }) {
+  const sharedFile = path.join(shared, FILE_NAME)
+  const sharedData = (await read(sharedFile)) || {}
+  const map = { ...(sharedData[CONTENT_KEY] || {}) }
+  const list = Array.isArray(map[instanceId]) ? [...map[instanceId]] : []
+  map[instanceId] = edit(list) || []
+  await fsp.mkdir(shared, { recursive: true })
+  await fsp.writeFile(sharedFile, JSON.stringify({ ...sharedData, [CONTENT_KEY]: map }, null, 2), 'utf8')
+
+  if (dir) {
+    const ownFile = path.join(dir, FILE_NAME)
+    const own = await read(ownFile)
+    if (own) {
+      await fsp.writeFile(ownFile, JSON.stringify({ ...own, [CONTENT_KEY]: { [instanceId]: map[instanceId] } }, null, 2), 'utf8')
+    }
+  }
+  return map[instanceId]
+}
+
+async function recordContent({ shared, dir, instanceId, entries = [] }) {
+  return updateContent({
+    shared,
+    dir,
+    instanceId,
+    edit: (list) => {
+      for (const entry of entries) {
+        if (!entry?.file) continue
+        const at = list.findIndex((row) => row.kind === entry.kind && row.file === entry.file)
+        if (at >= 0) list[at] = { ...list[at], ...entry }
+        else list.push(entry)
+      }
+      return list
+    },
+  })
+}
+
+async function dropContentFiles({ shared, dir, instanceId, files = [] }) {
+  const drop = new Set(files.map((name) => path.basename(String(name))))
+  if (!drop.size) return []
+  return updateContent({ shared, dir, instanceId, edit: (list) => list.filter((row) => !drop.has(row.file)) })
+}
+
+async function contentRecords({ dir, shared, instanceId }) {
+  const own = dir ? await read(path.join(dir, FILE_NAME)) : null
+  const data = own || (shared ? await read(path.join(shared, FILE_NAME)) : null)
+  const list = data?.[CONTENT_KEY]?.[instanceId]
+  return Array.isArray(list) ? list : []
 }
 
 async function writeLauncherProfiles({ shared, instances = [], version = '1.0.0', alsoDirs = true }) {
@@ -101,4 +153,4 @@ function profilesPath(shared) {
   return path.join(shared, FILE_NAME)
 }
 
-module.exports = { writeLauncherProfiles, profilesPath, FILE_NAME }
+module.exports = { writeLauncherProfiles, profilesPath, recordContent, dropContentFiles, contentRecords, FILE_NAME }

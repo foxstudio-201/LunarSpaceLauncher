@@ -6,7 +6,7 @@ const os = require('os')
 const { listVersions, listLoaderVersions, listLoaderGames, getLoaderProfile } = require('./mc/meta.cjs')
 const { pathsFor, install, resolveChain, ensureLaunchFiles } = require('./mc/install.cjs')
 const { findJava, buildLaunch, spawnGame, killTree, offlineUuid } = require('./mc/launch.cjs')
-const { writeLauncherProfiles, profilesPath } = require('./mc/profiles.cjs')
+const { writeLauncherProfiles, profilesPath, recordContent, dropContentFiles, contentRecords } = require('./mc/profiles.cjs')
 const javaModule = require('./mc/java.cjs')
 const { analyzeExit, uploadToMclogs } = require('./mc/crash.cjs')
 const forgeMod = require('./mc/forge.cjs')
@@ -66,6 +66,14 @@ const PACK_PLAN_FILE = '.lunaspace-modpack.json'
 const modEnvCache = new Map()
 
 const indexFile = () => path.join(app.getPath('userData'), 'instances.json')
+
+function readSettings() {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'settings.json'), 'utf8')) || {}
+  } catch {
+    return {}
+  }
+}
 
 function storageFor(settings = {}) {
   const shared = settings.sharedDir || path.join(app.getPath('userData'), 'shared')
@@ -608,6 +616,14 @@ async function trashFiles({ id, rels } = {}) {
     }
   }
   await writeTrash(entry.dir, manifest)
+  const gone = list.filter((rel) => !failed.some((row) => row.rel === rel))
+  if (gone.length) {
+    try {
+      const settings = readSettings()
+      const { shared } = storageFor(settings)
+      await dropContentFiles({ shared, dir: entry.dir, instanceId: entry.id, files: gone })
+    } catch {}
+  }
   return { ok: failed.length === 0, trashed, failed }
 }
 
@@ -2792,14 +2808,17 @@ async function contentInventory({ kind, instanceId } = {}) {
     return { ok: false, error: err.message, items: [] }
   }
   try {
-    const res = await content.inventory({ kind, root: entry.dir })
+    const settings = readSettings()
+    const { shared } = storageFor(settings)
+    const records = await contentRecords({ dir: entry.dir, shared, instanceId: entry.id })
+    const res = await content.inventory({ kind, root: entry.dir, records })
     return { ok: true, ...res }
   } catch (err) {
     return { ok: false, error: err.message, items: [] }
   }
 }
 
-async function contentInstall({ kind, source, id, versionId, instanceId, remove = [] } = {}, emit) {
+async function contentInstall({ kind, source, id, versionId, version = '', instanceId, remove = [] } = {}, emit) {
   let entry
   try {
     entry = findEntry(instanceId)
@@ -2839,6 +2858,28 @@ async function contentInstall({ kind, source, id, versionId, instanceId, remove 
       }
       if (removed.length) log(`[LunarSpace] Đã xoá bản cũ: ${removed.join(', ')}`)
     }
+    try {
+      const failed = new Set((res.failed || []).map((name) => path.basename(String(name))))
+      const entries = prepared.tasks
+        .filter((task) => !failed.has(path.basename(task.name || task.rel)))
+        .map((task) => ({
+          kind,
+          source,
+          projectId: String(id || ''),
+          versionId: String(versionId || ''),
+          version: String(version || ''),
+          file: path.basename(task.rel || task.name || ''),
+          rel: task.rel,
+          url: task.url || '',
+          at: new Date().toISOString(),
+        }))
+        .filter((row) => row.file)
+      if (entries.length) {
+        const settings = readSettings()
+        const { shared } = storageFor(settings)
+        await recordContent({ shared, dir: entry.dir, instanceId: entry.id, entries })
+      }
+    } catch {}
     emit?.({ type: 'progress', id: entry.id, phase: 'done', label: 'content', summary: res })
     return { ok: true, ...res, folder: prepared.folder, removed }
   } catch (err) {
