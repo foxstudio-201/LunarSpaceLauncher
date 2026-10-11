@@ -1209,16 +1209,6 @@ function Card({ c, lang, hit, kind, game, owned, onOpen, onMenu }) {
       style={{ background: owned ? `${c.accent}0d` : c.surface, border: `1px solid ${owned ? `${c.accent}55` : c.border}` }}
     >
       <span className="absolute left-0 top-3 bottom-3 w-[2px] rounded-full opacity-0 group-hover:opacity-40 transition-opacity" style={{ background: c.accent }} />
-      {owned ? (
-        <span
-          className="absolute right-0 top-0 z-10 inline-flex items-center gap-1 rounded-bl-lg px-2 py-[3px] text-[9px] font-mono max-w-[62%]"
-          style={{ background: `${c.accent}26`, borderLeft: `1px solid ${c.accent}55`, borderBottom: `1px solid ${c.accent}55`, color: c.accent }}
-          title={`${vn(lang, 'Đã cài', 'Installed')}${owned.version ? ` · ${owned.version}` : ''} · ${owned.file}`}
-        >
-          <CheckCircle size={9} weight="fill" />
-          <span className="truncate">{vn(lang, 'Đã cài', 'Installed')}{owned.version ? ` · ${owned.version}` : ''}</span>
-        </span>
-      ) : null}
       <div className="flex items-start gap-2.5">
         {hit.icon ? (
           <img src={hit.icon} alt="" loading="lazy" className="w-11 h-11 rounded-lg object-cover shrink-0" style={{ border: `1px solid ${c.border}`, background: c.input }} />
@@ -1231,15 +1221,32 @@ function Card({ c, lang, hit, kind, game, owned, onOpen, onMenu }) {
           <p className="text-[11px] font-bold truncate leading-tight" style={{ color: c.text }}>{hit.name}</p>
           <p className="mt-0.5 text-[10px] truncate" style={{ color: c.faint }}>{hit.author || '—'}</p>
         </div>
-        <span className="flex items-center gap-1 text-[9px] font-mono tabular-nums shrink-0" style={{ color: c.faint }}>
-          <Download size={10} />
-          {compact(hit.downloads)}
-        </span>
+        {owned ? (
+          <span
+            className="shrink-0 inline-flex items-center gap-1 rounded-md px-1.5 py-[3px] text-[9px] font-mono max-w-[58%]"
+            style={{ background: `${c.accent}26`, border: `1px solid ${c.accent}55`, color: c.accent }}
+            title={`${vn(lang, 'Đã cài', 'Installed')}${owned.version ? ` · ${owned.version}` : ''} · ${owned.file}`}
+          >
+            <CheckCircle size={9} weight="fill" className="shrink-0" />
+            <span className="truncate">{vn(lang, 'Đã cài', 'Installed')}{owned.version ? ` · ${owned.version}` : ''}</span>
+          </span>
+        ) : (
+          <span className="flex items-center gap-1 text-[9px] font-mono tabular-nums shrink-0" style={{ color: c.faint }}>
+            <Download size={10} />
+            {compact(hit.downloads)}
+          </span>
+        )}
       </div>
 
       <p className="text-[10px] leading-relaxed line-clamp-2" style={{ color: c.label }}>{hit.summary || '—'}</p>
 
       <div className="mt-auto flex items-center gap-2 pt-2" style={{ borderTop: `1px solid ${c.border}` }}>
+        {owned ? (
+          <span className="flex items-center gap-1 text-[9px] font-mono tabular-nums shrink-0" style={{ color: c.faint }}>
+            <Download size={10} />
+            {compact(hit.downloads)}
+          </span>
+        ) : null}
         {kind === 'mods' && <EnvChip c={c} env={hit.environment} lang={lang} />}
         {kind === 'mods' && (hit.loaders || []).length > 0 && (
           <div className="flex items-center gap-1 shrink-0">
