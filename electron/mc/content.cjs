@@ -189,6 +189,43 @@ async function installed({ kind, source, id, versionId, file, game, loader, root
   }
 }
 
+async function inventory({ kind, root, cacheDir } = {}) {
+  const entry = spec(kind)
+  const dir = path.join(root, entry.folder)
+  let names = []
+  try {
+    names = (await fsp.readdir(dir)).filter((name) => MOD_JAR_RE.test(name))
+  } catch {
+    return { items: [] }
+  }
+  if (!names.length) return { items: [] }
+  const owner = await localOwners({ dir, names, cacheDir })
+  if (!owner.size) return { items: [] }
+  const meta = new Map()
+  const ids = [...new Set([...owner.values()].map((row) => row.projectId).filter(Boolean))]
+  for (let i = 0; i < ids.length; i += 100) {
+    try {
+      const res = await fetchJson(`${MODRINTH}/projects?ids=${encodeURIComponent(JSON.stringify(ids.slice(i, i + 100)))}`)
+      for (const project of res || []) meta.set(project.id, { slug: project.slug || '', title: project.title || '' })
+    } catch {}
+  }
+  const items = []
+  for (const name of names) {
+    const row = owner.get(name)
+    if (!row?.projectId) continue
+    const extra = meta.get(row.projectId) || {}
+    items.push({
+      file: name,
+      projectId: row.projectId,
+      versionId: row.versionId,
+      version: row.version,
+      slug: extra.slug || '',
+      title: extra.title || '',
+    })
+  }
+  return { items }
+}
+
 function spec(kind) {
   const entry = KINDS[kind]
   if (!entry) throw new Error(`Loại nội dung không hợp lệ: ${kind}`)
@@ -760,6 +797,6 @@ async function projectPreview({ source = 'modrinth', id } = {}) {
 }
 
 module.exports = {
-  KINDS, spec, search, contentTags, versions, project, changelog, plan, install, installed, modEnvs,
+  KINDS, spec, search, contentTags, versions, project, changelog, plan, install, installed, inventory, modEnvs,
   normName, cfLoaderName, projectPreview, projectHashes,
 }

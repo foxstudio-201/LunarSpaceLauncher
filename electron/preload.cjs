@@ -145,6 +145,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   contentPreview: (opts) => ipcRenderer.invoke('launcher:content-preview', opts),
   contentChangelog: (opts) => ipcRenderer.invoke('launcher:content-changelog', opts),
   contentInstalled: (opts) => ipcRenderer.invoke('launcher:content-installed', opts),
+  contentInventory: (opts) => ipcRenderer.invoke('launcher:content-inventory', opts),
   contentInstall: (opts) => ipcRenderer.invoke('launcher:content-install', opts),
 
   getCrash: (opts) => ipcRenderer.invoke('launcher:crash', opts),

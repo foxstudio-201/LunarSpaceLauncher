@@ -945,6 +945,11 @@ export async function contentInstalled(opts = {}) {
   return { ok: false, error: NEEDS_APP, matches: [] }
 }
 
+export async function contentInventory(opts = {}) {
+  if (bridge?.contentInventory) return bridge.contentInventory(opts)
+  return { ok: false, error: NEEDS_APP, items: [] }
+}
+
 export async function contentInstall(opts = {}) {
   if (bridge?.contentInstall) return bridge.contentInstall(opts)
   throw new Error(NEEDS_APP)

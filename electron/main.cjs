@@ -711,6 +711,7 @@ function registerIpc() {
   ipcMain.handle('launcher:content-preview', (_e, opts) => launcher.contentPreview(opts || {}))
   ipcMain.handle('launcher:content-changelog', (_e, opts) => launcher.contentChangelog(opts || {}))
   ipcMain.handle('launcher:content-installed', (_e, opts) => launcher.contentInstalled(opts || {}))
+  ipcMain.handle('launcher:content-inventory', (_e, opts) => launcher.contentInventory(opts || {}))
   ipcMain.handle('launcher:content-install', (_e, opts) => launcher.contentInstall(opts || {}, emitLauncher))
 
   ipcMain.handle('launcher:choose-modpack', async () => {

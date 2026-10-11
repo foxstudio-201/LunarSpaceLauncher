@@ -2784,6 +2784,21 @@ async function contentInstalled({ kind, source, id, versionId, file, instanceId 
   }
 }
 
+async function contentInventory({ kind, instanceId } = {}) {
+  let entry
+  try {
+    entry = findEntry(instanceId)
+  } catch (err) {
+    return { ok: false, error: err.message, items: [] }
+  }
+  try {
+    const res = await content.inventory({ kind, root: entry.dir })
+    return { ok: true, ...res }
+  } catch (err) {
+    return { ok: false, error: err.message, items: [] }
+  }
+}
+
 async function contentInstall({ kind, source, id, versionId, instanceId, remove = [] } = {}, emit) {
   let entry
   try {
@@ -2935,5 +2950,6 @@ module.exports = {
   contentProject,
   contentChangelog,
   contentInstalled,
+  contentInventory,
   contentInstall,
 }

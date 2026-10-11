@@ -3,7 +3,7 @@ import {
   MagnifyingGlass, ArrowsClockwise, DownloadSimple, X, Package,
   CheckCircle, WarningCircle, ArrowLeft, CaretRight, Download, CaretDown,
   Info, Tag, Images, ArrowSquareOut, Sparkle, ClockCounterClockwise,
-  Users, LinkSimple, Cube,
+  Users, LinkSimple, Cube, Trash,
 } from '@phosphor-icons/react'
 import { palette } from '../../lib/palette'
 import { timeAgo, formatDate } from '../../lib/status'
@@ -16,6 +16,10 @@ import { loaderIcon, envIcon } from '../../api/client'
 import * as api from '../../api/client.js'
 
 const vn = (lang, vi, en) => (lang === 'vi' ? vi : en)
+const ownedKey = (text) => {
+  const norm = String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, '')
+  return norm ? `k:${norm}` : ''
+}
 const PAGE = 20
 const FADE_MS = 190
 
@@ -93,6 +97,10 @@ export default function ContentDownloadPage({ instance, theme, lang, kind, progr
   const [envSupported, setEnvSupported] = useState(false)
   const [stuck, setStuck] = useState(false)
   const [updateAsk, setUpdateAsk] = useState(null)
+  const [owned, setOwned] = useState({})
+  const [menu, setMenu] = useState(null)
+  const [removeAsk, setRemoveAsk] = useState(null)
+  const [removing, setRemoving] = useState(false)
 
   const [active, setActive] = useState(null)
   const [detail, setDetail] = useState(null)
@@ -115,6 +123,24 @@ export default function ContentDownloadPage({ instance, theme, lang, kind, progr
   const live = progress?.[instance.id]
   const picked = useMemo(() => versions.find((v) => v.id === versionId) || null, [versions, versionId])
   const latest = versions[0] || null
+
+  const loadOwned = useCallback(async () => {
+    const res = await api.contentInventory({ kind, instanceId: instance.id }).catch(() => null)
+    const map = {}
+    for (const row of res?.items || []) {
+      if (!row.projectId) continue
+      map[row.projectId] = row
+      const slug = ownedKey(row.slug)
+      const title = ownedKey(row.title)
+      if (slug) map[slug] = row
+      if (title) map[title] = row
+    }
+    setOwned(map)
+  }, [kind, instance.id])
+
+  useEffect(() => { loadOwned() }, [loadOwned])
+
+  const ownedOf = (hit) => owned[hit?.id] || owned[ownedKey(hit?.slug)] || owned[ownedKey(hit?.name)] || null
 
   const load = useCallback(async ({ reset = true } = {}) => {
     const id = ++reqRef.current
@@ -266,7 +292,8 @@ export default function ContentDownloadPage({ instance, theme, lang, kind, progr
     if (!res?.ok) return setInstallError(res?.error || 'error')
     setDone(res)
     onInstalled?.()
-  }, [kind, active, instance.id, onInstalled])
+    loadOwned()
+  }, [kind, active, instance.id, onInstalled, loadOwned])
 
   const install = useCallback(async (targetId, which) => {
     if (!active || !targetId) return
@@ -288,6 +315,24 @@ export default function ContentDownloadPage({ instance, theme, lang, kind, progr
     }
     await runInstall(targetId, which)
   }, [active, versions, latest, kind, instance.id, runInstall])
+
+  const runRemove = useCallback(async () => {
+    const ask = removeAsk
+    if (!ask) return
+    setRemoving(true)
+    const res = await api
+      .trashFiles({ id: instance.id, rels: [`${folder}/${ask.file}`] })
+      .catch((err) => ({ ok: false, error: err.message }))
+    setRemoving(false)
+    setRemoveAsk(null)
+    if (!res?.ok || res?.failed?.length) {
+      setInstallError(res?.error || vn(lang, 'Không gỡ được tệp này.', 'Could not remove this file.'))
+      return
+    }
+    setDone({ custom: vn(lang, `Đã chuyển ${ask.file} vào Thùng rác`, `Moved ${ask.file} to Trash`) })
+    await loadOwned()
+    onInstalled?.()
+  }, [removeAsk, folder, instance.id, lang, loadOwned, onInstalled])
 
   const targetLine = instance.loader && instance.loader !== 'vanilla' && kind === 'mods'
     ? `${instance.version} · ${LOADERS[instance.loader] || instance.loader}${instance.loaderVersion ? ` ${instance.loaderVersion}` : ''}`
@@ -494,7 +539,16 @@ export default function ContentDownloadPage({ instance, theme, lang, kind, progr
                         kind={kind}
                         load={() => api.contentPreview({ source: hit.source, id: hit.id })}
                       >
-                        <Card c={c} lang={lang} hit={hit} kind={kind} game={instance.version} onOpen={() => openItem(hit)} />
+                        <Card
+                          c={c}
+                          lang={lang}
+                          hit={hit}
+                          kind={kind}
+                          game={instance.version}
+                          owned={ownedOf(hit)}
+                          onOpen={() => openItem(hit)}
+                          onMenu={(event) => setMenu({ hit, x: event.clientX, y: event.clientY })}
+                        />
                       </HoverPreview>
                     ))}
                   </div>
@@ -911,9 +965,13 @@ export default function ContentDownloadPage({ instance, theme, lang, kind, progr
                   <div className="flex items-center gap-2 rounded-lg px-3 py-2" style={{ background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.3)' }}>
                     <CheckCircle size={13} weight="fill" style={{ color: '#22c55e' }} />
                     <span className="text-[10px] font-semibold flex-1 min-w-0 truncate" style={{ color: '#22c55e' }}>
-                      {vn(lang, `Đã thêm ${done.added} tệp vào ${folder}/`, `Added ${done.added} file(s) to ${folder}/`)}
-                      {done.existed ? vn(lang, ` · ${done.existed} đã có`, ` · ${done.existed} already there`) : ''}
-                      {done.failed?.length ? vn(lang, ` · lỗi ${done.failed.length}`, ` · ${done.failed.length} failed`) : ''}
+                      {done.custom
+                        ? done.custom
+                        : <>
+                            {vn(lang, `Đã thêm ${done.added} tệp vào ${folder}/`, `Added ${done.added} file(s) to ${folder}/`)}
+                            {done.existed ? vn(lang, ` · ${done.existed} đã có`, ` · ${done.existed} already there`) : ''}
+                            {done.failed?.length ? vn(lang, ` · lỗi ${done.failed.length}`, ` · ${done.failed.length} failed`) : ''}
+                          </>}
                     </span>
                   </div>
                 )}
@@ -927,6 +985,114 @@ export default function ContentDownloadPage({ instance, theme, lang, kind, progr
           </div>
         )}
       </div>
+
+      {menu && (
+        <>
+          <div
+            className="fixed inset-0 z-[190]"
+            onClick={() => setMenu(null)}
+            onContextMenu={(event) => { event.preventDefault(); setMenu(null) }}
+          />
+          <div
+            className="fixed z-[200] min-w-[190px] rounded-xl py-1 overflow-hidden"
+            style={{
+              left: Math.max(8, Math.min(menu.x, window.innerWidth - 206)),
+              top: Math.max(8, Math.min(menu.y, window.innerHeight - 140)),
+              background: c.surface,
+              border: `1px solid ${c.border}`,
+              boxShadow: '0 18px 40px rgba(0,0,0,0.45)',
+            }}
+          >
+            <p className="px-3 py-1.5 text-[9px] font-mono truncate" style={{ color: c.faint }}>{menu.hit.name}</p>
+            {[
+              { key: 'open', icon: Info, label: vn(lang, 'Xem chi tiết', 'View details'), run: () => openItem(menu.hit) },
+              ownedOf(menu.hit)
+                ? { key: 'update', icon: ArrowsClockwise, label: vn(lang, 'Cập nhật', 'Update'), run: () => { openItem(menu.hit); setTab('versions') } }
+                : null,
+              ownedOf(menu.hit)
+                ? {
+                    key: 'remove',
+                    icon: Trash,
+                    label: vn(lang, 'Gỡ khỏi phiên bản', 'Remove from instance'),
+                    danger: true,
+                    run: () => setRemoveAsk({ hit: menu.hit, file: ownedOf(menu.hit).file, version: ownedOf(menu.hit).version }),
+                  }
+                : null,
+            ].filter(Boolean).map((item) => (
+              <button
+                key={item.key}
+                onClick={() => { const run = item.run; setMenu(null); run() }}
+                className="w-full text-left px-3 py-2 flex items-center gap-2 transition-colors"
+                style={{ color: item.danger ? '#f87171' : c.label }}
+                onMouseEnter={(event) => { event.currentTarget.style.background = c.input }}
+                onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent' }}
+              >
+                <item.icon size={13} weight="duotone" style={{ color: item.danger ? '#f87171' : c.accent }} />
+                <span className="text-[11px] font-semibold">{item.label}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
+      {removeAsk && (
+        <div
+          className="modal-backdrop fixed inset-0 z-[210] flex items-center justify-center p-6"
+          onClick={() => { if (!removing) setRemoveAsk(null) }}
+        >
+          <div
+            className="modal-content w-full max-w-[460px] rounded-2xl flex flex-col overflow-hidden"
+            style={{ background: c.surface, border: `1px solid ${c.border}` }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-4 py-3 flex items-center gap-2" style={{ borderBottom: `1px solid ${c.border}` }}>
+              <Trash size={15} weight="duotone" style={{ color: '#f87171' }} />
+              <p className="text-[12px] font-bold flex-1" style={{ color: c.text }}>
+                {vn(lang, 'Gỡ khỏi phiên bản?', 'Remove from instance?')}
+              </p>
+              <button onClick={() => { if (!removing) setRemoveAsk(null) }} style={{ color: c.faint }}>
+                <X size={13} weight="bold" />
+              </button>
+            </div>
+            <div className="p-4 flex flex-col gap-3">
+              <div className="rounded-xl px-2.5 py-2 flex items-center gap-2" style={{ background: c.input, border: `1px solid ${c.border}` }}>
+                <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: '#f87171' }} />
+                <div className="min-w-0 flex-1">
+                  <p className="text-[11px] font-mono truncate" style={{ color: c.text }} title={removeAsk.file}>{removeAsk.file}</p>
+                  <p className="text-[9px] font-mono truncate" style={{ color: c.faint }}>
+                    {removeAsk.hit.name}{removeAsk.version ? ` · ${removeAsk.version}` : ''}
+                  </p>
+                </div>
+              </div>
+              <p className="text-[10px] leading-relaxed" style={{ color: c.faint }}>
+                {vn(
+                  lang,
+                  'Tệp sẽ được chuyển vào Thùng rác của launcher (khôi phục được ở trang Thùng rác), không xoá hẳn.',
+                  'The file goes to the launcher Trash (restorable from the Trash page), not deleted for good.',
+                )}
+              </p>
+            </div>
+            <div className="px-4 py-3 flex items-center gap-2 justify-end" style={{ borderTop: `1px solid ${c.border}` }}>
+              <button
+                onClick={() => setRemoveAsk(null)}
+                disabled={removing}
+                className="h-8 px-3 rounded-lg text-[11px] font-semibold disabled:opacity-50"
+                style={{ background: c.input, border: `1px solid ${c.border}`, color: c.label }}
+              >
+                {vn(lang, 'Huỷ', 'Cancel')}
+              </button>
+              <button
+                onClick={runRemove}
+                disabled={removing}
+                className="h-8 px-3 rounded-lg text-[11px] font-bold disabled:opacity-50"
+                style={{ background: 'rgba(248,113,113,0.16)', border: '1px solid rgba(248,113,113,0.5)', color: '#f87171' }}
+              >
+                {removing ? vn(lang, 'Đang gỡ…', 'Removing…') : vn(lang, 'Gỡ', 'Remove')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {updateAsk && (
         <div
@@ -1030,15 +1196,29 @@ export default function ContentDownloadPage({ instance, theme, lang, kind, progr
   )
 }
 
-function Card({ c, lang, hit, kind, game, onOpen }) {
+function Card({ c, lang, hit, kind, game, owned, onOpen, onMenu }) {
   const versions = hit.gameVersions || []
   return (
     <button
       onClick={onOpen}
+      onContextMenu={(event) => {
+        event.preventDefault()
+        onMenu?.(event)
+      }}
       className="group relative overflow-hidden text-left rounded-xl p-3 flex flex-col gap-2.5 transition-all duration-200 hover:-translate-y-0.5 h-full w-full"
-      style={{ background: c.surface, border: `1px solid ${c.border}` }}
+      style={{ background: owned ? `${c.accent}0d` : c.surface, border: `1px solid ${owned ? `${c.accent}55` : c.border}` }}
     >
       <span className="absolute left-0 top-3 bottom-3 w-[2px] rounded-full opacity-0 group-hover:opacity-40 transition-opacity" style={{ background: c.accent }} />
+      {owned ? (
+        <span
+          className="absolute right-0 top-0 z-10 inline-flex items-center gap-1 rounded-bl-lg px-2 py-[3px] text-[9px] font-mono max-w-[62%]"
+          style={{ background: `${c.accent}26`, borderLeft: `1px solid ${c.accent}55`, borderBottom: `1px solid ${c.accent}55`, color: c.accent }}
+          title={`${vn(lang, 'Đã cài', 'Installed')}${owned.version ? ` · ${owned.version}` : ''} · ${owned.file}`}
+        >
+          <CheckCircle size={9} weight="fill" />
+          <span className="truncate">{vn(lang, 'Đã cài', 'Installed')}{owned.version ? ` · ${owned.version}` : ''}</span>
+        </span>
+      ) : null}
       <div className="flex items-start gap-2.5">
         {hit.icon ? (
           <img src={hit.icon} alt="" loading="lazy" className="w-11 h-11 rounded-lg object-cover shrink-0" style={{ border: `1px solid ${c.border}`, background: c.input }} />
