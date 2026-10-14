@@ -4,6 +4,7 @@ const path = require('path')
 const { UA } = require('./net.cjs')
 
 const CLIENT_FLAGS = [
+  '-XX:+UnlockExperimentalVMOptions',
   '-XX:+UseG1GC',
   '-XX:+ParallelRefProcEnabled',
   '-XX:MaxGCPauseMillis=37',
