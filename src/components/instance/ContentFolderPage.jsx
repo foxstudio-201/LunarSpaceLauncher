@@ -3,9 +3,11 @@ import { createPortal } from 'react-dom'
 import {
   Check, DotsThreeVertical, FolderOpen, Trash, UploadSimple,
   ArrowsClockwise, Warning, Power, ProhibitInset, DownloadSimple,
+  ClockCounterClockwise, SortAscending, SortDescending,
 } from '@phosphor-icons/react'
 import { t } from '../../i18n/translations'
 import HoverPreview from '../ui/HoverPreview'
+import Select from '../ui/Select'
 import useVirtual from '../ui/useVirtual'
 import { palette } from '../../lib/palette'
 import { sizeLabel, stampLabel } from '../../lib/files'
@@ -18,6 +20,7 @@ const vn = (lang, vi, en) => (lang === 'vi' ? vi : en)
 const GRID = '1fr 100px 90px 140px 36px'
 const GRID_MODS = '1fr 100px 100px 90px 140px 36px'
 const GRID_GAP = 14
+let lastSortBy = 'recent'
 
 function fill(lang, key, map) {
   let text = t(lang, key)
@@ -37,6 +40,7 @@ export default function ContentFolderPage({
   const instProgress = progress?.[instance.id]
   const [entries, setEntries] = useState([])
   const [query, setQuery] = useState('')
+  const [sortBy, setSortBy] = useState(lastSortBy)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [menu, setMenu] = useState(null)
@@ -270,7 +274,30 @@ export default function ContentFolderPage({
   }
 
   const needle = query.trim().toLowerCase()
-  const shown = needle ? entries.filter((entry) => String(entry.name || '').toLowerCase().includes(needle)) : entries
+  const shown = useMemo(() => {
+    const base = needle ? entries.filter((entry) => String(entry.name || '').toLowerCase().includes(needle)) : entries
+    const list = [...base]
+    const byName = (a, b) => String(a.name || '').localeCompare(String(b.name || ''))
+    if (sortBy === 'size-asc') list.sort((a, b) => (a.size || 0) - (b.size || 0) || byName(a, b))
+    else if (sortBy === 'size-desc') list.sort((a, b) => (b.size || 0) - (a.size || 0) || byName(a, b))
+    else if (sortBy === 'time-asc') list.sort((a, b) => (a.mtime || 0) - (b.mtime || 0) || byName(a, b))
+    else if (sortBy === 'time-desc' || sortBy === 'recent') list.sort((a, b) => (b.mtime || 0) - (a.mtime || 0) || byName(a, b))
+    return list
+  }, [entries, needle, sortBy])
+
+  const setSort = (value) => {
+    lastSortBy = value
+    setSortBy(value)
+  }
+
+  const sortOptions = [
+    { value: 'default', label: t(lang, 'files.sortDefault') },
+    { value: 'recent', label: t(lang, 'files.sortRecent'), node: <ClockCounterClockwise size={13} weight="bold" /> },
+    { value: 'size-asc', label: t(lang, 'files.sortSizeAsc'), node: <SortAscending size={13} weight="bold" /> },
+    { value: 'size-desc', label: t(lang, 'files.sortSizeDesc'), node: <SortDescending size={13} weight="bold" /> },
+    { value: 'time-asc', label: t(lang, 'files.sortOldest') },
+    { value: 'time-desc', label: t(lang, 'files.sortNewest') },
+  ]
   const virtual = useVirtual({ containerRef: listRef, wrapRef: rowsRef, count: shown.length, rowHeight: 41, overscan: 6 })
   const allSelected = shown.length > 0 && selected.every((name) => shown.some((entry) => entry.name === name))
   const toggleAll = () => setSelected(allSelected ? [] : entries.map((e) => e.name))
@@ -357,6 +384,9 @@ export default function ContentFolderPage({
             {fill(lang, 'files.uploading', { n: busy })}
           </span>
         )}
+        <div className="w-56 shrink-0">
+          <Select theme={theme} value={sortBy} onChange={setSort} options={sortOptions} />
+        </div>
         <input
           value={query}
           onChange={(event) => setQuery(event.target.value)}
