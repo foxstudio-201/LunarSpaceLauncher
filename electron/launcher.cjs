@@ -24,6 +24,7 @@ const profileExport = require('./mc/export.cjs')
 const serverpack = require('./mc/serverpack.cjs')
 const servertest = require('./mc/servertest.cjs')
 const serverlocal = require('./mc/serverlocal.cjs')
+const { ensureGameGpu } = require('./gpupref.cjs')
 
 let broadcast = () => {}
 
@@ -1316,6 +1317,11 @@ async function runLaunch({ id, username, demo: demoOverride, settings }, emit) {
   const startedAt = Date.now()
   let child
   try {
+    const gpu = await ensureGameGpu(found.java.path).catch(() => false)
+    if (gpu) {
+      pushLog(id, '[LunarSpace] Đã ưu tiên GPU rời cho Java (Windows Graphics).')
+      emit?.({ type: 'log', id, line: '[LunarSpace] Đã ưu tiên GPU rời cho Java (Windows Graphics).' })
+    }
     child = spawnGame({
       javaPath: found.java.path,
       args,
