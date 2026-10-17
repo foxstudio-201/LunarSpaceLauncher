@@ -607,6 +607,8 @@ function registerIpc() {
   ipcMain.handle('launcher:modpack-import', (_e, opts) => launcher.modpackImport({ ...(opts || {}), settings: readSettings() }))
   ipcMain.handle('launcher:modpack-install', (_e, opts) => launcher.modpackInstall({ ...(opts || {}), settings: readSettings() }, emitLauncher))
   ipcMain.handle('launcher:modpack-repair', (_e, opts) => launcher.modpackRepair(opts || {}, emitLauncher))
+  ipcMain.handle('launcher:modpack-instance-info', (_e, opts) => launcher.modpackInstanceInfo(opts || {}))
+  ipcMain.handle('launcher:modpack-instance-update', (_e, opts) => launcher.modpackInstanceUpdate({ ...(opts || {}), settings: readSettings() }, emitLauncher))
 
   ipcMain.handle('launcher:content-search', (_e, opts) => launcher.contentSearch(opts || {}))
   ipcMain.handle('launcher:instance-mod-env', (_e, opts) => launcher.instanceModEnvs(opts || {}))

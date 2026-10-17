@@ -3,6 +3,7 @@ const fs = require('fs')
 const fsp = fs.promises
 const path = require('path')
 const os = require('os')
+const crypto = require('crypto')
 const { listVersions, listLoaderVersions, listLoaderGames, getLoaderProfile } = require('./mc/meta.cjs')
 const { pathsFor, install, resolveChain, ensureLaunchFiles } = require('./mc/install.cjs')
 const { findJava, buildLaunch, spawnGame, killTree, offlineUuid } = require('./mc/launch.cjs')
@@ -1559,6 +1560,8 @@ async function modpackResolve({ source, packId, fileId, settings } = {}) {
     })
     normalizePackPlan(plan)
     plan.notes = notes
+    plan.packId = String(packId)
+    plan.fileId = fileId || plan.fileId || null
     return { ok: true, plan: packView(plan, rememberPack(plan)) }
   } catch (err) {
     return { ok: false, error: err.message }
@@ -1663,7 +1666,19 @@ async function modpackInstall({ token, name, dir, icon = '', memoryMb = 4096, se
     try {
       await fsp.writeFile(
         path.join(entry.dir, PACK_PLAN_FILE),
-        JSON.stringify({ name: plan.name, source: plan.source, version: plan.version || '', mc: plan.mc, loader: plan.loader, files: plan.files, missing: plan.missing || [] }),
+        JSON.stringify({
+          name: plan.name,
+          source: plan.source,
+          version: plan.version || '',
+          mc: plan.mc,
+          loader: plan.loader,
+          projectId: plan.projectId || plan.packId || null,
+          versionId: plan.fileId || null,
+          projectUrl: plan.projectUrl || null,
+          slug: plan.slug || null,
+          files: plan.files,
+          missing: plan.missing || [],
+        }),
         'utf8',
       )
     } catch {}
@@ -1702,6 +1717,320 @@ async function modpackRepair({ id } = {}, emit) {
     return res
   } catch (err) {
     emit?.({ type: 'progress', id: entry.id, phase: 'clear' })
+    return { ok: false, error: err.message }
+  }
+}
+
+const packInfoCache = new Map()
+
+async function readPackMarker(dir) {
+  try {
+    return JSON.parse(await fsp.readFile(path.join(dir, PACK_PLAN_FILE), 'utf8'))
+  } catch {
+    return null
+  }
+}
+
+async function resolvePackIdentity(entry, marker) {
+  if (!marker || !['modrinth', 'curseforge'].includes(marker.source)) return null
+  if (marker.projectId) {
+    return {
+      source: marker.source,
+      id: String(marker.projectId),
+      slug: marker.slug || '',
+      projectUrl: marker.projectUrl || '',
+      versions: null,
+      installedVersionId: marker.versionId || null,
+      trusted: true,
+    }
+  }
+  const urlSlug = (() => {
+    const match = String(marker.projectUrl || '').match(/\/(?:modpacks?)\/([^/?#]+)/i)
+    return match ? decodeURIComponent(match[1]) : ''
+  })()
+  if (urlSlug) {
+    const urlKey = ['url', marker.source, urlSlug].join('|')
+    if (packInfoCache.has(urlKey)) return packInfoCache.get(urlKey)
+    let id = urlSlug
+    if (marker.source === 'curseforge') {
+      try {
+        const res = await modpack.search({ source: 'curseforge', query: urlSlug, limit: 10 })
+        const hit = (res?.hits || []).find((h) => modpack.normName(h.slug) === modpack.normName(urlSlug))
+        if (hit) id = hit.id
+      } catch {}
+    }
+    let versions = []
+    try {
+      versions = (await modpack.versions({ source: marker.source, id })) || []
+    } catch {}
+    if (versions.length) {
+      const want = modpack.normName(marker.version)
+      const installed = want
+        ? versions.find((v) => modpack.normName(v.versionNumber).includes(want) || modpack.normName(v.name).includes(want) || want.includes(modpack.normName(v.name)))
+        : null
+      const found = {
+        source: marker.source,
+        id: String(id),
+        slug: urlSlug,
+        projectUrl: marker.projectUrl,
+        versions,
+        installedVersionId: installed?.id || marker.versionId || null,
+        trusted: true,
+      }
+      packInfoCache.set(urlKey, found)
+      return found
+    }
+  }
+  const key = [marker.source, marker.name, marker.version, marker.mc, marker.loader].join('|')
+  if (packInfoCache.has(key)) return packInfoCache.get(key)
+  const target = modpack.normName(marker.name)
+  const words = String(marker.name || '').split(/\s+/).filter(Boolean)
+  const queries = [...new Set([
+    marker.name,
+    String(marker.name || '').split(/\s*[|/–-]\s*/)[0],
+    words.slice(0, 3).join(' '),
+    words.slice(0, 2).join(' '),
+    words[0],
+  ].map((q) => String(q || '').trim()).filter(Boolean))]
+  const candidates = new Map()
+  for (const q of queries) {
+    let res = null
+    const nq = modpack.normName(q)
+    try {
+      res = await modpack.search({ source: marker.source, query: q, game: marker.mc, loader: marker.loader, limit: 10 })
+    } catch {}
+    for (const hit of res?.hits || []) {
+      const name = modpack.normName(hit.name)
+      const slug = modpack.normName(hit.slug)
+      let rank = 0
+      if (name === target) rank = 3
+      else if ((name && (name.includes(target) || target.includes(name))) || (slug && target.includes(slug))) rank = 2
+      else if (nq.length >= 5 && ((name && name.includes(nq)) || (slug && slug.includes(nq)))) rank = 1
+      if (!rank) continue
+      const known = candidates.get(hit.id)
+      if (!known || rank > known.rank) candidates.set(hit.id, { hit, rank })
+    }
+    if ([...candidates.values()].some((c) => c.rank === 3)) break
+  }
+  if (!candidates.size) {
+    packInfoCache.set(key, null)
+    return null
+  }
+  const want = modpack.normName(marker.version)
+  const ranked = [...candidates.values()].sort((a, b) => b.rank - a.rank || (b.hit.downloads || 0) - (a.hit.downloads || 0))
+  let fallback = null
+  for (const candidate of ranked.slice(0, 5)) {
+    let versions = []
+    try {
+      versions = (await modpack.versions({ source: marker.source, id: candidate.hit.id })) || []
+    } catch {}
+    const installed = want
+      ? versions.find((v) => modpack.normName(v.versionNumber).includes(want) || modpack.normName(v.name).includes(want) || want.includes(modpack.normName(v.name)))
+      : null
+    const found = {
+      source: marker.source,
+      id: String(candidate.hit.id),
+      slug: candidate.hit.slug || '',
+      projectUrl: marker.source === 'curseforge'
+        ? `https://www.curseforge.com/minecraft/modpacks/${candidate.hit.slug || candidate.hit.id}`
+        : `https://modrinth.com/modpack/${candidate.hit.slug || candidate.hit.id}`,
+      versions,
+      installedVersionId: installed?.id || null,
+      trusted: !!installed,
+    }
+    if (installed) {
+      packInfoCache.set(key, found)
+      return found
+    }
+    if (candidate.rank >= 2 && !fallback) fallback = found
+    if (candidate.rank === 3) break
+  }
+  packInfoCache.set(key, fallback)
+  return fallback
+}
+
+async function modpackInstanceInfo({ id } = {}) {
+  let entry
+  try {
+    entry = findEntry(id)
+  } catch (err) {
+    return { ok: false, isModpack: false, error: err.message }
+  }
+  const marker = await readPackMarker(entry.dir)
+  if (!marker || !['modrinth', 'curseforge'].includes(marker.source)) return { ok: true, isModpack: false }
+  let ident = null
+  let resolveError = ''
+  try {
+    ident = await resolvePackIdentity(entry, marker)
+  } catch (err) {
+    resolveError = err.message
+  }
+  if (!ident) resolveError = resolveError || 'Không xác định được modpack nguồn.'
+  if (ident && ident.trusted && !marker.projectId) {
+    try {
+      await fsp.writeFile(
+        path.join(entry.dir, PACK_PLAN_FILE),
+        JSON.stringify({
+          ...marker,
+          projectId: ident.id,
+          slug: ident.slug || marker.slug || null,
+          projectUrl: ident.projectUrl || marker.projectUrl || null,
+          versionId: marker.versionId || ident.installedVersionId || null,
+        }),
+        'utf8',
+      )
+    } catch {}
+  }
+  return {
+    ok: true,
+    isModpack: true,
+    source: marker.source,
+    projectId: ident?.id || null,
+    installedVersionId: ident?.installedVersionId || marker.versionId || null,
+    resolveError,
+    marker: {
+      name: marker.name || entry.name,
+      version: marker.version || '',
+      mc: marker.mc || entry.version,
+      loader: marker.loader || entry.loader,
+      files: (marker.files || []).length,
+      missing: (marker.missing || []).length,
+    },
+  }
+}
+
+async function sha1Of(file) {
+  const hash = crypto.createHash('sha1')
+  hash.update(await fsp.readFile(file))
+  return hash.digest('hex')
+}
+
+async function modpackInstanceUpdate({ id, versionId, settings } = {}, emit) {
+  let entry
+  try {
+    entry = findEntry(id)
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+  if (['running', 'starting', 'stopping', 'installing'].includes(entry.status)) {
+    return { ok: false, error: 'Hãy dừng game và đợi thao tác hiện tại kết thúc.' }
+  }
+  if (!versionId) return { ok: false, error: 'Thiếu bản modpack cần cập nhật.' }
+  const marker = await readPackMarker(entry.dir)
+  if (!marker || !['modrinth', 'curseforge'].includes(marker.source)) {
+    return { ok: false, error: 'Instance này không phải modpack tải từ Modrinth/CurseForge.' }
+  }
+  const ident = await resolvePackIdentity(entry, marker)
+  if (!ident) return { ok: false, error: 'Không xác định được modpack nguồn để cập nhật.' }
+  let versions = ident.versions
+  if (!versions) {
+    try {
+      versions = (await modpack.versions({ source: marker.source, id: ident.id })) || []
+    } catch {
+      versions = []
+    }
+  }
+  const target = versions.find((v) => v.id === versionId)
+  if (!target) return { ok: false, error: 'Không tìm thấy bản modpack đã chọn.' }
+  const label = target.name || target.versionNumber || versionId
+  const { shared } = storageFor(settings)
+  const log = (line) => {
+    if (!line) return
+    pushLog(entry.id, line)
+    emit?.({ type: 'log', id: entry.id, line })
+  }
+  const stream = (p = {}) => emit?.({
+    type: 'progress',
+    id: entry.id,
+    phase: p.phase || 'download',
+    label: 'update',
+    done: p.done,
+    total: p.total,
+    bytesDone: p.bytesDone,
+    totalBytes: p.totalBytes,
+    file: p.file,
+    error: p.error,
+    summary: p.summary,
+  })
+  updateEntry(entry.id, { status: 'installing' })
+  stream({ phase: 'download', done: 0, total: 0 })
+  try {
+    log(`[LunarSpace] Cập nhật modpack: ${marker.version || '?'} → ${label}`)
+    const plan = await modpack.resolvePlan({
+      source: marker.source,
+      packId: ident.id,
+      fileId: versionId,
+      cacheDir: path.join(shared, 'modpacks'),
+      onLog: log,
+      onProgress: stream,
+    })
+    normalizePackPlan(plan)
+    const res = await modpack.applyPlan({
+      plan,
+      instanceDir: entry.dir,
+      onProgress: stream,
+      onLog: log,
+    })
+    const oldFiles = Array.isArray(marker.files) ? marker.files : []
+    const nextRels = new Set(plan.files.map((f) => f.rel))
+    const removable = []
+    for (const old of oldFiles) {
+      if (!old?.rel || nextRels.has(old.rel)) continue
+      const full = path.join(entry.dir, old.rel)
+      try {
+        const st = await fsp.stat(full)
+        if (!st.isFile()) continue
+        let same = false
+        if (old.sha1) same = (await sha1Of(full)) === old.sha1
+        else if (old.size) same = st.size === old.size
+        if (same) removable.push(old.rel)
+        else log(`[LunarSpace] Giữ tệp đã chỉnh tay: ${old.rel}`)
+      } catch {}
+    }
+    if (removable.length) {
+      const trashed = await trashFiles({ id: entry.id, rels: removable })
+      log(`[LunarSpace] Đã chuyển ${trashed?.trashed ?? removable.length} tệp không còn trong bản mới vào Thùng rác.`)
+    }
+    try {
+      await fsp.writeFile(
+        path.join(entry.dir, PACK_PLAN_FILE),
+        JSON.stringify({
+          name: plan.name || marker.name,
+          source: plan.source || marker.source,
+          version: target.name || target.versionNumber || '',
+          mc: plan.mc || marker.mc,
+          loader: plan.loader || marker.loader,
+          projectId: plan.projectId || ident.id,
+          versionId,
+          slug: plan.slug || marker.slug || null,
+          projectUrl: plan.projectUrl || marker.projectUrl || null,
+          files: plan.files,
+          missing: plan.missing || [],
+        }),
+        'utf8',
+      )
+    } catch {}
+    const meta = {
+      name: plan.name || marker.name,
+      version: target.name || target.versionNumber || '',
+      source: marker.source,
+      loader: plan.loader || marker.loader,
+      loaderVersion: plan.loaderVersion || null,
+      mods: plan.files.length,
+      missing: (plan.missing || []).length,
+    }
+    updateEntry(entry.id, { modpack: meta, status: 'ready', error: null })
+    await syncProfiles(settings)
+    stream({ phase: 'done', label: 'update', done: res.files, total: res.files, summary: { files: plan.files.length } })
+    return {
+      ok: true,
+      info: await modpackInstanceInfo({ id: entry.id }),
+      applied: { planned: plan.files.length, downloaded: res.downloaded, failed: res.failed.length, removed: removable.length },
+    }
+  } catch (err) {
+    log(`[LunarSpace] Lỗi cập nhật modpack: ${err.message}`)
+    updateEntry(entry.id, { status: 'ready' })
+    stream({ phase: 'error', label: 'update', error: err.message })
     return { ok: false, error: err.message }
   }
 }
@@ -2951,6 +3280,8 @@ module.exports = {
   modpackImport,
   modpackInstall,
   modpackRepair,
+  modpackInstanceInfo,
+  modpackInstanceUpdate,
   exportProfile,
   serverpackPlan,
   instanceTree,

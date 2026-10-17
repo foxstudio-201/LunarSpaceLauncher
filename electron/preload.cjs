@@ -92,6 +92,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   modpackImport: (opts) => ipcRenderer.invoke('launcher:modpack-import', opts),
   modpackInstall: (opts) => ipcRenderer.invoke('launcher:modpack-install', opts),
   modpackRepair: (opts) => ipcRenderer.invoke('launcher:modpack-repair', opts),
+  modpackInstanceInfo: (opts) => ipcRenderer.invoke('launcher:modpack-instance-info', opts),
+  modpackInstanceUpdate: (opts) => ipcRenderer.invoke('launcher:modpack-instance-update', opts),
   chooseModpack: () => ipcRenderer.invoke('launcher:choose-modpack'),
   exportProfile: (opts) => ipcRenderer.invoke('launcher:export-profile', opts),
   serverpackPlan: (opts) => ipcRenderer.invoke('launcher:serverpack-plan', opts),

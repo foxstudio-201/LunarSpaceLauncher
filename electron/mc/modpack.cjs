@@ -768,14 +768,36 @@ async function resolvePlan({ source, packId, fileId, cacheDir, onProgress, onLog
     if (!file) throw new Error('Không đọc được tệp modpack CurseForge.')
     const url = cfFileUrl(file)
     if (!url) throw new Error('Modpack này không cho tải qua API.')
+    let info = null
+    try {
+      info = (await cfJson(`${CF}/mods/${encodeURIComponent(packId)}`))?.data || null
+    } catch {}
     const zipPath = await downloadToCache({ url, name: file.fileName, dir: cacheDir, onProgress })
-    return planFromCurseforgeZip({ zipPath, onLog })
+    const plan = planFromCurseforgeZip({ zipPath, onLog })
+    plan.projectId = String(packId)
+    plan.fileId = String(fileId)
+    plan.slug = info?.slug || ''
+    plan.projectName = info?.name || ''
+    plan.projectUrl = info?.slug
+      ? `https://www.curseforge.com/minecraft/modpacks/${info.slug}`
+      : `https://www.curseforge.com/minecraft/modpacks/${packId}`
+    return plan
   }
   const list = await versionsModrinth({ id: packId })
   const version = fileId ? list.find((v) => v.id === fileId) : list[0]
   if (!version?.file?.url) throw new Error('Không tìm thấy bản modpack để tải.')
+  let info = null
+  try {
+    info = await fetchJson(`${MODRINTH}/project/${encodeURIComponent(packId)}`)
+  } catch {}
   const zipPath = await downloadToCache({ url: version.file.url, name: version.file.filename, dir: cacheDir, sha1: version.file.sha1, onProgress })
-  return planFromMrpack({ zipPath, onLog })
+  const plan = planFromMrpack({ zipPath, onLog })
+  plan.projectId = String(info?.id || packId)
+  plan.fileId = version.id
+  plan.slug = info?.slug || ''
+  plan.projectName = info?.title || ''
+  plan.projectUrl = info?.slug ? `https://modrinth.com/modpack/${info.slug}` : `https://modrinth.com/modpack/${plan.projectId}`
+  return plan
 }
 
 async function repairPlan({ planPath, onProgress, onLog }) {

@@ -975,6 +975,16 @@ export async function modpackRepair({ id } = {}) {
   throw new Error(NEEDS_APP)
 }
 
+export async function modpackInstanceInfo({ id } = {}) {
+  if (bridge?.modpackInstanceInfo) return bridge.modpackInstanceInfo({ id })
+  throw new Error(NEEDS_APP)
+}
+
+export async function modpackInstanceUpdate(opts = {}) {
+  if (bridge?.modpackInstanceUpdate) return bridge.modpackInstanceUpdate(opts)
+  throw new Error(NEEDS_APP)
+}
+
 export async function chooseModpack() {
   if (bridge?.chooseModpack) return bridge.chooseModpack()
   throw new Error(NEEDS_APP)
