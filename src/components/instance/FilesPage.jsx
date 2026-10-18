@@ -7,6 +7,7 @@ import {
 import { t } from '../../i18n/translations'
 import { palette } from '../../lib/palette'
 import { fileIcon, sizeLabel, stampLabel } from '../../lib/files'
+import ConfirmModal from '../ui/ConfirmModal'
 import * as api from '../../api/client.js'
 
 function fill(lang, key, map) {
@@ -487,6 +488,24 @@ export default function FilesPage({ instance, theme, lang }) {
     )
   }
 
+  const menuW = 168
+  const menuH = 104
+  let menuLeft = 0
+  let menuTop
+  let menuBottom
+  if (menu) {
+    menuLeft = menu.point
+      ? Math.max(8, Math.min(menu.point.x, window.innerWidth - menuW - 8))
+      : Math.max(8, Math.min(menu.rect.right - menuW, window.innerWidth - menuW - 8))
+    if (menu.point) {
+      menuTop = menu.point.y + menuH > window.innerHeight ? Math.max(8, menu.point.y - menuH) : menu.point.y
+    } else if (menu.rect.bottom + 4 + menuH > window.innerHeight) {
+      menuBottom = window.innerHeight - menu.rect.top + 4
+    } else {
+      menuTop = menu.rect.bottom + 4
+    }
+  }
+
   return (
     <div data-surface className="h-full flex flex-col overflow-hidden relative" style={{ background: c.bg }}>
       {osDragging && (
@@ -652,31 +671,6 @@ export default function FilesPage({ instance, theme, lang }) {
         </div>
       )}
 
-      {pending && (
-        <div className="shrink-0 mx-3 mt-2 flex items-center gap-3 px-3 py-2 rounded-lg text-[11px]" style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: '#f87171' }}>
-          <Warning size={13} weight="duotone" />
-          <span className="flex-1">
-            {pending.names.length === 1
-              ? fill(lang, 'files.confirmTrashOne', { name: pending.names[0] })
-              : fill(lang, 'files.confirmTrash', { n: pending.names.length })}
-          </span>
-          <button
-            onClick={() => setPending(null)}
-            className="px-2.5 py-1 rounded-md text-[10px] font-semibold"
-            style={{ background: c.input, border: `1px solid ${c.border}`, color: c.label }}
-          >
-            {t(lang, 'files.cancel')}
-          </button>
-          <button
-            onClick={() => runTrash(pending.names)}
-            className="px-2.5 py-1 rounded-md text-[10px] font-bold"
-            style={{ background: '#ef4444', color: '#fff' }}
-          >
-            {t(lang, 'files.toTrash')}
-          </button>
-        </div>
-      )}
-
       <div
         className="shrink-0 mx-3 mt-3 grid items-center px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider"
         style={{
@@ -753,6 +747,11 @@ export default function FilesPage({ instance, theme, lang }) {
                 onDragLeave={() => { if (dropTarget === entry.name) setDropTarget(null) }}
                 onDrop={(e) => onRowDrop(e, entry)}
                 onClick={() => onRowClick(entry)}
+                onContextMenu={(event) => {
+                  event.preventDefault()
+                  if (selectMode) return
+                  setMenu({ name: entry.name, point: { x: event.clientX, y: event.clientY }, dir: entry.dir })
+                }}
                 className="grid items-center px-3 cursor-pointer group"
                 style={{
                   gridTemplateColumns: GRID,
@@ -816,15 +815,15 @@ export default function FilesPage({ instance, theme, lang }) {
 
       {menu && createPortal(
         <>
-          <div className="fixed inset-0" style={{ zIndex: 9998 }} onClick={() => setMenu(null)} />
+          <div className="fixed inset-0" style={{ zIndex: 9998 }} onClick={() => setMenu(null)} onContextMenu={(event) => { event.preventDefault(); setMenu(null) }} />
           <div
             className="fixed rounded-md overflow-hidden shadow-xl py-0.5"
             style={{
               zIndex: 9999,
-              left: Math.max(8, Math.min(menu.rect.right - 168, window.innerWidth - 176)),
-              top: menu.rect.bottom + 4 + 104 > window.innerHeight ? undefined : menu.rect.bottom + 4,
-              bottom: menu.rect.bottom + 4 + 104 > window.innerHeight ? window.innerHeight - menu.rect.top + 4 : undefined,
-              width: 168,
+              left: menuLeft,
+              top: menuTop,
+              bottom: menuBottom,
+              width: menuW,
               background: c.surface,
               border: `1px solid ${c.border}`,
             }}
@@ -862,6 +861,21 @@ export default function FilesPage({ instance, theme, lang }) {
         </>,
         document.body,
       )}
+
+      <ConfirmModal
+        theme={theme}
+        lang={lang}
+        open={!!pending}
+        message={
+          pending
+            ? pending.names.length === 1
+              ? fill(lang, 'files.confirmTrashOne', { name: pending.names[0] })
+              : fill(lang, 'files.confirmTrash', { n: pending.names.length })
+            : ''
+        }
+        onCancel={() => setPending(null)}
+        onConfirm={() => runTrash(pending?.names || [])}
+      />
     </div>
   )
 }

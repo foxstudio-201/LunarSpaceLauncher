@@ -234,6 +234,7 @@ const en = {
   'files.toTrash': 'Move to trash',
   'files.confirmTrashOne': 'Move “{name}” to trash?',
   'files.confirmTrash': 'Move {n} selected items to trash?',
+  'files.confirmTitle': 'Move to Trash?',
   'files.trashed': 'Moved {n} items to trash',
   'files.trashFailed': 'Could not move {n} items to trash',
 

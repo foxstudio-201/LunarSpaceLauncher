@@ -234,6 +234,7 @@ const vi = {
   'files.toTrash': 'Chuyển vào thùng rác',
   'files.confirmTrashOne': 'Chuyển “{name}” vào thùng rác?',
   'files.confirmTrash': 'Chuyển {n} mục đã chọn vào thùng rác?',
+  'files.confirmTitle': 'Chuyển vào Thùng rác?',
   'files.trashed': 'Đã chuyển {n} mục vào thùng rác',
   'files.trashFailed': 'Không chuyển được {n} mục vào thùng rác',
 

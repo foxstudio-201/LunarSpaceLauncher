@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Check, DotsThreeVertical, FolderOpen, Trash, UploadSimple,
-  ArrowsClockwise, Warning, Power, ProhibitInset, DownloadSimple,
+  ArrowsClockwise, Power, ProhibitInset, DownloadSimple,
   ClockCounterClockwise, SortAscending, SortDescending,
 } from '@phosphor-icons/react'
 import { t } from '../../i18n/translations'
@@ -12,6 +12,7 @@ import useVirtual from '../ui/useVirtual'
 import { palette } from '../../lib/palette'
 import { sizeLabel, stampLabel } from '../../lib/files'
 import ProgressBar from '../ui/ProgressBar'
+import ConfirmModal from '../ui/ConfirmModal'
 import ContentDownloadPage from './ContentDownloadPage'
 import { EnvChip } from './catalogBits'
 import * as api from '../../api/client.js'
@@ -327,6 +328,24 @@ export default function ContentFolderPage({
     )
   }
 
+  const menuW = 190
+  const menuH = 130
+  let menuLeft = 0
+  let menuTop
+  let menuBottom
+  if (menu) {
+    menuLeft = menu.point
+      ? Math.max(8, Math.min(menu.point.x, window.innerWidth - menuW - 8))
+      : Math.max(8, Math.min(menu.rect.right - menuW, window.innerWidth - menuW - 8))
+    if (menu.point) {
+      menuTop = menu.point.y + menuH > window.innerHeight ? Math.max(8, menu.point.y - menuH) : menu.point.y
+    } else if (menu.rect.bottom + 4 + menuH > window.innerHeight) {
+      menuBottom = window.innerHeight - menu.rect.top + 4
+    } else {
+      menuTop = menu.rect.bottom + 4
+    }
+  }
+
   return (
     <div data-surface className="h-full flex flex-col overflow-hidden relative" style={{ background: c.bg }}>
       {osDragging && (
@@ -467,31 +486,6 @@ export default function ContentFolderPage({
         </div>
       )}
 
-      {pending && (
-        <div className="shrink-0 mx-3 mt-2 flex items-center gap-3 px-3 py-2 rounded-lg text-[11px]" style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: '#f87171' }}>
-          <Warning size={13} weight="duotone" />
-          <span className="flex-1">
-            {pending.names.length === 1
-              ? fill(lang, 'files.confirmTrashOne', { name: pending.names[0] })
-              : fill(lang, 'files.confirmTrash', { n: pending.names.length })}
-          </span>
-          <button
-            onClick={() => setPending(null)}
-            className="px-2.5 py-1 rounded-md text-[10px] font-semibold"
-            style={{ background: c.input, border: `1px solid ${c.border}`, color: c.label }}
-          >
-            {t(lang, 'files.cancel')}
-          </button>
-          <button
-            onClick={() => runTrash(pending.names)}
-            className="px-2.5 py-1 rounded-md text-[10px] font-bold"
-            style={{ background: '#ef4444', color: '#fff' }}
-          >
-            {t(lang, 'files.toTrash')}
-          </button>
-        </div>
-      )}
-
       {(instProgress || error || note) && (
         <div className="shrink-0 mx-3 mt-2 flex flex-col gap-2 px-3 py-2 rounded-lg" style={{ background: c.surface, border: `1px solid ${c.border}` }}>
           {instProgress && <ProgressBar theme={theme} lang={lang} progress={instProgress} />}
@@ -574,6 +568,11 @@ export default function ContentFolderPage({
               >
               <div
                 onClick={() => onRowClick(entry)}
+                onContextMenu={(event) => {
+                  event.preventDefault()
+                  if (selectMode) return
+                  setMenu({ name: entry.name, point: { x: event.clientX, y: event.clientY }, disabled: !!entry.disabled })
+                }}
                 className="grid items-center px-3 cursor-pointer group"
                 style={{
                   gridTemplateColumns: grid,
@@ -658,15 +657,15 @@ export default function ContentFolderPage({
 
       {menu && createPortal(
         <>
-          <div className="fixed inset-0" style={{ zIndex: 9998 }} onClick={() => setMenu(null)} />
+          <div className="fixed inset-0" style={{ zIndex: 9998 }} onClick={() => setMenu(null)} onContextMenu={(event) => { event.preventDefault(); setMenu(null) }} />
           <div
             className="fixed rounded-md overflow-hidden shadow-xl py-0.5"
             style={{
               zIndex: 9999,
-              left: Math.max(8, Math.min(menu.rect.right - 190, window.innerWidth - 198)),
-              top: menu.rect.bottom + 4 + 130 > window.innerHeight ? undefined : menu.rect.bottom + 4,
-              bottom: menu.rect.bottom + 4 + 130 > window.innerHeight ? window.innerHeight - menu.rect.top + 4 : undefined,
-              width: 190,
+              left: menuLeft,
+              top: menuTop,
+              bottom: menuBottom,
+              width: menuW,
               background: c.surface,
               border: `1px solid ${c.border}`,
             }}
@@ -703,6 +702,21 @@ export default function ContentFolderPage({
         </>,
         document.body,
       )}
+
+      <ConfirmModal
+        theme={theme}
+        lang={lang}
+        open={!!pending}
+        message={
+          pending
+            ? pending.names.length === 1
+              ? fill(lang, 'files.confirmTrashOne', { name: pending.names[0] })
+              : fill(lang, 'files.confirmTrash', { n: pending.names.length })
+            : ''
+        }
+        onCancel={() => setPending(null)}
+        onConfirm={() => runTrash(pending?.names || [])}
+      />
     </div>
   )
 }
