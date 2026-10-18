@@ -83,6 +83,9 @@ async function getVersionJson({ metaDir, version, url }) {
 }
 
 async function listLoaderVersions({ kind, game }) {
+  if (kind === 'lunar') {
+    return game === '1.20.1' ? [{ version: '0.1.0', build: null, stable: true, latest: true }] : []
+  }
   if (kind === 'forge') return forge.listVersions({ game })
   if (kind === 'neoforge') return neoforge.listVersions({ game })
   const spec = META[kind]
@@ -107,6 +110,7 @@ async function listLoaderVersions({ kind, game }) {
 const gamesCache = new Map()
 
 async function listLoaderGames({ kind }) {
+  if (kind === 'lunar') return [{ version: '1.20.1', stable: true }]
   if (kind === 'forge') return forge.listGames()
   if (kind === 'neoforge') return neoforge.listGames()
   const spec = META[kind]

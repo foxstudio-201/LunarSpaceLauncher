@@ -6,6 +6,7 @@ export const LOADERS = [
   { id: 'quilt', name: 'Quilt', image: 'loader-icon/quilt.png', desc: 'Kế thừa Fabric, hiện đại hơn' },
   { id: 'forge', name: 'Forge', image: 'loader-icon/forge.png', desc: 'Loader lâu đời, nhiều mod nhất' },
   { id: 'neoforge', name: 'NeoForge', image: 'loader-icon/neoforge.png', desc: 'Bản tách từ Forge, hiện đại hơn' },
+  { id: 'lunar', name: 'LunarLoader', image: 'loader-icon/lunar.png', desc: 'Loader riêng của LunarSpace, tối ưu cho mod hiện đại' },
 ]
 
 const FORGE_META_URL = 'https://files.minecraftforge.net/net/minecraftforge/forge/maven-metadata.json'
@@ -142,6 +143,9 @@ export async function listVersions({ snapshots = false, force = false } = {}) {
 export async function listLoaderVersions({ kind, game } = {}) {
   if (bridge?.listLoaderVersions) return bridge.listLoaderVersions({ kind, game })
   if (kind === 'vanilla') return { ok: true, versions: [] }
+  if (kind === 'lunar') {
+    return { ok: true, versions: game === '1.20.1' ? [{ version: '0.1.0', build: null, stable: true, latest: true }] : [] }
+  }
   if (kind === 'forge') {
     if (!forgeSupportsGame(game)) return { ok: true, versions: [] }
     const [meta, promos] = await Promise.all([
@@ -211,6 +215,7 @@ export async function listLoaderVersions({ kind, game } = {}) {
 export async function listLoaderGames({ kind } = {}) {
   if (bridge?.listLoaderGames) return bridge.listLoaderGames({ kind })
   if (!kind || kind === 'vanilla') return { ok: true, games: [], all: true }
+  if (kind === 'lunar') return { ok: true, games: [{ version: '1.20.1', stable: true }], all: false }
   const url = kind === 'fabric'
     ? 'https://meta.fabricmc.net/v2/versions/game'
     : kind === 'quilt'

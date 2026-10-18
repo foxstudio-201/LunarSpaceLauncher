@@ -250,6 +250,14 @@ async function resolveTarget({ version, loader = 'vanilla', loaderVersion, setti
   const { paths } = storageFor(settings)
   if (loader === 'vanilla') return { versionId: version, profile: null }
   if (loader === 'forge' || loader === 'neoforge') return { versionId: null, profile: null }
+  if (loader === 'lunar') {
+    const versionId = `lunarloader-${version}`
+    const profileFile = path.join(paths.versions, versionId, `${versionId}.json`)
+    if (!fs.existsSync(profileFile)) {
+      throw new Error(`LunarLoader chưa được cài cho Minecraft ${version}`)
+    }
+    return { versionId, profile: null }
+  }
   const profile = await getLoaderProfile({ kind: loader, game: version, loader: loaderVersion, metaDir: paths.meta })
   return { versionId: profile.id, profile }
 }
@@ -1091,6 +1099,7 @@ async function changeLoaderVersion({ id, loaderVersion, settings } = {}, emit) {
   const entry = readIndex().find((i) => i.id === id)
   if (!entry) return { ok: false, error: 'Không tìm thấy instance.' }
   if (entry.loader === 'vanilla') return { ok: false, error: 'Phiên bản này không dùng loader.' }
+  if (entry.loader === 'lunar') return { ok: false, error: 'LunarLoader chưa hỗ trợ đổi phiên bản loader.' }
   const wanted = String(loaderVersion || '').trim()
   if (!wanted) return { ok: false, error: 'Thiếu phiên bản loader.' }
   if (wanted === (entry.loaderVersion || '')) return { ok: true, instance: entry, unchanged: true }
