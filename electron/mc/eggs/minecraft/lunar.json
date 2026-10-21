@@ -1,7 +1,7 @@
 {
   "_comment": "LunarLoader Minecraft server. Installation is handled by serverlocal.cjs (ModLauncher server launch).",
   "name": "LunarLoader",
-  "description": "Minecraft server chạy bằng LunarLoader (Java 17, Minecraft 1.20.1). Hỗ trợ mod lunar.mod.json theo side server/both.",
+  "description": "Minecraft server chạy bằng LunarLoader (Java 17, Minecraft 1.20.1 / 1.20.2). Hỗ trợ mod lunar.mod.json theo side server/both.",
   "features": [
     "eula",
     "java_version"
@@ -26,7 +26,7 @@
   "variables": [
     {
       "name": "Minecraft Version",
-      "description": "Phiên bản Minecraft cho server LunarLoader.",
+      "description": "Phiên bản Minecraft cho server LunarLoader (1.20.1 hoặc 1.20.2).",
       "env_variable": "MC_VERSION",
       "default_value": "1.20.1",
       "user_viewable": true,

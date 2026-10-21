@@ -453,7 +453,7 @@ async function installLunarServer(entry, { onLog, onProgress }) {
   let gameJar = null
   for (const lib of profile.libraries || []) {
     const name = String(lib?.name || '')
-    if (/lunar-ui:|lunar-perf:/.test(name)) continue
+    if (/lunar-ui:|lunar-perf:|lunar-shaders:|lunar-client-menu:/.test(name)) continue
     const rel = libraryRel(lib)
     if (!rel) continue
     if (/^vn\.lunar:minecraft:/i.test(name) || /minecraft-.*\.jar$/i.test(rel)) {
@@ -495,7 +495,7 @@ async function installLunarServer(entry, { onLog, onProgress }) {
     if (candidate) files.set(path.relative(paths.libraries, candidate).split(path.sep).join('/'), candidate)
   }
 
-  if (!gameJar || !fs.existsSync(gameJar)) throw new Error('Không tìm thấy minecraft-1.20.1.jar đã remap trong thư viện loader.')
+  if (!gameJar || !fs.existsSync(gameJar)) throw new Error(`Không tìm thấy minecraft-${game}.jar đã remap trong thư viện loader.`)
   await fsp.mkdir(dir, { recursive: true })
   await copyIfFile(gameJar, path.join(dir, 'server.jar'), onLog)
   let copied = 0
@@ -517,6 +517,7 @@ async function installLunarServer(entry, { onLog, onProgress }) {
     const args = [
       '-Dlunar.side=server',
       '-Dlunar.gameJar=server.jar',
+      `-Dlunar.minecraftVersion=${game}`,
       '-DignoreList=bootstraplauncher,securejarhandler,asm-commons,asm-util,asm-analysis,asm-tree,asm,server.jar',
       '-DlibraryDirectory=libraries',
       '-p',
