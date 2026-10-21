@@ -575,6 +575,7 @@ function registerIpc() {
   ipcMain.handle('launcher:create', (_e, opts) => launcher.createInstance({ ...(opts || {}), settings: readSettings() }, emitLauncher))
   ipcMain.handle('launcher:update', (_e, opts) => launcher.updateInstance({ ...(opts || {}), settings: readSettings(), emit: emitLauncher }))
   ipcMain.handle('launcher:loader-version', (_e, opts) => launcher.changeLoaderVersion({ ...(opts || {}), settings: readSettings() }, emitLauncher))
+  ipcMain.handle('launcher:loader-reinstall', (_e, opts) => launcher.reinstallLoader({ ...(opts || {}), settings: readSettings() }, emitLauncher))
   ipcMain.handle('launcher:remove', (_e, opts) => launcher.removeInstance({ ...(opts || {}), settings: readSettings() }))
   ipcMain.handle('launcher:launch', (_e, opts) => launcher.launchInstance({ ...(opts || {}), settings: readSettings() }, emitLauncher))
   ipcMain.handle('launcher:stop', (_e, opts) => launcher.stopInstance(opts || {}, emitLauncher))

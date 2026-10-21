@@ -96,6 +96,7 @@ export default function InstanceSettingsPage({ instance, theme, lang, account, o
   const [build, setBuild] = useState(instance.loaderVersion || '')
   const [buildsLoading, setBuildsLoading] = useState(false)
   const [loaderAsk, setLoaderAsk] = useState(false)
+  const [reinstallAsk, setReinstallAsk] = useState(false)
   const [loaderBusy, setLoaderBusy] = useState(false)
   const [loaderNote, setLoaderNote] = useState('')
   const [javaPath, setJavaPath] = useState(instance.javaPath || '')
@@ -178,6 +179,21 @@ export default function InstanceSettingsPage({ instance, theme, lang, account, o
     }
     onSaveInstance?.(res.instance)
     setLoaderNote(t(lang, 'instance.settings.loaderDone'))
+    setTimeout(() => setLoaderNote(''), 2600)
+  }
+
+  const reinstallLoader = async () => {
+    setReinstallAsk(false)
+    setLoaderBusy(true)
+    setLoaderNote('')
+    const res = await api.reinstallLoader({ id: instance.id }).catch((err) => ({ ok: false, error: err.message }))
+    setLoaderBusy(false)
+    if (!res?.ok) {
+      setError(res?.error || 'error')
+      return
+    }
+    onSaveInstance?.(res.instance)
+    setLoaderNote(t(lang, 'instance.settings.loaderReinstalled'))
     setTimeout(() => setLoaderNote(''), 2600)
   }
 
@@ -286,7 +302,7 @@ export default function InstanceSettingsPage({ instance, theme, lang, account, o
                   />
                 </div>
                 <button
-                  onClick={() => setLoaderAsk(true)}
+                  onClick={() => { setLoaderAsk(true); setReinstallAsk(false) }}
                   disabled={loaderBusy || !build || build === (instance.loaderVersion || '')}
                   className="h-8 px-3 rounded-lg text-[11px] font-bold shrink-0 flex items-center gap-1.5 disabled:opacity-40"
                   style={{ background: c.accent, color: '#0a0a0a' }}
@@ -298,6 +314,45 @@ export default function InstanceSettingsPage({ instance, theme, lang, account, o
                   )}
                   {loaderBusy ? t(lang, 'instance.settings.loaderBusy') : t(lang, 'instance.settings.loaderChange')}
                 </button>
+                <button
+                  onClick={() => { setReinstallAsk(true); setLoaderAsk(false) }}
+                  disabled={loaderBusy}
+                  title={t(lang, 'instance.settings.loaderReinstallHint')}
+                  className="h-8 px-3 rounded-lg text-[11px] font-bold shrink-0 flex items-center gap-1.5 disabled:opacity-40"
+                  style={{ background: c.input, border: `1px solid ${c.border}`, color: c.label }}
+                >
+                  <ArrowsClockwise size={13} weight="bold" />
+                  {t(lang, 'instance.settings.loaderReinstall')}
+                </button>
+              </div>
+            )}
+
+            {reinstallAsk && (
+              <div className="px-4 py-3" style={rowStyle}>
+                <div className="rounded-lg p-3 flex flex-col gap-3" style={{ background: c.input, border: `1px solid ${c.border}` }}>
+                  <p className="text-[11px] leading-relaxed" style={{ color: c.text }}>
+                    {t(lang, 'instance.settings.loaderReinstallConfirm')}
+                  </p>
+                  <p className="text-[10px] leading-relaxed" style={{ color: c.faint }}>
+                    {t(lang, 'instance.settings.loaderReinstallHint')}
+                  </p>
+                  <div className="flex items-center gap-2 justify-end">
+                    <button
+                      onClick={() => setReinstallAsk(false)}
+                      className="h-8 px-3 rounded-lg text-[11px] font-semibold"
+                      style={{ background: c.input, border: `1px solid ${c.border}`, color: c.label }}
+                    >
+                      {t(lang, 'files.cancel')}
+                    </button>
+                    <button
+                      onClick={reinstallLoader}
+                      className="h-8 px-3.5 rounded-lg text-[11px] font-bold"
+                      style={{ background: c.accent, color: '#0a0a0a' }}
+                    >
+                      {t(lang, 'instance.settings.loaderReinstallApply')}
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
 

@@ -23,6 +23,30 @@ export default function HomePage({
 
   const [loaderInfo, setLoaderInfo] = useState(null)
   const [runtimes, setRuntimes] = useState(null)
+  const [tab, setTab] = useState('overview')
+
+  const tabs = [
+    { id: 'overview', label: vn(lang, 'Tổng quan', 'Overview') },
+    { id: 'recent', label: vn(lang, 'Chơi gần đây', 'Recent') },
+    { id: 'instances', label: vn(lang, 'Phiên bản', 'Instances') },
+    { id: 'system', label: vn(lang, 'Hệ thống', 'System') },
+  ]
+
+  const recentWorlds = useMemo(() => {
+    return (instances || [])
+      .flatMap((inst) => (Array.isArray(inst.recentWorlds) ? inst.recentWorlds : []).map((row) => ({ ...row, instance: inst })))
+      .filter((row) => row.folder)
+      .sort((a, b) => new Date(b.playedAt || 0) - new Date(a.playedAt || 0))
+      .slice(0, 8)
+  }, [instances])
+
+  const recentServers = useMemo(() => {
+    return (instances || [])
+      .flatMap((inst) => (Array.isArray(inst.recentServers) ? inst.recentServers : []).map((row) => ({ ...row, instance: inst })))
+      .filter((row) => row.host)
+      .sort((a, b) => new Date(b.playedAt || 0) - new Date(a.playedAt || 0))
+      .slice(0, 8)
+  }, [instances])
 
   const releases = useMemo(() => (versions || []).slice(0, 9), [versions])
   const latestRelease = latest?.release || releases[0]?.id || null
@@ -75,7 +99,7 @@ export default function HomePage({
   const orderedInstances = [...instances].sort((a, b) => new Date(b.lastPlayed || b.created || 0) - new Date(a.lastPlayed || a.created || 0))
 
   return (
-    <div data-surface className="h-full overflow-y-auto" style={{ background: c.bg }}>
+    <div data-surface className="h-full flex flex-col overflow-hidden" style={{ background: c.bg }}>
       <PageHeader
         theme={theme}
         title={t(lang, 'home.title')}
@@ -109,8 +133,32 @@ export default function HomePage({
         </button>
       </PageHeader>
 
-      <div className="p-6">
+      <div className="shrink-0 px-6 pt-3">
+        <div className="max-w-5xl mx-auto flex items-center gap-1.5">
+          {tabs.map((item) => {
+            const active = tab === item.id
+            return (
+              <button
+                key={item.id}
+                onClick={() => setTab(item.id)}
+                className="h-8 px-3 rounded-lg text-[11px] font-semibold transition-colors"
+                style={{
+                  background: active ? c.input : 'transparent',
+                  border: `1px solid ${active ? c.border : 'transparent'}`,
+                  color: active ? c.text : c.faint,
+                }}
+              >
+                {item.label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      <div className="flex-1 min-h-0 overflow-y-auto p-6">
         <div className="max-w-5xl mx-auto flex flex-col gap-6">
+          {tab === 'overview' && (
+          <>
           <Section c={c} title={vn(lang, 'Sẵn sàng chơi', 'Ready to play')} hint={`${running ? `${running} ${vn(lang, 'đang chạy', 'running')}` : vn(lang, 'không có tiến trình', 'nothing running')}`}>
             <div className="group relative rounded-xl overflow-hidden transition-transform duration-300 hover:scale-[1.005]" style={{ border: `1px solid ${c.border}` }}>
               <img
@@ -364,8 +412,86 @@ export default function HomePage({
               })}
             </div>
           </Section>
+          </>
+          )}
 
-          {orderedInstances.length > 0 && (
+          {tab === 'recent' && (
+            <div className="flex flex-col gap-6">
+              <Section c={c} title={vn(lang, 'Thế giới gần đây', 'Recent worlds')} hint={vn(lang, 'bấm để vào nhanh', 'click to jump back in')}>
+                {recentWorlds.length ? (
+                  <Card c={c}>
+                    {recentWorlds.map((row, i) => (
+                      <div key={`${row.instance.id}-${row.folder}`} className="flex items-center gap-3 px-3.5 h-14" style={{ borderTop: i === 0 ? 'none' : `1px solid ${c.border}` }}>
+                        <img src={loaderIcon(row.instance.loader)} alt="" className="w-7 h-7 rounded object-contain shrink-0" />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[11px] font-bold truncate" style={{ color: c.text }}>{row.name || row.folder}</p>
+                          <p className="text-[10px] font-mono truncate" style={{ color: c.faint }}>
+                            {row.instance.name} · {row.folder}
+                          </p>
+                        </div>
+                        <span className="hidden md:flex items-center gap-1 text-[10px] font-mono shrink-0" style={{ color: c.faint }}>
+                          <Clock size={11} />
+                          {row.playedAt ? timeAgo(row.playedAt, lang) : '—'}
+                        </span>
+                        <button
+                          onClick={() => onLaunch(row.instance, undefined, { type: 'world', folder: row.folder, name: row.name || row.folder })}
+                          className="h-8 px-3 rounded-lg text-[10px] font-bold flex items-center gap-1.5 shrink-0"
+                          style={{ background: 'rgba(34,197,94,0.14)', color: '#22c55e' }}
+                        >
+                          <Play size={11} weight="fill" />
+                          {vn(lang, 'Vào world', 'Play')}
+                        </button>
+                      </div>
+                    ))}
+                  </Card>
+                ) : (
+                  <Card c={c} className="p-4">
+                    <p className="text-[11px]" style={{ color: c.faint }}>
+                      {vn(lang, 'Chưa có world nào được ghi lại. Vào Singleplayer một lần để lịch sử xuất hiện ở đây.', 'No worlds recorded yet. Open Singleplayer once and it will appear here.')}
+                    </p>
+                  </Card>
+                )}
+              </Section>
+
+              <Section c={c} title={vn(lang, 'Server gần đây', 'Recent servers')} hint={vn(lang, 'tham gia lại nhanh', 'rejoin quickly')}>
+                {recentServers.length ? (
+                  <Card c={c}>
+                    {recentServers.map((row, i) => (
+                      <div key={`${row.instance.id}-${row.host}-${row.port}`} className="flex items-center gap-3 px-3.5 h-14" style={{ borderTop: i === 0 ? 'none' : `1px solid ${c.border}` }}>
+                        <img src={loaderIcon(row.instance.loader)} alt="" className="w-7 h-7 rounded object-contain shrink-0" />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[11px] font-bold truncate" style={{ color: c.text }}>{row.host}{Number(row.port) && Number(row.port) !== 25565 ? `:${row.port}` : ''}</p>
+                          <p className="text-[10px] font-mono truncate" style={{ color: c.faint }}>
+                            {row.instance.name} · {row.instance.loader} {row.instance.version}
+                          </p>
+                        </div>
+                        <span className="hidden md:flex items-center gap-1 text-[10px] font-mono shrink-0" style={{ color: c.faint }}>
+                          <Clock size={11} />
+                          {row.playedAt ? timeAgo(row.playedAt, lang) : '—'}
+                        </span>
+                        <button
+                          onClick={() => onLaunch(row.instance, undefined, { type: 'server', host: row.host, port: row.port })}
+                          className="h-8 px-3 rounded-lg text-[10px] font-bold flex items-center gap-1.5 shrink-0"
+                          style={{ background: 'rgba(34,197,94,0.14)', color: '#22c55e' }}
+                        >
+                          <Play size={11} weight="fill" />
+                          {vn(lang, 'Tham gia', 'Join')}
+                        </button>
+                      </div>
+                    ))}
+                  </Card>
+                ) : (
+                  <Card c={c} className="p-4">
+                    <p className="text-[11px]" style={{ color: c.faint }}>
+                      {vn(lang, 'Chưa có server nào được ghi lại. Tham gia Multiplayer một lần để lịch sử xuất hiện ở đây.', 'No servers recorded yet. Join Multiplayer once and it will appear here.')}
+                    </p>
+                  </Card>
+                )}
+              </Section>
+            </div>
+          )}
+
+          {tab === 'instances' && orderedInstances.length > 0 && (
             <Section c={c} title={vn(lang, 'Phiên bản của bạn', 'Your instances')} hint={`${orderedInstances.length} ${vn(lang, 'phiên bản', 'instances')}`}>
               <Card c={c}>
                 {orderedInstances.map((inst, i) => {
@@ -408,6 +534,21 @@ export default function HomePage({
             </Section>
           )}
 
+          {tab === 'instances' && orderedInstances.length === 0 && (
+            <Card c={c} className="p-5 flex items-center gap-4">
+              <Cube size={22} weight="duotone" style={{ color: c.accent }} />
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-bold" style={{ color: c.text }}>{vn(lang, 'Chưa có phiên bản nào', 'No instances yet')}</p>
+                <p className="text-[10px] mt-0.5" style={{ color: c.faint }}>{vn(lang, 'Tạo phiên bản để bắt đầu chơi.', 'Create an instance to start playing.')}</p>
+              </div>
+              <button onClick={onOpenVersions} className="h-8 px-3 rounded-lg text-[10px] font-bold shrink-0" style={{ background: c.accent, color: '#0a0a0a' }}>
+                {t(lang, 'versions.create')}
+              </button>
+            </Card>
+          )}
+
+          {tab === 'system' && (
+          <>
           <Section c={c} title={vn(lang, 'Hệ thống & lưu trữ', 'System & storage')}>
             <div className="grid grid-cols-2 gap-3">
               <Card c={c} className="p-4 flex flex-col gap-3.5">
@@ -455,6 +596,8 @@ export default function HomePage({
               <ArrowsClockwise size={11} className="animate-spin" />
               {vn(lang, 'Đang đọc thông tin hệ thống…', 'Reading system info…')}
             </span>
+          )}
+          </>
           )}
         </div>
       </div>

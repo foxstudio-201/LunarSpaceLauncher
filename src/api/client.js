@@ -372,6 +372,11 @@ export async function changeLoaderVersion(opts) {
   throw new Error(NEEDS_APP)
 }
 
+export async function reinstallLoader(opts) {
+  if (bridge?.reinstallLoader) return bridge.reinstallLoader(opts)
+  throw new Error(NEEDS_APP)
+}
+
 export async function removeInstance() {
   if (bridge?.removeInstance) return bridge.removeInstance(...arguments)
   throw new Error(NEEDS_APP)

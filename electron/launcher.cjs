@@ -365,13 +365,14 @@ async function installForge({ entry, paths, settings, emit }) {
   return created
 }
 
-async function installLunar({ entry, paths, emit }) {
+async function installLunar({ entry, paths, emit, force = false }) {
   const res = await lunarMod.install({
     game: entry.version,
     version: entry.loaderVersion || undefined,
     paths,
     onProgress: (p) => emit?.({ type: 'progress', id: entry.id, phase: 'download', ...p }),
     signal: undefined,
+    force,
   })
   return res.versionId
 }
@@ -434,8 +435,9 @@ async function createInstance({ name, version, loader = 'vanilla', loaderVersion
   return { ok: true, instance: entry }
 }
 
-async function runInstall(entry, settings, emit) {
+async function runInstall(entry, settings, emit, options = {}) {
   const { paths } = storageFor(settings)
+  const force = !!options.force
   installingIds.add(entry.id)
   emit?.({ type: 'progress', id: entry.id, phase: 'start', label: 'start' })
   try {
@@ -444,13 +446,14 @@ async function runInstall(entry, settings, emit) {
       versionId = await installForge({ entry, paths, settings, emit })
       updateEntry(entry.id, { versionId })
     } else if (entry.loader === 'lunar') {
-      versionId = await installLunar({ entry, paths, emit })
+      versionId = await installLunar({ entry, paths, emit, force })
       updateEntry(entry.id, { versionId })
     }
     const result = await install({
       versionId,
       paths,
       onProgress: (p) => emit?.({ type: 'progress', id: entry.id, phase: 'download', ...p }),
+      force,
     })
     if (result.errors.length) {
       const first = result.errors[0]
@@ -1142,13 +1145,47 @@ async function changeLoaderVersion({ id, loaderVersion, settings } = {}, emit) {
   } catch {}
 
   emit?.({ type: 'progress', id: entry.id, phase: 'start', label: 'loader' })
-  await runInstall(next, settings, emit)
+  await runInstall(next, settings, emit, { force: true })
   await syncProfiles(settings)
   const after = readIndex().find((i) => i.id === entry.id) || next
   try {
     await fsp.writeFile(path.join(entry.dir, 'instance.json'), JSON.stringify(after, null, 2), 'utf8')
   } catch {}
   if (after.status === 'error') return { ok: false, error: after.error || 'Cài loader thất bại.', instance: after }
+  return { ok: true, instance: after }
+}
+
+async function reinstallLoader({ id, settings } = {}, emit) {
+  const entry = readIndex().find((i) => i.id === id)
+  if (!entry) return { ok: false, error: 'Không tìm thấy instance.' }
+  if (entry.loader === 'vanilla') return { ok: false, error: 'Phiên bản này không dùng loader.' }
+  if (installingIds.has(entry.id)) return { ok: false, error: 'Instance đang cài, chờ cho xong đã.' }
+
+  const patch = { status: 'installing', error: null, boostResult: null }
+  if (entry.loader === 'forge' || entry.loader === 'neoforge') {
+    patch.versionId = null
+    patch.forgeVersion = entry.loaderVersion || entry.forgeVersion || null
+  } else if (entry.loader === 'fabric' || entry.loader === 'quilt') {
+    try {
+      const target = await resolveTarget({ version: entry.version, loader: entry.loader, loaderVersion: entry.loaderVersion, settings })
+      patch.versionId = target.versionId
+    } catch (err) {
+      return { ok: false, error: `Không lấy được loader: ${err.message}` }
+    }
+  }
+  const next = updateEntry(entry.id, patch)
+  try {
+    await fsp.writeFile(path.join(entry.dir, 'instance.json'), JSON.stringify(next, null, 2), 'utf8')
+  } catch {}
+
+  emit?.({ type: 'progress', id: entry.id, phase: 'start', label: 'loader' })
+  await runInstall(next, settings, emit, { force: true })
+  await syncProfiles(settings)
+  const after = readIndex().find((i) => i.id === entry.id) || next
+  try {
+    await fsp.writeFile(path.join(entry.dir, 'instance.json'), JSON.stringify(after, null, 2), 'utf8')
+  } catch {}
+  if (after.status === 'error') return { ok: false, error: after.error || 'Cài lại loader thất bại.', instance: after }
   return { ok: true, instance: after }
 }
 
@@ -1239,6 +1276,60 @@ async function javaCandidates({ primary, paths, limit = 3 }) {
   return out
 }
 
+const MAX_RECENT_HISTORY = 8
+
+async function latestWorldFolder(instanceDir) {
+  const saves = path.join(instanceDir, 'saves')
+  let rows = []
+  try {
+    rows = await fsp.readdir(saves, { withFileTypes: true })
+  } catch {
+    return null
+  }
+  let best = null
+  for (const row of rows) {
+    if (!row.isDirectory()) continue
+    const level = path.join(saves, row.name, 'level.dat')
+    try {
+      const info = await fsp.stat(level)
+      if (!best || info.mtimeMs > best.mtime) best = { folder: row.name, mtime: info.mtimeMs }
+    } catch {}
+  }
+  return best?.folder || null
+}
+
+async function worldMeta(instanceDir, folder) {
+  const fallback = { folder, name: folder }
+  if (!folder) return fallback
+  try {
+    const root = await nbt.readFile(path.join(instanceDir, 'saves', folder, 'level.dat'))
+    const data = (root.value || []).find((node) => node.name === 'Data')
+    const name = (data?.value || []).find((node) => node.name === 'LevelName')?.value
+    return { folder, name: String(name || folder) }
+  } catch {
+    return fallback
+  }
+}
+
+function historyKey(kind, item) {
+  return kind === 'world'
+    ? String(item?.folder || '')
+    : `${String(item?.host || '')}:${Number(item?.port) || 25565}`
+}
+
+function recordRecent(id, kind, item) {
+  if (!item) return
+  const key = historyKey(kind, item)
+  if (!key || key === ':25565') return
+  const entry = readIndex().find((i) => i.id === id)
+  if (!entry) return
+  const listKey = kind === 'world' ? 'recentWorlds' : 'recentServers'
+  const list = (Array.isArray(entry[listKey]) ? entry[listKey] : [])
+    .filter((row) => historyKey(kind, row) !== key)
+  list.unshift({ ...item, playedAt: new Date().toISOString() })
+  updateEntry(id, { [listKey]: list.slice(0, MAX_RECENT_HISTORY) })
+}
+
 async function launchInstance(opts, emit) {
   const entry = readIndex().find((i) => i.id === (opts || {}).id) || null
   if (entry) presence.starting(entry)
@@ -1248,7 +1339,7 @@ async function launchInstance(opts, emit) {
   return res
 }
 
-async function runLaunch({ id, username, demo: demoOverride, settings }, emit) {
+async function runLaunch({ id, username, demo: demoOverride, quickPlay, settings }, emit) {
   const { paths } = storageFor(settings)
   const entry = readIndex().find((i) => i.id === id)
   if (!entry) return { ok: false, error: 'Không tìm thấy instance.' }
@@ -1327,6 +1418,7 @@ async function runLaunch({ id, username, demo: demoOverride, settings }, emit) {
     extraJvm: [...(auth.javaAgent ? [auth.javaAgent] : []), ...(entry.boost ? [...boost.jvmFlags(entry.memoryMb || 2048), ...userJvm] : userJvm)],
     auth,
     demo,
+    quickPlay,
   })
 
   logs.set(id, [])
@@ -1354,6 +1446,12 @@ async function runLaunch({ id, username, demo: demoOverride, settings }, emit) {
 
   const startedAt = Date.now()
   let child
+  let worldSeen = false
+  if (quickPlay?.type === 'world' && quickPlay.folder) {
+    recordRecent(id, 'world', { folder: quickPlay.folder, name: quickPlay.name || quickPlay.folder })
+  } else if (quickPlay?.type === 'server' && quickPlay.host) {
+    recordRecent(id, 'server', { host: quickPlay.host, port: Number(quickPlay.port) || 25565, name: quickPlay.name || '' })
+  }
   try {
     const gpu = await ensureGameGpu(found.java.path).catch(() => false)
     if (gpu) {
@@ -1368,6 +1466,17 @@ async function runLaunch({ id, username, demo: demoOverride, settings }, emit) {
         markRunning()
         pushLog(id, line)
         emit?.({ type: 'log', id, line })
+        const serverMatch = line.match(/Connecting to ([^,\s]+), (\d+)/)
+        if (serverMatch) {
+          recordRecent(id, 'server', { host: serverMatch[1], port: Number(serverMatch[2]) || 25565 })
+        }
+        if (!worldSeen && /Starting integrated minecraft server/.test(line)) {
+          worldSeen = true
+          latestWorldFolder(entry.dir)
+            .then((folder) => (folder ? worldMeta(entry.dir, folder) : null))
+            .then((meta) => { if (meta) recordRecent(id, 'world', meta) })
+            .catch(() => {})
+        }
       },
       onExit: (code) => {
         settled = true
@@ -3292,6 +3401,7 @@ module.exports = {
   accountsList,
   accountAdd,
   changeLoaderVersion,
+  reinstallLoader,
   accountRemove,
   accountSetActive,
   accountAuth,

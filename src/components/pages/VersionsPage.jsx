@@ -33,7 +33,8 @@ export default function VersionsPage({
 }) {
   const c = palette(theme)
   const draft = readDraft()
-  const [loader, setLoader] = useState(draft.loader || 'vanilla')
+  const [loader, setLoader] = useState(draft.loader || null)
+  const [loaderPicked, setLoaderPicked] = useState(false)
   const [builds, setBuilds] = useState([])
   const [build, setBuild] = useState(draft.build || '')
   const [buildsLoading, setBuildsLoading] = useState(false)
@@ -162,7 +163,7 @@ export default function VersionsPage({
   }, [importPath, importName, importDir, importMemory, lang, onRefreshInstances])
 
   useEffect(() => {
-    if (loader === 'vanilla') {
+    if (!loader || loader === 'vanilla') {
       setSupported(null)
       return undefined
     }
@@ -181,9 +182,10 @@ export default function VersionsPage({
   }, [loader])
 
   const activeLoader = api.LOADERS.find((l) => l.id === loader) || api.LOADERS[0]
+  const hasLoader = !!api.LOADERS.find((l) => l.id === loader)
 
   useEffect(() => {
-    if (!picked || !supported || supported.has(picked)) return
+    if (!loader || !picked || !supported || supported.has(picked)) return
     const missing = picked
     setPicked(null)
     setFormError(
@@ -202,7 +204,7 @@ export default function VersionsPage({
   }, [query, snapshots])
 
   useEffect(() => {
-    if (loader === 'vanilla' || !picked) {
+    if (!loader || loader === 'vanilla' || !picked) {
       setBuilds([])
       setBuild('')
       setBuildsError('')
@@ -233,9 +235,13 @@ export default function VersionsPage({
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    const rows = q ? versions.filter((v) => v.id.toLowerCase().includes(q)) : versions
+    let rows = q ? versions.filter((v) => v.id.toLowerCase().includes(q)) : versions
+    if (loader && loader !== 'vanilla') {
+      if (!supported) return []
+      rows = rows.filter((v) => supported.has(v.id))
+    }
     return rows
-  }, [versions, query])
+  }, [versions, query, loader, supported])
   const progressive = useProgressive(Math.min(filtered.length, visible), { first: 12 })
 
   const slug = String(name || (picked ? `${activeLoader.name}-${picked}` : 'instance')).replace(/[^\w.-]+/g, '-')
@@ -254,6 +260,7 @@ export default function VersionsPage({
 
   const submit = async () => {
     setFormError('')
+    if (!hasLoader) return setFormError(lang === 'vi' ? 'Chưa chọn loader.' : 'Pick a loader.')
     if (!picked) return setFormError(lang === 'vi' ? 'Chưa chọn phiên bản game.' : 'Pick a game version.')
     const label = name.trim() || `${activeLoader.name} ${picked}`
     if (loader !== 'vanilla' && !build) {
@@ -319,6 +326,85 @@ export default function VersionsPage({
         </button>
       </PageHeader>
 
+      {!loaderPicked ? (
+        <div className="flex-1 min-h-0 overflow-y-auto px-8 py-7">
+          <div className="max-w-5xl mx-auto">
+            <div className="flex items-end justify-between gap-4 mb-6">
+              <div>
+                <h2 className="text-lg font-bold" style={{ color: c.text }}>
+                  {lang === 'vi' ? 'Chọn loader' : 'Choose a loader'}
+                </h2>
+                <p className="text-[11px] mt-1" style={{ color: c.faint }}>
+                  {lang === 'vi'
+                    ? 'Chọn loại loader trước, sau đó chọn phiên bản Minecraft và cấu hình instance.'
+                    : 'Pick the loader type first, then choose a Minecraft version and configure the instance.'}
+                </p>
+              </div>
+              <span className="text-[10px] font-mono shrink-0" style={{ color: c.faint }}>
+                {lang === 'vi' ? 'Bước 1 / 2' : 'Step 1 / 2'}
+              </span>
+            </div>
+
+            <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))' }}>
+              {api.LOADERS.map((l) => {
+                const recommended = l.id === 'lunar'
+                return (
+                  <button
+                    key={l.id}
+                    onClick={() => {
+                      setLoader(l.id)
+                      setLoaderPicked(true)
+                      setPicked(null)
+                      setBuild('')
+                      setFormError('')
+                    }}
+                    className="group relative flex flex-col gap-4 p-4 rounded-2xl text-left transition-all hover:-translate-y-0.5 hover:shadow-lg active:scale-[0.99]"
+                    style={{
+                      background: c.surface,
+                      border: `1px solid ${c.border}`,
+                    }}
+                  >
+                    <div className="flex items-start gap-3">
+                      <span
+                        className="w-14 h-14 rounded-2xl flex items-center justify-center shrink-0"
+                        style={{ background: c.input, border: `1px solid ${c.border}` }}
+                      >
+                        <img src={`./${l.image}`} alt="" className="w-9 h-9 object-contain" />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-bold" style={{ color: c.text }}>{l.name}</p>
+                          {recommended && (
+                            <span className="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase" style={{ background: c.input, border: `1px solid ${c.border}`, color: c.label }}>
+                              {lang === 'vi' ? 'khuyến nghị' : 'recommended'}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[10px] leading-relaxed mt-1" style={{ color: c.faint }}>{l.desc}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[9px] font-mono uppercase tracking-wide" style={{ color: c.label }}>
+                        {l.id === 'vanilla' ? (lang === 'vi' ? 'không mod' : 'no mods') : (lang === 'vi' ? 'hỗ trợ mod' : 'mod support')}
+                      </span>
+                      <span className="text-[10px] font-bold flex items-center gap-1" style={{ color: c.accent }}>
+                        {lang === 'vi' ? 'Chọn' : 'Select'}
+                        <span aria-hidden>→</span>
+                      </span>
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+
+            <p className="text-[10px] leading-relaxed mt-5" style={{ color: c.faint }}>
+              {lang === 'vi'
+                ? 'Có thể đổi loader sau ở cột bên phải. LunarLoader đi kèm shaderpack, HUD client và renderer tối ưu.'
+                : 'You can still change the loader in the right column. LunarLoader includes shaderpacks, the client HUD and the optimized renderer.'}
+            </p>
+          </div>
+        </div>
+      ) : (
       <div className="flex-1 min-h-0 flex overflow-hidden">
         <div className="flex-1 min-w-0 flex flex-col px-6 py-4 gap-3">
           <div className="flex items-center gap-2">
@@ -357,7 +443,7 @@ export default function VersionsPage({
                 </button>
               </div>
             ) : (
-              <div className="stream-items flex flex-col gap-1">
+              <div className="stream-items grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))' }}>
                 {filtered.slice(0, Math.min(visible, progressive)).map((v) => {
                   const active = picked === v.id
                   const isLatest = v.id === latest?.release
@@ -367,40 +453,46 @@ export default function VersionsPage({
                       key={v.id}
                       onClick={() => { if (!unsupported) setPicked(v.id) }}
                       disabled={unsupported}
-                      className={`group relative flex items-center gap-3 h-11 px-3 rounded-lg text-left transition-colors ${unsupported ? 'cursor-not-allowed' : ''}`}
+                      className={`group relative flex flex-col gap-2.5 p-3 rounded-xl text-left transition-all ${unsupported ? 'cursor-not-allowed' : 'hover:-translate-y-0.5'}`}
                       style={{
-                        background: active ? 'rgba(167,139,250,0.12)' : 'transparent',
-                        border: `1px solid ${active ? 'rgba(167,139,250,0.45)' : 'transparent'}`,
+                        background: active ? 'rgba(167,139,250,0.12)' : c.surface,
+                        border: `1px solid ${active ? 'rgba(167,139,250,0.5)' : c.border}`,
                         opacity: unsupported ? 0.45 : 1,
                       }}
                     >
-                      <img src="./loader-icon/vanilla.png" alt="" className="w-5 h-5 rounded object-contain shrink-0" />
-                      <span className="text-xs font-bold font-mono w-32 shrink-0" style={{ color: active ? c.accent : c.text }}>{v.id}</span>
-                      <span
-                        className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase shrink-0"
-                        style={{
-                          background: v.type === 'release' ? 'rgba(34,197,94,0.14)' : 'rgba(234,179,8,0.14)',
-                          color: v.type === 'release' ? '#22c55e' : '#eab308',
-                        }}
-                      >
-                        {v.type === 'release' ? t(lang, 'home.release') : t(lang, 'home.snapshot')}
-                      </span>
-                      {isLatest && (
-                        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase shrink-0"
-                          style={{ background: 'rgba(167,139,250,0.16)', color: c.accent }}>
-                          Latest
+                      <div className="flex items-center gap-2.5">
+                        <span className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0" style={{ background: c.input, border: `1px solid ${c.border}` }}>
+                          <img src={`./${activeLoader.image}`} alt="" className="w-6 h-6 object-contain" />
                         </span>
-                      )}
-                      {unsupported && (
-                        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase shrink-0"
-                          style={{ background: 'rgba(239,68,68,0.14)', color: '#f87171' }}>
-                          {lang === 'vi' ? 'không hỗ trợ' : 'unsupported'}
+                        <span className="text-sm font-bold font-mono truncate" style={{ color: active ? c.accent : c.text }}>{v.id}</span>
+                        <span className="ml-auto shrink-0">
+                          {active ? <Check size={14} weight="bold" style={{ color: c.accent }} /> : null}
                         </span>
-                      )}
-                      <span className="ml-auto text-[10px] font-mono shrink-0" style={{ color: c.faint }}>
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span
+                          className="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase"
+                          style={{
+                            background: v.type === 'release' ? 'rgba(34,197,94,0.14)' : 'rgba(234,179,8,0.14)',
+                            color: v.type === 'release' ? '#22c55e' : '#eab308',
+                          }}
+                        >
+                          {v.type === 'release' ? t(lang, 'home.release') : t(lang, 'home.snapshot')}
+                        </span>
+                        {isLatest && (
+                          <span className="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase" style={{ background: 'rgba(167,139,250,0.16)', color: c.accent }}>
+                            Latest
+                          </span>
+                        )}
+                        {unsupported && (
+                          <span className="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase" style={{ background: 'rgba(239,68,68,0.14)', color: '#f87171' }}>
+                            {lang === 'vi' ? 'không hỗ trợ' : 'unsupported'}
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[10px] font-mono" style={{ color: c.faint }}>
                         {formatDate(v.releaseTime, lang) || '—'}
                       </span>
-                      {active && <Check size={14} weight="bold" className="shrink-0" style={{ color: c.accent }} />}
                     </button>
                   )
                 })}
@@ -422,30 +514,23 @@ export default function VersionsPage({
           <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 flex flex-col gap-4">
           <div className="flex items-center gap-2">
             <img src={`./${activeLoader.image}`} alt="" className="w-7 h-7 rounded-lg object-contain" />
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <p className="text-xs font-bold" style={{ color: c.text }}>{t(lang, 'versions.create')}</p>
               <p className="text-[10px] truncate" style={{ color: c.faint }}>{t(lang, 'versions.pickLoader')}</p>
             </div>
+            <button
+              onClick={() => setLoaderPicked(false)}
+              className="h-7 px-2 rounded-lg text-[10px] font-semibold shrink-0"
+              style={{ background: c.input, border: `1px solid ${c.border}`, color: c.label }}
+            >
+              {lang === 'vi' ? 'Đổi loader' : 'Change loader'}
+            </button>
           </div>
 
-          <div className="flex items-center gap-1.5">
-            {api.LOADERS.map((l) => {
-              const active = l.id === loader
-              return (
-                <button
-                  key={l.id}
-                  onClick={() => setLoader(l.id)}
-                  className="flex-1 h-9 rounded-lg text-[11px] font-semibold transition-colors"
-                  style={{
-                    background: active ? 'rgba(167,139,250,0.14)' : c.input,
-                    border: `1px solid ${active ? 'rgba(167,139,250,0.42)' : c.border}`,
-                    color: active ? c.accent : c.label,
-                  }}
-                >
-                  {l.name}
-                </button>
-              )
-            })}
+          <div className="flex items-center gap-2 px-2.5 py-2 rounded-lg" style={{ background: c.input, border: `1px solid ${c.border}` }}>
+            <img src={`./${activeLoader.image}`} alt="" className="w-5 h-5 object-contain shrink-0" />
+            <span className="text-[11px] font-bold" style={{ color: c.accent }}>{activeLoader.name}</span>
+            <span className="text-[9px] truncate" style={{ color: c.faint }}>{activeLoader.desc}</span>
           </div>
 
           {loader !== 'vanilla' && (
@@ -649,6 +734,7 @@ export default function VersionsPage({
         </div>
       </aside>
       </div>
+      )}
 
       {importOpen && (
         <div

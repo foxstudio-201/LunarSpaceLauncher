@@ -450,7 +450,7 @@ function AppContent() {
     return res
   }, [refreshInstances])
 
-  const handleLaunch = useCallback(async (instance, username) => {
+  const handleLaunch = useCallback(async (instance, username, quickPlay = null) => {
     setLaunchError((e) => ({ ...e, [instance.id]: '' }))
     setOpenCrash((current) => (current === instance.id ? null : current))
     setCrashes((prev) => {
@@ -459,7 +459,7 @@ function AppContent() {
       delete next[instance.id]
       return next
     })
-    const res = await api.launchInstance({ id: instance.id, username })
+    const res = await api.launchInstance({ id: instance.id, username, ...(quickPlay ? { quickPlay } : {}) })
     if (!res?.ok) {
       const message = res?.error || vn(langRef.current, 'Không khởi chạy được.', 'Could not launch.')
       setLaunchError((e) => ({ ...e, [instance.id]: message }))

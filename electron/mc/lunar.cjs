@@ -53,8 +53,9 @@ async function latest({ game, version }) {
   return apiJson(`/api-v2/latest?${query.toString()}`, 30000)
 }
 
-async function install({ game, version, paths, onProgress, signal }) {
+async function install({ game, version, paths, onProgress, signal, force = false }) {
   if (!paths?.libraries || !paths?.versions) throw new Error('Thiếu đường dẫn cài đặt')
+  if (force) cache.clear()
   const manifest = await latest({ game, version })
   if (manifest.api !== 2) throw new Error('API LunarLoader không hỗ trợ giao thức này')
   if (!manifest.profile || !manifest.install) throw new Error('Bản phát hành thiếu profile cài đặt')
@@ -72,14 +73,28 @@ async function install({ game, version, paths, onProgress, signal }) {
       dest: path.join(paths.libraries, String(lib.path)),
       sha1: lib.sha1 ? String(lib.sha1) : undefined,
       size: Number(lib.size) || 0,
+      name: String(lib.name || ''),
     }))
 
   const concurrency = Math.max(1, Number(process.env.LUNARLOADER_CONCURRENCY) || 8)
-  const result = await downloadAll(tasks, {
-    concurrency,
-    onProgress: (p) => onProgress?.({ label: 'lunarloader', ...p }),
-    signal,
-  })
+  const forced = force
+    ? tasks.filter((task) => task.name.startsWith('vn.lunar:') && !task.name.startsWith('vn.lunar:minecraft'))
+    : []
+  const normal = force ? tasks.filter((task) => !forced.includes(task)) : tasks
+  const result = { errors: [] }
+  for (const batch of [
+    { tasks: normal, force: false },
+    { tasks: forced, force: true },
+  ]) {
+    if (!batch.tasks.length) continue
+    const part = await downloadAll(batch.tasks, {
+      concurrency,
+      onProgress: (p) => onProgress?.({ label: 'lunarloader', ...p }),
+      signal,
+      force: batch.force,
+    })
+    result.errors.push(...part.errors)
+  }
   if (result.errors.length) {
     const first = result.errors[0]
     throw new Error(`Tải ${path.basename(first.file)} thất bại: ${first.error}`)

@@ -212,7 +212,7 @@ function clientExtraJar({ chain, paths }) {
   return fs.existsSync(file) ? file : null
 }
 
-function buildLaunch({ chain, paths, nativesDir, instanceDir, username, memoryMb, extraJvm = [], auth = null, demo = false, linkDir = '' }) {
+function buildLaunch({ chain, paths, nativesDir, instanceDir, username, memoryMb, extraJvm = [], auth = null, demo = false, quickPlay = null, linkDir = '' }) {
   const safeInstance = asciiSafePath(instanceDir, linkDir)
   const safeAssets = asciiSafePath(paths.assets, linkDir)
   const safeNatives = asciiSafePath(nativesDir, linkDir)
@@ -318,6 +318,12 @@ function buildLaunch({ chain, paths, nativesDir, instanceDir, username, memoryMb
     : substitute(String(chain.minecraftArguments || '').split(' ').filter(Boolean), map)
 
   if (demo && !game.includes('--demo')) game.push('--demo')
+
+  if (quickPlay?.type === 'world' && quickPlay.folder) {
+    game.push('--quickPlaySingleplayer', String(quickPlay.folder))
+  } else if (quickPlay?.type === 'server' && quickPlay.host) {
+    game.push('--quickPlayMultiplayer', `${quickPlay.host}:${Number(quickPlay.port) || 25565}`)
+  }
 
   const jvmArgs = [`-Xmx${memoryMb}M`, ...extraJvm.filter(Boolean), ...jvm]
   return { args: [...jvmArgs, chain.mainClass, ...game], classpath, uuid, pathFix }

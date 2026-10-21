@@ -53,6 +53,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   createInstance: (opts) => ipcRenderer.invoke('launcher:create', opts),
   updateInstance: (opts) => ipcRenderer.invoke('launcher:update', opts),
   changeLoaderVersion: (opts) => ipcRenderer.invoke('launcher:loader-version', opts),
+  reinstallLoader: (opts) => ipcRenderer.invoke('launcher:loader-reinstall', opts),
   removeInstance: (opts) => ipcRenderer.invoke('launcher:remove', opts),
   launchInstance: (opts) => ipcRenderer.invoke('launcher:launch', opts),
   stopInstance: (opts) => ipcRenderer.invoke('launcher:stop', opts),

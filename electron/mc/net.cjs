@@ -156,7 +156,7 @@ async function downloadOne(task, onDelta) {
   return streamDownload(task, onDelta)
 }
 
-async function downloadAll(tasks, { concurrency = 16, onProgress, signal, label } = {}) {
+async function downloadAll(tasks, { concurrency = 16, onProgress, signal, label, force = false } = {}) {
   const queue = [...tasks]
   const total = queue.length
   const totalBytes = tasks.reduce((sum, task) => sum + (task.size || 0), 0)
@@ -189,7 +189,7 @@ async function downloadAll(tasks, { concurrency = 16, onProgress, signal, label 
       const task = queue.shift()
       if (!task) return
       try {
-        if (await isFresh(task)) {
+        if (!force && await isFresh(task)) {
           skipped += 1
           skippedBytes += task.size || 0
         } else {

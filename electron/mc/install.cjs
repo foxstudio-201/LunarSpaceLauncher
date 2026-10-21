@@ -106,6 +106,7 @@ function libraryTasks(version, paths) {
         dest: path.join(paths.libraries, dl.artifact.path),
         sha1: dl.artifact.sha1,
         size: dl.artifact.size,
+        name: lib.name,
       })
       if (/:natives-/.test(lib.name)) natives.push(path.join(paths.libraries, dl.artifact.path))
     }
@@ -224,7 +225,7 @@ async function ensureLaunchFiles({ versionId, paths, onProgress, signal }) {
   return { chain, errors: res.errors, downloaded: missing.length - res.skipped, nativesDir, repaired: true }
 }
 
-async function install({ versionId, paths, onProgress, signal, dryRun = false }) {
+async function install({ versionId, paths, onProgress, signal, dryRun = false, force = false }) {
   const ctx = { paths, onProgress, signal, dryRun }
   const chain = await resolveChain(versionId, ctx)
   const { artifacts, natives } = libraryTasks(chain, paths)
@@ -266,8 +267,24 @@ async function install({ versionId, paths, onProgress, signal, dryRun = false })
     errors.push(...res.errors)
   }
   if (artifacts.length) {
-    const res = await downloadAll(artifacts, { onProgress, signal, label: 'libraries', concurrency: 12 })
-    errors.push(...res.errors)
+    const forcedPrefixes = ['vn.lunar:', 'net.fabricmc:', 'org.quiltmc:', 'net.minecraftforge:', 'cpw.mods:']
+    const shouldForce = (task) => forcedPrefixes.some((prefix) => String(task.name || '').startsWith(prefix))
+    const forced = force ? artifacts.filter(shouldForce) : []
+    const normal = force ? artifacts.filter((task) => !shouldForce(task)) : artifacts
+    for (const batch of [
+      { tasks: normal, force: false },
+      { tasks: forced, force: true },
+    ]) {
+      if (!batch.tasks.length) continue
+      const res = await downloadAll(batch.tasks, {
+        onProgress,
+        signal,
+        label: 'libraries',
+        concurrency: 12,
+        force: batch.force,
+      })
+      errors.push(...res.errors)
+    }
   }
   if (objects.length) {
     const res = await downloadAll(objects, { onProgress, signal, label: 'assets', concurrency: 20 })
