@@ -9,6 +9,7 @@ export const LOADERS = [
   { id: 'lunar', name: 'LunarLoader', image: 'loader-icon/lunar.png', desc: 'Loader riêng của LunarSpace, tối ưu cho mod hiện đại' },
 ]
 
+const LUNAR_API = String(import.meta.env?.VITE_LUNAR_API || 'https://lunarspace.site').replace(/\/+$/, '')
 const FORGE_META_URL = 'https://files.minecraftforge.net/net/minecraftforge/forge/maven-metadata.json'
 const FORGE_PROMOS_URL = 'https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json'
 
@@ -144,7 +145,17 @@ export async function listLoaderVersions({ kind, game } = {}) {
   if (bridge?.listLoaderVersions) return bridge.listLoaderVersions({ kind, game })
   if (kind === 'vanilla') return { ok: true, versions: [] }
   if (kind === 'lunar') {
-    return { ok: true, versions: game === '1.20.1' ? [{ version: '0.1.0', build: null, stable: true, latest: true }] : [] }
+    const data = await webJson(`${LUNAR_API}/api-v2/versions?mc=${encodeURIComponent(game)}`)
+    const rows = Array.isArray(data?.versions) ? data.versions : []
+    return {
+      ok: true,
+      versions: rows.map((row, index) => ({
+        version: String(row.version || ''),
+        build: null,
+        stable: String(row.channel || 'stable') === 'stable',
+        latest: index === 0,
+      })).filter((row) => row.version),
+    }
   }
   if (kind === 'forge') {
     if (!forgeSupportsGame(game)) return { ok: true, versions: [] }
@@ -215,7 +226,20 @@ export async function listLoaderVersions({ kind, game } = {}) {
 export async function listLoaderGames({ kind } = {}) {
   if (bridge?.listLoaderGames) return bridge.listLoaderGames({ kind })
   if (!kind || kind === 'vanilla') return { ok: true, games: [], all: true }
-  if (kind === 'lunar') return { ok: true, games: [{ version: '1.20.1', stable: true }], all: false }
+  if (kind === 'lunar') {
+    const data = await webJson(`${LUNAR_API}/api-v2/versions`)
+    const rows = Array.isArray(data?.versions) ? data.versions : []
+    const games = new Map()
+    for (const row of rows) {
+      const version = String(row.minecraft || '')
+      if (!version) continue
+      const current = games.get(version)
+      if (!current || (current.channel !== 'stable' && row.channel === 'stable')) {
+        games.set(version, { version, stable: String(row.channel || 'stable') === 'stable' })
+      }
+    }
+    return { ok: true, games: [...games.values()], all: false }
+  }
   const url = kind === 'fabric'
     ? 'https://meta.fabricmc.net/v2/versions/game'
     : kind === 'quilt'

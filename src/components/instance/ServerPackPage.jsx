@@ -96,7 +96,7 @@ const PROP_GROUPS = [
   },
 ]
 
-const LOADER_NAMES = { vanilla: 'Vanilla', forge: 'Forge', neoforge: 'NeoForge', fabric: 'Fabric', quilt: 'Quilt' }
+const LOADER_NAMES = { vanilla: 'Vanilla', forge: 'Forge', neoforge: 'NeoForge', fabric: 'Fabric', quilt: 'Quilt', lunar: 'LunarLoader' }
 
 function escapeValue(value) {
   return String(value).replace(/\\/g, '\\\\').replace(/[^\x20-\x7E]/g, (ch) => `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`)

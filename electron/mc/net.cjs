@@ -67,6 +67,7 @@ async function rangedDownload(task, onDelta) {
     host = new URL(task.url).host
   } catch {}
   if (host && noRangeHosts.has(host)) return false
+  if (host === '127.0.0.1' || host === 'localhost' || host === '::1') return false
 
   const probe = await fetch(task.url, { method: 'HEAD', headers: UA, signal: AbortSignal.timeout(20000) })
   if (!probe.ok) return false

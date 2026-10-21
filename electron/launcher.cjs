@@ -12,6 +12,7 @@ const javaModule = require('./mc/java.cjs')
 const { analyzeExit, uploadToMclogs } = require('./mc/crash.cjs')
 const forgeMod = require('./mc/forge.cjs')
 const neoMod = require('./mc/neoforge.cjs')
+const lunarMod = require('./mc/lunar.cjs')
 const boost = require('./mc/boost.cjs')
 const presence = require('./presence.cjs')
 const modpack = require('./mc/modpack.cjs')
@@ -38,6 +39,8 @@ async function serverLocalCall({ method, args = [], settings } = {}) {
   serverlocal.configure({
     root: () => serverTestRoot(),
     metaDir: () => storageFor(settings).paths.meta,
+    storage: () => storageFor(settings).paths,
+    ensureGame: (versionId) => ensureLaunchFiles({ versionId, paths: storageFor(settings).paths }),
   })
   const fn = serverlocal[method]
   if (typeof fn !== 'function') return { ok: false, error: `Không hỗ trợ: ${method}` }
@@ -49,7 +52,12 @@ async function serverLocalCall({ method, args = [], settings } = {}) {
 }
 
 function serverLocalStart() {
-  serverlocal.configure({ root: () => serverTestRoot(), metaDir: () => storageFor({}).paths.meta })
+  serverlocal.configure({
+    root: () => serverTestRoot(),
+    metaDir: () => storageFor({}).paths.meta,
+    storage: () => storageFor({}).paths,
+    ensureGame: (versionId) => ensureLaunchFiles({ versionId, paths: storageFor({}).paths }),
+  })
   serverlocal.startScheduler()
   return { ok: true }
 }
@@ -253,9 +261,7 @@ async function resolveTarget({ version, loader = 'vanilla', loaderVersion, setti
   if (loader === 'lunar') {
     const versionId = `lunarloader-${version}`
     const profileFile = path.join(paths.versions, versionId, `${versionId}.json`)
-    if (!fs.existsSync(profileFile)) {
-      throw new Error(`LunarLoader chưa được cài cho Minecraft ${version}`)
-    }
+    if (!fs.existsSync(profileFile)) return { versionId: null, profile: null }
     return { versionId, profile: null }
   }
   const profile = await getLoaderProfile({ kind: loader, game: version, loader: loaderVersion, metaDir: paths.meta })
@@ -359,6 +365,17 @@ async function installForge({ entry, paths, settings, emit }) {
   return created
 }
 
+async function installLunar({ entry, paths, emit }) {
+  const res = await lunarMod.install({
+    game: entry.version,
+    version: entry.loaderVersion || undefined,
+    paths,
+    onProgress: (p) => emit?.({ type: 'progress', id: entry.id, phase: 'download', ...p }),
+    signal: undefined,
+  })
+  return res.versionId
+}
+
 async function createInstance({ name, version, loader = 'vanilla', loaderVersion, memoryMb = 2048, dir, username = 'Player', demo = false, icon = '', awaitInstall = false, settings }, emit) {
   if (!name || !version) return { ok: false, error: 'Thiếu tên hoặc phiên bản.' }
   const { paths, defaultInstanceDir } = storageFor(settings)
@@ -425,6 +442,9 @@ async function runInstall(entry, settings, emit) {
     let versionId = entry.versionId
     if ((entry.loader === 'forge' || entry.loader === 'neoforge') && !versionId) {
       versionId = await installForge({ entry, paths, settings, emit })
+      updateEntry(entry.id, { versionId })
+    } else if (entry.loader === 'lunar') {
+      versionId = await installLunar({ entry, paths, emit })
       updateEntry(entry.id, { versionId })
     }
     const result = await install({
@@ -1099,7 +1119,6 @@ async function changeLoaderVersion({ id, loaderVersion, settings } = {}, emit) {
   const entry = readIndex().find((i) => i.id === id)
   if (!entry) return { ok: false, error: 'Không tìm thấy instance.' }
   if (entry.loader === 'vanilla') return { ok: false, error: 'Phiên bản này không dùng loader.' }
-  if (entry.loader === 'lunar') return { ok: false, error: 'LunarLoader chưa hỗ trợ đổi phiên bản loader.' }
   const wanted = String(loaderVersion || '').trim()
   if (!wanted) return { ok: false, error: 'Thiếu phiên bản loader.' }
   if (wanted === (entry.loaderVersion || '')) return { ok: true, instance: entry, unchanged: true }
@@ -1238,6 +1257,15 @@ async function runLaunch({ id, username, demo: demoOverride, settings }, emit) {
   if (!entry.versionId && (entry.loader === 'forge' || entry.loader === 'neoforge')) {
     try {
       const versionId = await installForge({ entry, paths, settings, emit })
+      updateEntry(entry.id, { versionId, status: 'ready', error: null })
+      entry.versionId = versionId
+    } catch (err) {
+      updateEntry(entry.id, { status: 'error', error: err.message })
+      return { ok: false, error: err.message }
+    }
+  } else if (!entry.versionId && entry.loader === 'lunar') {
+    try {
+      const versionId = await installLunar({ entry, paths, emit })
       updateEntry(entry.id, { versionId, status: 'ready', error: null })
       entry.versionId = versionId
     } catch (err) {
@@ -2662,6 +2690,7 @@ async function serverTestSuggest({ instanceId } = {}) {
   const vars = servertest.buildEggEnv(servertest.readEgg(eggId), {
     SERVER_JARFILE: 'server.jar',
     MC_VERSION: mc,
+    LUNARLOADER_VERSION: '',
     NEOFORGE_VERSION: eggId === 'neoforge' ? fullVersion : '',
     FORGE_VERSION: eggId === 'forge' ? fullVersion : '',
   })
@@ -2749,6 +2778,7 @@ async function serverTestCreate({ name, eggId, mc, loaderVersion, ramMb, port, i
   const merged = {
     SERVER_JARFILE: 'server.jar',
     MC_VERSION: mc || '',
+    LUNARLOADER_VERSION: eggId === 'lunar' ? (vars?.LUNARLOADER_VERSION || '') : '',
     NEOFORGE_VERSION: eggId === 'neoforge' ? await resolveLoaderVersion({ mc, loader: 'neoforge', loaderVersion }) : '',
     FORGE_VERSION: eggId === 'forge' ? await resolveLoaderVersion({ mc, loader: 'forge', loaderVersion }) : '',
     ...(vars || {}),

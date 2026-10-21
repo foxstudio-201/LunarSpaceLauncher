@@ -4,10 +4,11 @@ const path = require('path')
 const crypto = require('crypto')
 const { spawn } = require('child_process')
 const servertest = require('./servertest.cjs')
+const lunarLoader = require('./lunar.cjs')
 const cron = require('./cron.cjs')
 const { createTarGz, extractTarGz } = require('./targz.cjs')
 
-let hooks = { root: () => '', metaDir: () => '', emit: () => {} }
+let hooks = { root: () => '', metaDir: () => '', emit: () => {}, storage: () => null, ensureGame: null }
 function configure(next) {
   hooks = { ...hooks, ...next }
 }
@@ -394,6 +395,170 @@ async function power(id, action) {
   return res
 }
 
+function mavenRel(name) {
+  const [group, artifact, version] = String(name || '').split(':')
+  if (!group || !artifact || !version) return ''
+  return `${group.replace(/\./g, '/')}/${artifact}/${version}/${artifact}-${version}.jar`
+}
+
+function libraryRel(lib) {
+  const artifact = lib?.downloads?.artifact
+  if (artifact?.path) return artifact.path
+  return mavenRel(lib?.name)
+}
+
+async function copyIfFile(source, target, onLog) {
+  try {
+    const st = await fsp.stat(source)
+    if (!st.isFile()) return false
+    await fsp.mkdir(path.dirname(target), { recursive: true })
+    await fsp.copyFile(source, target)
+    return true
+  } catch (err) {
+    onLog?.(`[Install] Thiếu ${source}: ${err.message}`)
+    return false
+  }
+}
+
+async function installLunarServer(entry, { onLog, onProgress }) {
+  const paths = hooks.storage?.()
+  if (!paths?.libraries || !paths?.versions) throw new Error('Thiếu đường dẫn shared của launcher.')
+  if (typeof hooks.ensureGame !== 'function') throw new Error('Launcher chưa cấu hình ensureGame.')
+  const game = entry.mc || entry.vars?.MC_VERSION || '1.20.1'
+  const version = entry.vars?.LUNARLOADER_VERSION || ''
+  const dir = entry.dir
+
+  onLog?.(`[Install] LunarLoader server · Minecraft ${game}${version ? ` · loader ${version}` : ''}`)
+  const installed = await lunarLoader.install({
+    game,
+    version,
+    paths,
+    onProgress: (p) => onProgress?.({ ...p, phase: 'lunar' }),
+  })
+  onLog?.(`[Install] Loader ${installed.release?.version || version || 'latest'} · profile ${installed.versionId}`)
+  onLog?.('[Install] Đang bảo đảm thư viện Minecraft…')
+  await hooks.ensureGame(game)
+  onProgress?.({ phase: 'libs', percent: 55 })
+
+  const profile = installed.profile || {}
+  const vanillaPath = path.join(paths.versions, game, `${game}.json`)
+  const vanilla = JSON.parse(await fsp.readFile(vanillaPath, 'utf8'))
+  const files = new Map()
+  const addShared = (rel) => {
+    if (!rel) return
+    const source = path.join(paths.libraries, rel)
+    if (!files.has(rel) && fs.existsSync(source)) files.set(rel, source)
+  }
+
+  let gameJar = null
+  for (const lib of profile.libraries || []) {
+    const name = String(lib?.name || '')
+    if (/lunar-ui:|lunar-perf:/.test(name)) continue
+    const rel = libraryRel(lib)
+    if (!rel) continue
+    if (/^vn\.lunar:minecraft:/i.test(name) || /minecraft-.*\.jar$/i.test(rel)) {
+      gameJar = path.join(paths.libraries, rel)
+      continue
+    }
+    addShared(rel)
+  }
+  for (const lib of vanilla.libraries || []) {
+    addShared(lib?.downloads?.artifact?.path)
+  }
+  const moduleNames = [
+    'bootstraplauncher-1.1.2.jar',
+    'securejarhandler-2.1.10.jar',
+    'asm-9.9.1.jar',
+    'asm-commons-9.9.1.jar',
+    'asm-util-9.9.1.jar',
+    'asm-analysis-9.9.1.jar',
+    'asm-tree-9.9.1.jar',
+  ]
+  for (const name of moduleNames) {
+    const rel = [...files.keys()].find((item) => path.basename(item) === name)
+    if (rel) continue
+    const candidate = ['cpw/mods', 'org/ow2/asm'].map((prefix) => {
+      const root = path.join(paths.libraries, prefix)
+      try {
+        const stack = [root]
+        while (stack.length) {
+          const current = stack.pop()
+          for (const item of fs.readdirSync(current, { withFileTypes: true })) {
+            const full = path.join(current, item.name)
+            if (item.isDirectory()) stack.push(full)
+            else if (item.isFile() && item.name === name) return full
+          }
+        }
+      } catch {}
+      return ''
+    }).find(Boolean)
+    if (candidate) files.set(path.relative(paths.libraries, candidate).split(path.sep).join('/'), candidate)
+  }
+
+  if (!gameJar || !fs.existsSync(gameJar)) throw new Error('Không tìm thấy minecraft-1.20.1.jar đã remap trong thư viện loader.')
+  await fsp.mkdir(dir, { recursive: true })
+  await copyIfFile(gameJar, path.join(dir, 'server.jar'), onLog)
+  let copied = 0
+  for (const [rel, source] of files) {
+    if (await copyIfFile(source, path.join(dir, 'libraries', ...rel.split('/')), onLog)) copied += 1
+  }
+  onLog?.(`[Install] Đã chép ${copied} thư viện vào server.`)
+
+  const rels = [...files.keys()].map((rel) => `libraries/${rel}`)
+  const classpath = [...rels, 'server.jar']
+  const moduleRels = moduleNames
+    .map((name) => [...files.keys()].find((rel) => path.basename(rel) === name))
+    .filter(Boolean)
+    .map((rel) => `libraries/${rel}`)
+  if (moduleRels.length !== moduleNames.length) throw new Error('Thiếu jar module của BootstrapLauncher/ASM trong thư viện loader.')
+
+  const sep = process.platform === 'win32' ? ';' : ':'
+  const writeArgs = (file, separator) => {
+    const args = [
+      '-Dlunar.side=server',
+      '-Dlunar.gameJar=server.jar',
+      '-DignoreList=bootstraplauncher,securejarhandler,asm-commons,asm-util,asm-analysis,asm-tree,asm,server.jar',
+      '-DlibraryDirectory=libraries',
+      '-p',
+      moduleRels.join(separator),
+      '--add-modules',
+      'ALL-MODULE-PATH',
+      '--add-opens',
+      'java.base/java.util.jar=cpw.mods.securejarhandler',
+      '--add-opens',
+      'java.base/java.lang.invoke=cpw.mods.securejarhandler',
+      '--add-exports',
+      'java.base/sun.security.util=cpw.mods.securejarhandler',
+      '-cp',
+      classpath.join(separator),
+      'cpw.mods.bootstraplauncher.BootstrapLauncher',
+      '--launchTarget',
+      'lunarloaderserver',
+    ]
+    return fsp.writeFile(path.join(dir, file), `${args.join('\n')}\n`, 'utf8')
+  }
+  await writeArgs('win_args.txt', ';')
+  await writeArgs('unix_args.txt', ':')
+  const loaderRel = [...files.keys()].find((rel) => /lunarloader-.*\.jar$/i.test(path.basename(rel)))
+  if (loaderRel) {
+    try {
+      const AdmZip = require('adm-zip')
+      const zip = new AdmZip(path.join(dir, 'libraries', ...loaderRel.split('/')))
+      if (!zip.getEntry('vn/lunar/loader/LunarServerLaunchHandler.class')) {
+        throw new Error('Loader trên API chưa có server support. Cần upload bản 0.1.1-dev trở lên.')
+      }
+    } catch (err) {
+      if (/chưa có server support/.test(err.message)) throw err
+    }
+  }
+
+  const javaBin = await servertest.ensureJava({ root: root(), major: 17, onLog })
+  await servertest.writeEula(dir)
+  await servertest.writeProperties(dir, { ...(entry.vars || {}), port: entry.port })
+  onLog?.('[Install] LunarLoader server đã sẵn sàng.')
+  return { ok: true, java: javaBin, javaMajor: 17, mc: game, jarFile: 'server.jar' }
+}
+
 async function install(id) {
   let entry
   try {
@@ -414,26 +579,36 @@ async function install(id) {
   progress(3, 'Chuẩn bị cài đặt (basic, không Docker)…')
   try {
     const { paths } = { paths: { meta: hooks.metaDir() } }
-    const res = await servertest.installServer({
-      dir: entry.dir,
-      eggId: entry.eggId,
-      vars: { ...(entry.vars || {}), port: entry.port },
-      root: root(),
-      metaDir: paths.meta,
-      onLog: (line) => {
-        servertest.pushLine(id, line)
-        emit({ type: 'server-log', serverId: id, message: line })
-        if (/\[Java\]/.test(line)) progress(20, line.replace('[Java] ', ''))
-        else if (/\[Install\]/.test(line)) {
-          const clean = line.replace('[Install] ', '').trim()
-          const noise = /^\s*\d|Total\s+%|Dload|--:--|^\d+\s*$|^[0-9.,]+\s*[kKMG]?$/.test(clean)
-          if (!noise && clean.length > 6 && clean.length < 160) progress(Math.min(88, 45 + Math.random() * 30), clean)
-        }
-      },
-      onProgress: (info) => {
-        if (info?.phase === 'java') progress(25, 'Đang tải Java…')
-      },
-    })
+    const onLog = (line) => {
+      servertest.pushLine(id, line)
+      emit({ type: 'server-log', serverId: id, message: line })
+      if (/\[Java\]/.test(line)) progress(20, line.replace('[Java] ', ''))
+      else if (/\[Install\]/.test(line)) {
+        const clean = line.replace('[Install] ', '').trim()
+        const noise = /^\s*\d|Total\s+%|Dload|--:--|^\d+\s*$|^[0-9.,]+\s*[kKMG]?$/.test(clean)
+        if (!noise && clean.length > 6 && clean.length < 160) progress(Math.min(88, 45 + Math.random() * 30), clean)
+      }
+    }
+    const res = entry.eggId === 'lunar'
+      ? await installLunarServer(entry, {
+          onLog,
+          onProgress: (info) => {
+            if (info?.phase === 'java') progress(25, 'Đang tải Java…')
+            else if (info?.phase === 'libs') progress(60, 'Đang chép thư viện server…')
+            else if (info?.label) progress(40, `Đang tải ${info.label}…`)
+          },
+        })
+      : await servertest.installServer({
+          dir: entry.dir,
+          eggId: entry.eggId,
+          vars: { ...(entry.vars || {}), port: entry.port },
+          root: root(),
+          metaDir: paths.meta,
+          onLog,
+          onProgress: (info) => {
+            if (info?.phase === 'java') progress(25, 'Đang tải Java…')
+          },
+        })
     progress(95, 'Ghi eula.txt và server.properties…')
     update(id, {
       installed: true,

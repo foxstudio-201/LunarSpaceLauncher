@@ -1,0 +1,55 @@
+{
+  "_comment": "LunarLoader Minecraft server. Installation is handled by serverlocal.cjs (ModLauncher server launch).",
+  "name": "LunarLoader",
+  "description": "Minecraft server chạy bằng LunarLoader (Java 17, Minecraft 1.20.1). Hỗ trợ mod lunar.mod.json theo side server/both.",
+  "features": [
+    "eula",
+    "java_version"
+  ],
+  "docker_images": {
+    "Java 17": "ghcr.io/pelican-eggs/yolks:java_17"
+  },
+  "startup": "java @win_args.txt nogui",
+  "config": {
+    "files": "{\n    \"server.properties\": {\n        \"parser\": \"properties\",\n        \"find\": {\n            \"server-ip\": \"\",\n            \"server-port\": \"{{server.build.default.port}}\",\n            \"query.port\": \"{{server.build.default.port}}\"\n        }\n    }\n}",
+    "startup": "{\n    \"done\": \")! For help, type \"\n}",
+    "logs": "[]",
+    "stop": "stop"
+  },
+  "scripts": {
+    "installation": {
+      "script": "#!/bin/bash\n# LunarLoader server files are prepared by LunarSpace Launcher.\nexit 0\n",
+      "container": "ghcr.io/pelican-eggs/installers:java_17",
+      "entrypoint": "bash"
+    }
+  },
+  "variables": [
+    {
+      "name": "Minecraft Version",
+      "description": "Phiên bản Minecraft cho server LunarLoader.",
+      "env_variable": "MC_VERSION",
+      "default_value": "1.20.1",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|string|max:9"
+    },
+    {
+      "name": "LunarLoader Version",
+      "description": "Phiên bản loader; để trống để dùng bản mới nhất trên API.",
+      "env_variable": "LUNARLOADER_VERSION",
+      "default_value": "",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "nullable|string|max:32"
+    },
+    {
+      "name": "Server Jar File",
+      "description": "Tên tệp game jar đã remap do launcher chuẩn bị.",
+      "env_variable": "SERVER_JARFILE",
+      "default_value": "server.jar",
+      "user_viewable": true,
+      "user_editable": false,
+      "rules": "required|string|max:64"
+    }
+  ]
+}

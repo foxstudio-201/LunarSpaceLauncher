@@ -7,8 +7,8 @@ const { spawn } = require('child_process')
 const { downloadOne } = require('./net.cjs')
 
 const EGGS_DIR = path.join(__dirname, 'eggs', 'minecraft')
-const EGG_IDS = ['vanilla', 'paper', 'purpur', 'spigot', 'forge', 'fabric', 'neoforge']
-const LOADER_EGG = { vanilla: 'vanilla', paper: 'paper', purpur: 'purpur', spigot: 'spigot', forge: 'forge', fabric: 'fabric', neoforge: 'neoforge' }
+const EGG_IDS = ['vanilla', 'paper', 'purpur', 'spigot', 'forge', 'fabric', 'neoforge', 'lunar']
+const LOADER_EGG = { vanilla: 'vanilla', paper: 'paper', purpur: 'purpur', spigot: 'spigot', forge: 'forge', fabric: 'fabric', neoforge: 'neoforge', lunar: 'lunar' }
 const ARGS_EGGS = new Set(['forge', 'neoforge'])
 const MAX_LINES = 3000
 
@@ -121,6 +121,7 @@ function buildEggEnv(egg, vars) {
     const name = v.env_variable
     let value = ''
     if (name === 'SERVER_JARFILE') value = cfg.SERVER_JARFILE || v.default_value || 'server.jar'
+    else if (name === 'LUNARLOADER_VERSION') value = cfg.LUNARLOADER_VERSION || v.default_value || ''
     else if (/^(MC_VERSION|MINECRAFT_VERSION|VANILLA_VERSION|DL_VERSION)$/.test(name)) value = canonical || v.default_value || 'latest'
     else value = cfg[name] !== undefined && cfg[name] !== '' ? cfg[name] : v.default_value || ''
     env[name] = value

@@ -23,7 +23,7 @@ const SERVER_PANEL_PAGES = [
   { key: 'server-settings', icon: GearSix, label: 'Settings', labelVi: 'Cài đặt' },
 ]
 
-const LOADERS = ['vanilla', 'paper', 'purpur', 'spigot', 'forge', 'neoforge', 'fabric']
+const LOADERS = ['vanilla', 'paper', 'purpur', 'spigot', 'forge', 'neoforge', 'fabric', 'lunar']
 
 const vn = (lang, vi, en) => (lang === 'vi' ? vi : en)
 
@@ -35,6 +35,7 @@ const EGG_LABEL = {
   forge: 'Forge',
   neoforge: 'NeoForge',
   fabric: 'Fabric',
+  lunar: 'LunarLoader',
 }
 
 function statusColor(status) {
@@ -510,6 +511,7 @@ function CreateServerModal({ c, theme, lang, instances, eggs, onClose, onCreated
       instanceId: instanceId || undefined,
       vars: {
         MC_VERSION: mc,
+        LUNARLOADER_VERSION: '',
         NEOFORGE_VERSION: eggId === 'neoforge' ? suggest?.loaderVersion || '' : '',
         FORGE_VERSION: eggId === 'forge' ? suggest?.loaderVersion || '' : '',
         SERVER_JARFILE: 'server.jar',

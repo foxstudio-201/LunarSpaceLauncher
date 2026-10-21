@@ -75,7 +75,7 @@ const NEO_MAVEN = 'https://maven.neoforged.net/releases/net/neoforged'
 const FABRIC_META = 'https://meta.fabricmc.net/v2'
 const QUILT_META = 'https://meta.quiltmc.org/v3'
 
-const LOADER_KEYS = ['forge', 'fabric', 'quilt', 'neoforge']
+const LOADER_KEYS = ['forge', 'fabric', 'quilt', 'neoforge', 'lunar']
 const LEGACY_GAME = '1.20.1'
 
 const DEFAULT_PROPS = [
@@ -317,6 +317,13 @@ async function serverBundle({ metaDir, mc, loader, loaderVersion }) {
   if (!mc) return { ok: false, error: 'Chưa rõ phiên bản Minecraft của instance.' }
   if (kind !== 'vanilla' && !loaderVersion) return { ok: false, error: `Instance thiếu bản ${kind} nên không dựng được tệp server.` }
   try {
+    if (kind === 'lunar') {
+      return {
+        ok: false,
+        kind,
+        error: 'LunarLoader server được cài trong tab Server Local. Serverpack hiện chỉ đóng gói nội dung, chưa kèm loader; bỏ chọn "kèm tệp server" nếu chỉ cần nội dung.',
+      }
+    }
     if (kind === 'forge') {
       const full = await forgeModule.resolveFullId({ game: mc, idOrVersion: loaderVersion }).catch(() => `${mc}-${loaderVersion}`)
       const name = `forge-${full}-installer.jar`
