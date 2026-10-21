@@ -212,7 +212,7 @@ function clientExtraJar({ chain, paths }) {
   return fs.existsSync(file) ? file : null
 }
 
-function buildLaunch({ chain, paths, nativesDir, instanceDir, username, memoryMb, extraJvm = [], auth = null, demo = false, quickPlay = null, linkDir = '' }) {
+function buildLaunch({ chain, paths, nativesDir, instanceDir, username, memoryMb, extraJvm = [], auth = null, demo = false, quickPlay = null, linkDir = '', skin = null }) {
   const safeInstance = asciiSafePath(instanceDir, linkDir)
   const safeAssets = asciiSafePath(paths.assets, linkDir)
   const safeNatives = asciiSafePath(nativesDir, linkDir)
@@ -316,6 +316,15 @@ function buildLaunch({ chain, paths, nativesDir, instanceDir, username, memoryMb
   const game = chain.arguments?.game?.length
     ? substitute(flatten(chain.arguments.game), map)
     : substitute(String(chain.minecraftArguments || '').split(' ').filter(Boolean), map)
+
+  if (skin?.uuid) {
+    jvm.push(
+      `-Dlunar.skinDir=${skin.dir}`,
+      `-Dlunar.skinUuid=${skin.uuid}`,
+      `-Dlunar.skinName=${skin.name || username}`,
+      `-Dlunar.skinModel=${skin.model || 'classic'}`,
+    )
+  }
 
   if (demo && !game.includes('--demo')) game.push('--demo')
 

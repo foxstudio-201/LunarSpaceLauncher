@@ -11,7 +11,7 @@ const SIZES = {
   lg: { trigger: 'h-10 px-3', label: 'text-[13px]', row: 'h-11 px-3', rowText: 'text-[13px]', icon: 20, caret: 14, max: 300, minPanel: 240 },
 }
 
-export default function Select({ theme, value, options = [], onChange, placeholder = '—', disabled = false, badgeLabel, size = 'md', direction = 'auto' }) {
+export default function Select({ theme, value, options = [], onChange, placeholder = '—', disabled = false, badgeLabel, size = 'md', direction = 'auto', panelWidth }) {
   const c = palette(theme)
   const scale = SIZES[size] || SIZES.md
   const [open, setOpen] = useState(false)
@@ -91,7 +91,7 @@ export default function Select({ theme, value, options = [], onChange, placehold
         className="select-panel fixed overflow-y-auto"
         style={{
           left: rect.left,
-          width: scale.minPanel ? Math.max(rect.width, scale.minPanel) : rect.width,
+          width: Math.max(rect.width, panelWidth || scale.minPanel || 0),
           zIndex: 9999,
           ...(flip
             ? { bottom: window.innerHeight - rect.top + GAP, maxHeight: scale.max }

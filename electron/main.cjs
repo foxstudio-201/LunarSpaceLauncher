@@ -546,7 +546,17 @@ function registerIpc() {
     return res
   })
   ipcMain.handle('launcher:account-refresh', (_e, opts) => launcher.accountRefresh({ id: (opts || {}).id, accounts: readSettings().accounts }))
-  ipcMain.handle('skin:resolve', (_e, opts) => skins.resolve(opts || {}))
+  ipcMain.handle('skin:resolve', async (_e, opts) => {
+    const input = opts || {}
+    if (!input.provider && input.uuid) {
+      const local = await launcher.skinRead({ uuid: input.uuid, settings: readSettings() })
+      if (local?.ok && local.skin) return { ok: true, data: local.skin, local: true }
+    }
+    return skins.resolve(input)
+  })
+  ipcMain.handle('launcher:skin-read', (_e, opts) => launcher.skinRead({ ...(opts || {}), settings: readSettings() }))
+  ipcMain.handle('launcher:skin-save', (_e, opts) => launcher.skinSave({ ...(opts || {}), settings: readSettings() }))
+  ipcMain.handle('launcher:skin-remove', (_e, opts) => launcher.skinRemove({ ...(opts || {}), settings: readSettings() }))
   ipcMain.handle('launcher:account-active', (_e, opts) => {
     const current = readSettings()
     const res = launcher.accountSetActive({ id: (opts || {}).id, accounts: current.accounts, activeAccountId: current.activeAccountId })

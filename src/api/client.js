@@ -287,6 +287,21 @@ export async function refreshAccount({ id } = {}) {
   throw new Error(NEEDS_APP)
 }
 
+export async function skinRead(payload = {}) {
+  if (bridge?.skinRead) return bridge.skinRead(payload)
+  return { ok: false, error: NEEDS_APP }
+}
+
+export async function skinSave(payload = {}) {
+  if (bridge?.skinSave) return bridge.skinSave(payload)
+  return { ok: false, error: NEEDS_APP }
+}
+
+export async function skinRemove(payload = {}) {
+  if (bridge?.skinRemove) return bridge.skinRemove(payload)
+  return { ok: false, error: NEEDS_APP }
+}
+
 export async function resolveSkin({ uuid, name, provider } = {}) {
   if (bridge?.resolveSkin) return bridge.resolveSkin({ uuid, name, provider })
   return { ok: true, data: '' }

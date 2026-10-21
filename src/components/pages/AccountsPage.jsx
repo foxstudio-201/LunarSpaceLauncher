@@ -6,6 +6,7 @@ import PageHeader from '../ui/PageHeader'
 import HeadSkin from '../ui/HeadSkin'
 import AddAccountModal from '../accounts/AddAccountModal.jsx'
 import DiscordLinkModal from '../accounts/DiscordLinkModal.jsx'
+import SkinTab from '../accounts/SkinTab.jsx'
 import * as api from '../../api/client.js'
 
 const TYPE_LABELS = {
@@ -17,6 +18,8 @@ const TYPE_LABELS = {
 export default function AccountsPage({ theme, lang, accounts, activeAccountId, onAccountsChanged }) {
   const c = palette(theme)
   const [adding, setAdding] = useState(false)
+  const [tab, setTab] = useState('list')
+  const [skinWide, setSkinWide] = useState(false)
   const [error, setError] = useState('')
   const [flash, setFlash] = useState(null)
   const [refreshing, setRefreshing] = useState('')
@@ -109,9 +112,31 @@ export default function AccountsPage({ theme, lang, accounts, activeAccountId, o
   }
 
   const list = accounts || []
+  const wideView = tab === 'skin' && skinWide
+  const [heads, setHeads] = useState({})
+  const [headsVersion, setHeadsVersion] = useState(0)
+
+  useEffect(() => {
+    const targets = list.filter((account) => account.type === 'offline' && account.uuid)
+    if (!targets.length) {
+      setHeads({})
+      return undefined
+    }
+    let alive = true
+    Promise.all(targets.map(async (account) => {
+      const res = await api.skinRead({ uuid: account.uuid }).catch(() => null)
+      return [account.uuid, res?.ok ? res.skin || '' : '']
+    })).then((entries) => {
+      if (alive) setHeads(Object.fromEntries(entries))
+    })
+    return () => {
+      alive = false
+    }
+  }, [accounts, headsVersion])
 
   return (
     <div data-surface className="h-full flex flex-col overflow-hidden" style={{ background: c.bg }}>
+      {!wideView && (
       <PageHeader theme={theme} title={t(lang, 'accounts.title')} subtitle={t(lang, 'accounts.subtitle')}>
         {flash && (
           <span
@@ -127,14 +152,16 @@ export default function AccountsPage({ theme, lang, accounts, activeAccountId, o
         <span className="text-[10px] font-mono" style={{ color: c.faint }}>
           {list.length} {t(lang, 'files.items')}
         </span>
-        <button
-          onClick={() => openDiscord({ start: false })}
-          className="h-9 px-3 rounded-lg text-xs font-semibold flex items-center gap-2"
-          style={{ background: c.input, border: `1px solid ${c.border}`, color: c.text }}
-        >
-          <DiscordLogo size={14} weight="duotone" style={{ color: '#5865f2' }} />
-          {t(lang, 'discord.link')}
-        </button>
+        {tab === 'list' && (
+          <button
+            onClick={() => openDiscord({ start: false })}
+            className="h-9 px-3 rounded-lg text-xs font-semibold flex items-center gap-2"
+            style={{ background: c.input, border: `1px solid ${c.border}`, color: c.text }}
+          >
+            <DiscordLogo size={14} weight="duotone" style={{ color: '#5865f2' }} />
+            {t(lang, 'discord.link')}
+          </button>
+        )}
         <button
           onClick={() => { setAdding(true); setError('') }}
           className="h-9 px-3 rounded-lg text-xs font-semibold flex items-center gap-2"
@@ -144,8 +171,48 @@ export default function AccountsPage({ theme, lang, accounts, activeAccountId, o
           {t(lang, 'accounts.add')}
         </button>
       </PageHeader>
+      )}
 
-      <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4">
+      {!wideView && (
+      <div className="shrink-0 px-6 pt-3">
+        <div className="max-w-5xl mx-auto flex items-center gap-1.5">
+          {['list', 'skin'].map((key) => {
+            const active = tab === key
+            return (
+              <button
+                key={key}
+                onClick={() => { setTab(key); if (key !== 'skin') setSkinWide(false) }}
+                className="h-8 px-3 rounded-lg text-[11px] font-semibold transition-colors"
+                style={{
+                  background: active ? c.input : 'transparent',
+                  border: `1px solid ${active ? c.border : 'transparent'}`,
+                  color: active ? c.text : c.faint,
+                }}
+              >
+                {t(lang, `accounts.tab.${key}`)}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+      )}
+
+      <div className={tab === 'skin' ? 'flex-1 min-h-0 flex flex-col overflow-hidden' : 'hidden'}>
+        <SkinTab
+          theme={theme}
+          lang={lang}
+          accounts={list}
+          activeAccountId={activeAccountId}
+          heads={heads}
+          notify={notify}
+          visible={tab === 'skin'}
+          wide={skinWide}
+          onWideChange={setSkinWide}
+          onChanged={() => setHeadsVersion((value) => value + 1)}
+        />
+      </div>
+
+      <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4" style={{ display: tab === 'list' ? 'block' : 'none' }}>
         <div className="max-w-3xl mx-auto flex flex-col gap-3">
           <div className="flex items-start gap-2 px-3 py-2 rounded-lg text-[11px]" style={{ background: c.input, border: `1px solid ${c.border}`, color: c.label }}>
             <Info size={13} weight="duotone" style={{ color: c.accent, marginTop: 1 }} />
@@ -176,7 +243,7 @@ export default function AccountsPage({ theme, lang, accounts, activeAccountId, o
                     className="flex items-center gap-3 px-3.5 py-3"
                     style={{ borderTop: i === 0 ? 'none' : `1px solid ${c.border}` }}
                   >
-                    <HeadSkin name={account.name} uuid={account.uuid} type={account.type} size={40} radius={9} theme={theme} />
+                    <HeadSkin name={account.name} uuid={account.uuid} type={account.type} size={40} radius={9} theme={theme} customSkin={heads[account.uuid] || ''} />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <p className="text-xs font-bold truncate" style={{ color: c.text }}>{account.name}</p>

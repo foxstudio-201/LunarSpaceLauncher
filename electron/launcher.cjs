@@ -26,6 +26,7 @@ const profileExport = require('./mc/export.cjs')
 const serverpack = require('./mc/serverpack.cjs')
 const servertest = require('./mc/servertest.cjs')
 const serverlocal = require('./mc/serverlocal.cjs')
+const skins = require('./skins.cjs')
 const { ensureGameGpu } = require('./gpupref.cjs')
 
 let broadcast = () => {}
@@ -858,6 +859,21 @@ function accountAdd({ name, type, uuid: profileUuid, xuid, accounts, activeAccou
   return { ok: true, accounts: list, activeAccountId: activeAccountId || entry.id, added: entry }
 }
 
+function skinRead({ uuid, settings } = {}) {
+  const { shared } = storageFor(settings)
+  return skins.read({ shared, uuid })
+}
+
+function skinSave({ uuid, name, model, skin, cape, settings } = {}) {
+  const { shared } = storageFor(settings)
+  return skins.save({ shared, uuid, name, model, skin, cape })
+}
+
+function skinRemove({ uuid, settings } = {}) {
+  const { shared } = storageFor(settings)
+  return skins.remove({ shared, uuid })
+}
+
 function accountRemove({ id, accounts, activeAccountId } = {}) {
   const list = (Array.isArray(accounts) ? accounts : []).filter((a) => a.id !== id)
   const active = activeAccountId === id ? list[0]?.id || null : activeAccountId
@@ -1407,6 +1423,9 @@ async function runLaunch({ id, username, demo: demoOverride, quickPlay, settings
     emit?.({ type: 'log', id: entry.id, line })
   }
   const userJvm = entry.jvmArgs ? entry.jvmArgs.split(/\s+/).filter(Boolean) : []
+  const skin = account?.type === 'offline' && account.uuid && skins.customSync(paths.shared, account.uuid)
+    ? { dir: skins.dirFor(paths.shared), uuid: account.uuid, name: account.name, model: skins.modelSync(paths.shared, account.uuid) }
+    : null
   const { args, pathFix } = buildLaunch({
     chain,
     paths,
@@ -1419,6 +1438,7 @@ async function runLaunch({ id, username, demo: demoOverride, quickPlay, settings
     auth,
     demo,
     quickPlay,
+    skin,
   })
 
   logs.set(id, [])
@@ -3400,6 +3420,9 @@ module.exports = {
   moveEntry,
   accountsList,
   accountAdd,
+  skinRead,
+  skinSave,
+  skinRemove,
   changeLoaderVersion,
   reinstallLoader,
   accountRemove,

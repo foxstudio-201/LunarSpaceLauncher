@@ -34,22 +34,23 @@ function CropHead({ skin, size }) {
   return <canvas ref={ref} style={{ width: size, height: size, imageRendering: 'pixelated', display: 'block' }} />
 }
 
-export default function HeadSkin({ name, uuid, type, size = 32, radius = 8, theme = 'dark', style }) {
+export default function HeadSkin({ name, uuid, type, size = 32, radius = 8, theme = 'dark', style, customSkin }) {
   const username = String(name || '').trim()
   const key = `${providerOf(type)}|${uuid || ''}|${username.toLowerCase()}`
-  const [skin, setSkin] = useState(() => memory.get(key) || '')
+  const [remote, setRemote] = useState(() => memory.get(key) || '')
   const [idx, setIdx] = useState(0)
 
   useEffect(() => {
+    if (customSkin) return undefined
     const cached = memory.get(key)
     if (cached !== undefined) {
-      setSkin(cached)
+      setRemote(cached)
       setIdx(0)
       return undefined
     }
     if (!uuid && !username) {
       memory.set(key, '')
-      setSkin('')
+      setRemote('')
       return undefined
     }
     let alive = true
@@ -59,7 +60,7 @@ export default function HeadSkin({ name, uuid, type, size = 32, radius = 8, them
         const next = res?.data || ''
         memory.set(key, next)
         if (alive) {
-          setSkin(next)
+          setRemote(next)
           setIdx(0)
         }
       })
@@ -67,7 +68,9 @@ export default function HeadSkin({ name, uuid, type, size = 32, radius = 8, them
     return () => {
       alive = false
     }
-  }, [key, uuid, username, type])
+  }, [key, uuid, username, type, customSkin])
+
+  const skin = customSkin || remote
 
   const sources = []
   if (skin) sources.push({ skin })
