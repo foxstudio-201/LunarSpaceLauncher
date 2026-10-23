@@ -8,7 +8,6 @@ import {
   CaretRight,
   Check,
   CornersIn,
-  CornersOut,
   Drop,
   Eraser,
   Eye,
@@ -77,7 +76,7 @@ function canvasBlank(canvas) {
   return true
 }
 
-export default function SkinTab({ theme, lang, accounts, activeAccountId, heads = {}, notify, onChanged, visible = true, wide = false, onWideChange }) {
+export default function SkinTab({ theme, lang, accounts, activeAccountId, heads = {}, notify, onChanged, visible = true, onClose }) {
   const c = palette(theme)
   const offline = useMemo(() => (accounts || []).filter((account) => account.type === 'offline'), [accounts])
   const [selectedId, setSelectedId] = useState('')
@@ -118,18 +117,8 @@ export default function SkinTab({ theme, lang, accounts, activeAccountId, heads 
   const skinFileRef = useRef(null)
   const capeFileRef = useRef(null)
   const historyRef = useRef({ skin: [], cape: [], redo: { skin: [], cape: [] } })
-  const layoutDataRef = useRef({ skin: null, cape: null })
 
   const canvasFor = useCallback((key) => (key === 'cape' ? capeCanvasRef.current : skinCanvasRef.current), [])
-
-  const captureLayoutData = useCallback(() => {
-    const skin = skinCanvasRef.current
-    const cape = capeCanvasRef.current
-    layoutDataRef.current = {
-      skin: skin ? skin.toDataURL('image/png') : null,
-      cape: cape ? cape.toDataURL('image/png') : null,
-    }
-  }, [])
 
   useEffect(() => {
     if (!selectedId && offline[0]) setSelectedId(offline[0].id)
@@ -172,16 +161,6 @@ export default function SkinTab({ theme, lang, accounts, activeAccountId, heads 
     const timer = setTimeout(() => setFlash(''), 2600)
     return () => clearTimeout(timer)
   }, [flash])
-
-  useEffect(() => {
-    if (wide) {
-      setToolsOpen(true)
-      setColorsOpen(true)
-    }
-    const data = layoutDataRef.current
-    if (data.skin) paintImage(skinCanvasRef.current, data.skin, 64, 64, () => setTextureVersion((value) => value + 1))
-    if (data.cape) paintImage(capeCanvasRef.current, data.cape, 64, 32, () => setTextureVersion((value) => value + 1))
-  }, [wide])
 
   useEffect(() => {
     if (!visible) return undefined
@@ -506,25 +485,6 @@ export default function SkinTab({ theme, lang, accounts, activeAccountId, heads 
           })}
         </div>
 
-        {!wide && (
-          <div className="mb-4">
-            <label className="block text-[10px] font-bold uppercase tracking-wide mb-1.5" style={{ color: c.faint }}>{t(lang, 'accounts.skin.model')}</label>
-            <Select
-              theme={theme}
-              value={model}
-              onChange={setModel}
-              options={[
-                { value: 'classic', label: t(lang, 'accounts.skin.model.classic') },
-                { value: 'slim', label: t(lang, 'accounts.skin.model.slim') },
-              ]}
-            />
-          </div>
-        )}
-
-                {!wide && layerNode}
-
-        {!wide && partsNode}
-
         {selected && !active && (
           <div className="flex items-start gap-2 px-2.5 py-2 rounded-lg text-[10px] mb-3" style={{ background: c.input, color: c.label, border: `1px solid ${c.border}` }}>
             <Info size={12} weight="duotone" style={{ color: c.accent, marginTop: 1 }} />
@@ -676,7 +636,6 @@ export default function SkinTab({ theme, lang, accounts, activeAccountId, heads 
               />
   )
 
-  if (wide) {
     return (
       <div className="flex-1 min-h-0 flex flex-col overflow-hidden" style={{ background: c.bg }}>
         <div className="shrink-0 flex items-center gap-2 pl-8 pr-3 py-2 flex-wrap" style={{ borderBottom: `1px solid ${c.border}`, background: c.surface }}>
@@ -699,12 +658,12 @@ export default function SkinTab({ theme, lang, accounts, activeAccountId, heads 
           </div>
           <button
             type="button"
-            onClick={() => { captureLayoutData(); onWideChange?.(false) }}
+            onClick={() => onClose?.()}
             className="h-8 px-2.5 rounded-lg text-[10px] font-semibold flex items-center gap-1.5"
             style={{ background: c.input, color: c.text, border: `1px solid ${c.border}` }}
           >
             <CornersIn size={14} />
-            {t(lang, 'accounts.skin.view.collapse')}
+            {t(lang, 'accounts.skin.backToList')}
           </button>
         </div>
 
@@ -734,6 +693,7 @@ export default function SkinTab({ theme, lang, accounts, activeAccountId, heads 
                 brushSize={brushSize}
                 brushSoft={brushSoft}
                 loupeRight={colorsOpen ? 238 : 12}
+                gizmoLeft={toolsOpen ? 306 : 12}
                 version={textureVersion}
                 onStrokeStart={handleStrokeStart}
                 onStrokeEnd={handleStrokeEnd}
@@ -878,100 +838,3 @@ export default function SkinTab({ theme, lang, accounts, activeAccountId, heads 
       </div>
     )
   }
-
-  return (
-    <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
-      <aside className="w-full lg:w-[286px] shrink-0 overflow-y-auto px-4 py-4" style={{ borderRight: `1px solid ${c.border}`, background: c.bg }}>
-        {settingsNode}
-      </aside>
-
-      <main className="flex-1 min-w-0 overflow-y-auto px-4 py-4 lg:px-6">
-        <div className="flex items-center gap-2 mb-3 flex-wrap">
-          <div className="min-w-0 flex-1">
-            <div className="text-sm font-bold truncate" style={{ color: c.text }}>{selected?.name || '—'}</div>
-            <div className="text-[10px]" style={{ color: c.label }}>{t(lang, 'accounts.skin.subtitle')}</div>
-          </div>
-          <div className="flex gap-0.5 p-0.5 rounded-lg" style={{ background: c.input, border: `1px solid ${c.border}` }}>
-            {['draw', 'upload'].map((item) => (
-              <button
-                key={item}
-                type="button"
-                onClick={() => setMode(item)}
-                className="h-7 px-2.5 rounded-md text-[10px] font-semibold"
-                style={{ background: mode === item ? c.accent : 'transparent', color: mode === item ? c.ink : c.label }}
-              >
-                {t(lang, item === 'draw' ? 'accounts.skin.mode.draw' : 'accounts.skin.mode.upload')}
-              </button>
-            ))}
-          </div>
-          <button
-            type="button"
-            data-tip={t(lang, 'accounts.skin.view.expand')}
-            onClick={() => { captureLayoutData(); onWideChange?.(true) }}
-            className="h-8 px-2.5 rounded-lg text-[10px] font-semibold flex items-center gap-1.5"
-            style={{ background: c.input, color: c.text, border: `1px solid ${c.border}` }}
-          >
-            <CornersOut size={14} />
-            {t(lang, 'accounts.skin.view.expand')}
-          </button>
-        </div>
-
-        {mode === 'upload' ? uploadNode : (
-          <>
-            {assetTabsNode}
-            <div className="mb-3 overflow-x-auto">{toolbarNode}</div>
-            <div className="flex flex-col lg:flex-row gap-3 items-start">
-              <div className="flex-1 min-w-0 w-full">
-                <SkinViewer3D
-                  theme={theme}
-                  lang={lang}
-                  skinCanvasRef={skinCanvasRef}
-                  capeCanvasRef={capeCanvasRef}
-                  model={model}
-                  asset={asset}
-                  paintLayer={paintLayer}
-                  outerVisible={outerVisible}
-                  hiddenParts={hiddenParts}
-                  showGrid={modelGrid}
-                  tool={tool}
-                  color={color}
-                  alpha={alpha}
-                  mirrorMode={mirrorMode}
-                  brushSize={brushSize}
-                  brushSoft={brushSoft}
-                  version={textureVersion}
-                  onStrokeStart={handleStrokeStart}
-                  onStrokeEnd={handleStrokeEnd}
-                  onPick={handlePick}
-                />
-              </div>
-              {colorPanelNode}
-
-            </div>
-          </>
-        )}
-
-        <input ref={skinFileRef} type="file" accept="image/png" style={{ display: 'none' }} onChange={(event) => { upload(event.target.files?.[0], 'skin'); event.target.value = '' }} />
-        <input ref={capeFileRef} type="file" accept="image/png" style={{ display: 'none' }} onChange={(event) => { upload(event.target.files?.[0], 'cape'); event.target.value = '' }} />
-      </main>
-
-      <div style={{ display: 'none' }}>
-        <canvas ref={skinCanvasRef} width={64} height={64} />
-        <canvas ref={capeCanvasRef} width={64} height={32} />
-      </div>
-
-      <ConfirmModal
-        theme={theme}
-        lang={lang}
-        open={resetAsk}
-        title={t(lang, 'accounts.skin.reset')}
-        message={t(lang, 'accounts.skin.resetAsk')}
-        confirmLabel={t(lang, 'accounts.skin.resetYes')}
-        cancelLabel={t(lang, 'accounts.skin.cancel')}
-        busy={resetting}
-        onCancel={() => setResetAsk(false)}
-        onConfirm={reset}
-      />
-    </div>
-  )
-}

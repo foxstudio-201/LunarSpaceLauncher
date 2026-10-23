@@ -666,3 +666,9 @@ html[data-wiping] * {
 }
 .md-body summary { cursor: pointer; font-weight: 600; }
 .md-body font { font-size: inherit; }
+
+.skin-gizmo g[role='button'] { outline: none; }
+.skin-gizmo g[role='button']:focus-visible .gizmo-ball {
+  stroke: #ffffff;
+  stroke-width: 2.4;
+}

@@ -19,7 +19,6 @@ export default function AccountsPage({ theme, lang, accounts, activeAccountId, o
   const c = palette(theme)
   const [adding, setAdding] = useState(false)
   const [tab, setTab] = useState('list')
-  const [skinWide, setSkinWide] = useState(false)
   const [error, setError] = useState('')
   const [flash, setFlash] = useState(null)
   const [refreshing, setRefreshing] = useState('')
@@ -112,7 +111,7 @@ export default function AccountsPage({ theme, lang, accounts, activeAccountId, o
   }
 
   const list = accounts || []
-  const wideView = tab === 'skin' && skinWide
+  const wideView = tab === 'skin'
   const [heads, setHeads] = useState({})
   const [headsVersion, setHeadsVersion] = useState(0)
 
@@ -181,7 +180,7 @@ export default function AccountsPage({ theme, lang, accounts, activeAccountId, o
             return (
               <button
                 key={key}
-                onClick={() => { setTab(key); if (key !== 'skin') setSkinWide(false) }}
+                onClick={() => setTab(key)}
                 className="h-8 px-3 rounded-lg text-[11px] font-semibold transition-colors"
                 style={{
                   background: active ? c.input : 'transparent',
@@ -206,8 +205,7 @@ export default function AccountsPage({ theme, lang, accounts, activeAccountId, o
           heads={heads}
           notify={notify}
           visible={tab === 'skin'}
-          wide={skinWide}
-          onWideChange={setSkinWide}
+          onClose={() => setTab('list')}
           onChanged={() => setHeadsVersion((value) => value + 1)}
         />
       </div>

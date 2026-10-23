@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import * as THREE from 'three'
-import { ArrowCounterClockwise, CaretDown, CaretLeft, CaretRight, CaretUp, Cube, Warning } from '@phosphor-icons/react'
+import { ArrowCounterClockwise, Warning } from '@phosphor-icons/react'
 import { palette } from '../../lib/palette'
 import { t } from '../../i18n/translations'
 import { rgbaCss, rgbToHex } from './skinColor'
@@ -13,7 +12,28 @@ const MAX_ZOOM = 2.6
 const HALF_PI = Math.PI / 2
 const LOUPE_SIZE = 164
 const LOUPE_SPAN = 16
+const GIZMO_SIZE = 132
+const GIZMO_CENTER = GIZMO_SIZE / 2
+const GIZMO_RADIUS = 42
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value))
+
+const AXIS_DOTS = [
+  { key: '+X', label: 'X', color: '#ef5350', vector: [1, 0, 0], hint: 'accounts.skin.view.dir.right' },
+  { key: '-X', label: '−X', color: '#ef5350', vector: [-1, 0, 0], hint: 'accounts.skin.view.dir.left' },
+  { key: '+Y', label: 'Y', color: '#4ade80', vector: [0, 1, 0], hint: 'accounts.skin.view.dir.top' },
+  { key: '-Y', label: '−Y', color: '#4ade80', vector: [0, -1, 0], hint: 'accounts.skin.view.dir.bottom' },
+  { key: '+Z', label: 'Z', color: '#60a5fa', vector: [0, 0, 1], hint: 'accounts.skin.view.dir.front' },
+  { key: '-Z', label: '−Z', color: '#60a5fa', vector: [0, 0, -1], hint: 'accounts.skin.view.dir.back' },
+]
+
+const AXIS_VIEWS = {
+  '+X': { yaw: -HALF_PI, pitch: 0 },
+  '-X': { yaw: HALF_PI, pitch: 0 },
+  '+Y': { yaw: 0, pitch: HALF_PI },
+  '-Y': { yaw: 0, pitch: -HALF_PI },
+  '+Z': { yaw: 0, pitch: 0 },
+  '-Z': { yaw: Math.PI, pitch: 0 },
+}
 
 function faceRects(u, v, width, height, depth) {
   return [
@@ -149,14 +169,14 @@ export default function SkinViewer3D({
   fill = false,
   wide = false,
   loupeRight = 12,
+  gizmoLeft = 12,
 }) {
   const c = palette(theme)
   const hostRef = useRef(null)
   const overlayRef = useRef(null)
   const stateRef = useRef(null)
-  const angleRef = useRef(null)
-  const [angleOpen, setAngleOpen] = useState(false)
-  const [anglePos, setAnglePos] = useState(null)
+  const gizmoBallsRef = useRef({})
+  const gizmoLinesRef = useRef({})
   const propsRef = useRef({})
   propsRef.current = { theme, lang, model, asset, paintLayer, outerVisible, hiddenParts, showGrid, brushSize, brushSoft, tool, color, alpha, mirrorMode, onStrokeStart, onStrokeEnd, onPick, wide, loupeRight }
   const [failed, setFailed] = useState(false)
@@ -606,6 +626,68 @@ export default function SkinViewer3D({
       if (current.wide) drawLoupe(ctx, hit)
     }
 
+    const updateGizmo = () => {
+      const balls = gizmoBallsRef.current
+      const lines = gizmoLinesRef.current
+      const center = GIZMO_CENTER
+      const radius = GIZMO_RADIUS
+      const cp = Math.cos(state.pitch)
+      const sp = Math.sin(state.pitch)
+      const cy = Math.cos(state.yaw)
+      const sy = Math.sin(state.yaw)
+      const positions = {}
+      for (const dot of AXIS_DOTS) {
+        const [x, y, z] = dot.vector
+        const y1 = y * cp - z * sp
+        const z1 = y * sp + z * cp
+        const x2 = x * cy + z1 * sy
+        const z2 = -x * sy + z1 * cy
+        positions[dot.key] = { x: center + x2 * radius, y: center - y1 * radius, z: z2 }
+      }
+      const wrapped = new Set()
+      const squeezed = new Set()
+      for (const [posKey, negKey] of [['+X', '-X'], ['+Y', '-Y'], ['+Z', '-Z']]) {
+        const a = positions[posKey]
+        const b = positions[negKey]
+        if (Math.hypot(a.x - b.x, a.y - b.y) >= 22) continue
+        const nearKey = a.z >= b.z ? posKey : negKey
+        wrapped.add(nearKey === posKey ? negKey : posKey)
+        squeezed.add(nearKey)
+      }
+      for (const dot of AXIS_DOTS) {
+        const pos = positions[dot.key]
+        const node = balls[dot.key]
+        if (!node) continue
+        node.style.opacity = String(0.6 + ((pos.z + 1) / 2) * 0.4)
+        const ball = node.querySelector('.gizmo-ball')
+        const hit = node.querySelector('.gizmo-hit')
+        const ring = node.querySelector('.gizmo-ring')
+        const label = node.querySelector('.gizmo-label')
+        const isWrapped = wrapped.has(dot.key)
+        const isSqueezed = squeezed.has(dot.key)
+        if (ball) {
+          ball.setAttribute('r', isWrapped ? '13.5' : dot.label.length > 1 ? '9.5' : '10.5')
+          ball.setAttribute('fill', isWrapped ? 'none' : dot.color)
+          ball.setAttribute('stroke', isWrapped ? dot.color : 'rgba(4,8,12,0.35)')
+          ball.setAttribute('stroke-width', isWrapped ? '2.2' : '1')
+        }
+        if (hit) {
+          hit.setAttribute('r', isWrapped ? '0' : isSqueezed ? '11' : '16')
+          hit.setAttribute('fill', isWrapped ? 'none' : 'transparent')
+        }
+        if (ring) ring.setAttribute('pointer-events', isWrapped ? 'stroke' : 'none')
+        if (label) label.setAttribute('opacity', isWrapped ? '0' : '1')
+        node.setAttribute('transform', `translate(${pos.x.toFixed(1)} ${pos.y.toFixed(1)})`)
+      }
+      for (const axis of ['X', 'Y', 'Z']) {
+        const line = lines[axis]
+        const end = positions[`+${axis}`]
+        if (!line || !end) continue
+        line.setAttribute('x2', end.x.toFixed(1))
+        line.setAttribute('y2', end.y.toFixed(1))
+      }
+    }
+
     const renderFrame = () => {
       state.frame = 0
       if (state.disposed) return
@@ -625,6 +707,7 @@ export default function SkinViewer3D({
       state.grids.forEach((grid) => { grid.visible = !!current.showGrid })
       state.scene.updateMatrixWorld(true)
       renderer.render(scene, camera)
+      updateGizmo()
       drawHover()
     }
 
@@ -961,9 +1044,6 @@ export default function SkinViewer3D({
       if (state.tilt) state.tilt.rotation.x = state.pitch
       requestRender()
     }
-    state.nudgeView = (yaw, pitch) => {
-      state.applyView(state.yaw + yaw, state.pitch + pitch)
-    }
     state.available = true
     setFailed(false)
 
@@ -1023,126 +1103,12 @@ export default function SkinViewer3D({
     stateRef.current?.resetView?.()
   }
 
-  const applyView = (yaw, pitch) => {
-    stateRef.current?.applyView?.(yaw, pitch)
+  const snapView = (key) => {
+    const view = AXIS_VIEWS[key]
+    if (view) stateRef.current?.applyView?.(view.yaw, view.pitch)
   }
 
-  const nudgeView = (yaw, pitch) => {
-    stateRef.current?.nudgeView?.(yaw, pitch)
-  }
-
-  const openAngle = () => {
-    const el = angleRef.current
-    if (!el) return
-    const box = el.getBoundingClientRect()
-    const width = 252
-    const height = 266
-    const left = Math.max(8, Math.min(box.left + box.width / 2 - width / 2, window.innerWidth - width - 8))
-    const top = window.innerHeight - box.bottom < height + 14
-      ? Math.max(8, box.top - height - 8)
-      : box.bottom + 8
-    setAnglePos({ left, top })
-    setAngleOpen(true)
-  }
-
-  const angleAxes = [
-    {
-      label: t(lang, 'accounts.skin.view.axisX'),
-      color: '#f87171',
-      options: [
-        { key: '−X', hint: t(lang, 'accounts.skin.view.dir.left'), yaw: HALF_PI, pitch: 0 },
-        { key: '+X', hint: t(lang, 'accounts.skin.view.dir.right'), yaw: -HALF_PI, pitch: 0 },
-      ],
-    },
-    {
-      label: t(lang, 'accounts.skin.view.axisY'),
-      color: '#4ade80',
-      options: [
-        { key: '−Y', hint: t(lang, 'accounts.skin.view.dir.bottom'), yaw: 0, pitch: -HALF_PI },
-        { key: '+Y', hint: t(lang, 'accounts.skin.view.dir.top'), yaw: 0, pitch: HALF_PI },
-      ],
-    },
-    {
-      label: t(lang, 'accounts.skin.view.axisZ'),
-      color: '#60a5fa',
-      options: [
-        { key: '−Z', hint: t(lang, 'accounts.skin.view.dir.back'), yaw: Math.PI, pitch: 0 },
-        { key: '+Z', hint: t(lang, 'accounts.skin.view.dir.front'), yaw: 0, pitch: 0 },
-      ],
-    },
-  ]
-
-  const nudgeButton = (icon, yaw, pitch, tip) => (
-    <button
-      type="button"
-      data-tip={tip}
-      onClick={() => nudgeView(yaw, pitch)}
-      className="w-full h-7 rounded-md flex items-center justify-center"
-      style={{ background: c.input, color: c.label, border: `1px solid ${c.border}` }}
-    >
-      {icon}
-    </button>
-  )
-
-  const angleMenu = angleOpen && anglePos && createPortal(
-    <>
-      <div className="fixed inset-0" style={{ zIndex: 9998 }} onClick={() => setAngleOpen(false)} />
-      <div
-        className="fixed rounded-xl"
-        style={{ left: anglePos.left, top: anglePos.top, width: 252, zIndex: 9999, background: c.surface, border: `1px solid ${c.border}`, boxShadow: '0 16px 40px rgba(0,0,0,0.45)' }}
-      >
-        <div className="flex items-center justify-between px-3 pt-2.5 pb-1.5">
-          <span className="text-[10px] font-bold uppercase tracking-wide" style={{ color: c.faint }}>{t(lang, 'accounts.skin.view.angle')}</span>
-          <span className="flex items-center gap-1.5">
-            {angleAxes.map((axis) => (
-              <span key={axis.label} className="text-[9px] font-mono font-bold" style={{ color: axis.color }}>{axis.label.replace(/[^XYZ]/g, '')}</span>
-            ))}
-          </span>
-        </div>
-        <div className="px-3 pb-3">
-          <div className="mx-auto grid grid-cols-3 gap-1" style={{ width: 108 }}>
-            <span />
-            {nudgeButton(<CaretUp size={13} weight="bold" />, 0, Math.PI / 18, t(lang, 'accounts.skin.view.tiltUp'))}
-            <span />
-            {nudgeButton(<CaretLeft size={13} weight="bold" />, -Math.PI / 12, 0, t(lang, 'accounts.skin.view.rotateLeft'))}
-            <button
-              type="button"
-              data-tip={t(lang, 'accounts.skin.view.reset')}
-              onClick={resetView}
-              className="w-full h-7 rounded-md flex items-center justify-center"
-              style={{ background: c.input, color: c.accent, border: `1px solid ${c.border}` }}
-            >
-              <ArrowCounterClockwise size={13} weight="bold" />
-            </button>
-            {nudgeButton(<CaretRight size={13} weight="bold" />, Math.PI / 12, 0, t(lang, 'accounts.skin.view.rotateRight'))}
-            <span />
-            {nudgeButton(<CaretDown size={13} weight="bold" />, 0, -Math.PI / 18, t(lang, 'accounts.skin.view.tiltDown'))}
-            <span />
-          </div>
-          <div className="mt-3 flex flex-col gap-1.5">
-            {angleAxes.map((axis) => (
-              <div key={axis.label} className="flex items-center gap-1.5">
-                <span className="w-[40px] shrink-0 text-[9px] font-bold uppercase tracking-wide" style={{ color: axis.color }}>{axis.label}</span>
-                {axis.options.map((option) => (
-                  <button
-                    key={option.key}
-                    type="button"
-                    onClick={() => { applyView(option.yaw, option.pitch); setAngleOpen(false) }}
-                    className="flex-1 h-8 rounded-md flex items-center justify-center gap-1.5"
-                    style={{ background: c.input, border: `1px solid ${c.border}`, color: c.text }}
-                  >
-                    <span className="font-mono text-[11px] font-bold" style={{ color: axis.color }}>{option.key}</span>
-                    <span className="text-[9px]" style={{ color: c.faint }}>{option.hint}</span>
-                  </button>
-                ))}
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </>,
-    document.body,
-  )
+  const axisTitle = (dot) => `${dot.label} · ${t(lang, dot.hint)}`
 
   return (
     <div
@@ -1155,18 +1121,38 @@ export default function SkinViewer3D({
       }}
     >
       <canvas ref={overlayRef} className="absolute inset-0 pointer-events-none" style={{ zIndex: 2 }} />
+      <div className="absolute" style={{ ...(wide ? { left: gizmoLeft, bottom: 10 } : {}), zIndex: 3, display: wide ? 'block' : 'none' }}>
+        <svg className="skin-gizmo" width={GIZMO_SIZE} height={GIZMO_SIZE} viewBox={`0 0 ${GIZMO_SIZE} ${GIZMO_SIZE}`} role="group" aria-label={t(lang, 'accounts.skin.view.angle')} style={{ display: 'block' }}>
+          <g strokeWidth="2.4" strokeLinecap="round" opacity="0.62">
+            <line ref={(el) => { gizmoLinesRef.current.X = el }} x1={GIZMO_CENTER} y1={GIZMO_CENTER} x2={GIZMO_CENTER} y2={GIZMO_CENTER} stroke="#ef5350" />
+            <line ref={(el) => { gizmoLinesRef.current.Y = el }} x1={GIZMO_CENTER} y1={GIZMO_CENTER} x2={GIZMO_CENTER} y2={GIZMO_CENTER} stroke="#4ade80" />
+            <line ref={(el) => { gizmoLinesRef.current.Z = el }} x1={GIZMO_CENTER} y1={GIZMO_CENTER} x2={GIZMO_CENTER} y2={GIZMO_CENTER} stroke="#60a5fa" />
+          </g>
+          {AXIS_DOTS.map((dot) => (
+            <g
+              key={dot.key}
+              ref={(el) => { gizmoBallsRef.current[dot.key] = el }}
+              role="button"
+              tabIndex={0}
+              aria-label={axisTitle(dot)}
+              onClick={() => snapView(dot.key)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  snapView(dot.key)
+                }
+              }}
+              style={{ cursor: 'pointer' }}
+            >
+              <circle className="gizmo-hit" r="16" fill="transparent" />
+              <circle className="gizmo-ring" r="14.5" fill="none" stroke="transparent" strokeWidth="10" />
+              <circle className="gizmo-ball" r={dot.label.length > 1 ? 9.5 : 10.5} fill={dot.color} stroke="rgba(4,8,12,0.35)" strokeWidth="1" />
+              <text className="gizmo-label" y="0.5" textAnchor="middle" dominantBaseline="middle" fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace" fontSize={dot.label.length > 1 ? 7.5 : 9} fontWeight="700" fill="#0a1016">{dot.label}</text>
+            </g>
+          ))}
+        </svg>
+      </div>
       <div className={`absolute top-2.5 flex items-center gap-1.5 ${wide ? 'left-1/2 -translate-x-1/2' : 'right-2.5'}`} style={{ zIndex: 3 }}>
-        <button
-          ref={angleRef}
-          type="button"
-          onClick={() => (angleOpen ? setAngleOpen(false) : openAngle())}
-          data-tip={t(lang, 'accounts.skin.view.angle')}
-          aria-expanded={angleOpen}
-          className="w-8 h-8 rounded-lg flex items-center justify-center"
-          style={{ background: 'rgba(255,255,255,0.88)', border: `1px solid ${angleOpen ? c.accent : c.border}`, color: angleOpen ? c.accent : '#1f2937', backdropFilter: 'blur(6px)' }}
-        >
-          <Cube size={15} weight="bold" />
-        </button>
         <button
           type="button"
           onClick={resetView}
@@ -1177,7 +1163,6 @@ export default function SkinViewer3D({
           <ArrowCounterClockwise size={15} weight="bold" />
         </button>
       </div>
-      {angleMenu}
       {!wide && (
       <div
         className="absolute bottom-2.5 left-2.5 text-[9px] font-mono px-2 py-1 rounded-md pointer-events-none"
