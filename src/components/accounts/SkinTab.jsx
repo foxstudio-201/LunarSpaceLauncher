@@ -324,9 +324,11 @@ export default function SkinTab({ theme, lang, accounts, activeAccountId, heads 
       const cape = canvasBlank(capeCanvasRef.current) ? null : capeCanvasRef.current.toDataURL('image/png')
       const res = await api.skinSave({ uuid: selected.uuid, name: selected.name, model, skin, cape })
       if (!res?.ok) throw new Error(res?.error || 'save failed')
+      const savedKey = res.shared ? 'accounts.skin.savedShared' : 'accounts.skin.savedLocal'
+      const savedText = t(lang, savedKey).replace('{name}', selected.name)
       setTouched({ skin: false, cape: false })
-      setFlash(t(lang, 'accounts.skin.saved').replace('{name}', selected.name))
-      notify?.(t(lang, 'accounts.skin.saved').replace('{name}', selected.name))
+      setFlash(savedText)
+      notify?.(savedText)
       onChanged?.()
       setTextureVersion((value) => value + 1)
     } catch (err) {

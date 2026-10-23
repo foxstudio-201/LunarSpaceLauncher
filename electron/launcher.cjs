@@ -27,6 +27,7 @@ const serverpack = require('./mc/serverpack.cjs')
 const servertest = require('./mc/servertest.cjs')
 const serverlocal = require('./mc/serverlocal.cjs')
 const skins = require('./skins.cjs')
+const skinshare = require('./skinshare.cjs')
 const { ensureGameGpu } = require('./gpupref.cjs')
 
 let broadcast = () => {}
@@ -864,14 +865,23 @@ function skinRead({ uuid, settings } = {}) {
   return skins.read({ shared, uuid })
 }
 
-function skinSave({ uuid, name, model, skin, cape, settings } = {}) {
+async function skinSave({ uuid, name, model, skin, cape, settings } = {}) {
   const { shared } = storageFor(settings)
-  return skins.save({ shared, uuid, name, model, skin, cape })
+  const res = await skins.save({ shared, uuid, name, model, skin, cape })
+  if (!res.ok) return res
+  const share = await skinshare.share({ uuid, name: res.name || name, model: res.model, skin: res.skin, cape: res.cape })
+  return { ...res, shared: share.ok, shareError: share.ok ? '' : share.error }
 }
 
-function skinRemove({ uuid, settings } = {}) {
+async function skinRemove({ uuid, settings } = {}) {
   const { shared } = storageFor(settings)
-  return skins.remove({ shared, uuid })
+  const before = await skins.read({ shared, uuid })
+  const res = await skins.remove({ shared, uuid })
+  if (res.ok && before.ok && before.name) {
+    const share = await skinshare.share({ uuid: before.uuid, name: before.name, model: before.model, skin: null, cape: null })
+    return { ...res, shared: share.ok, shareError: share.ok ? '' : share.error }
+  }
+  return res
 }
 
 function accountRemove({ id, accounts, activeAccountId } = {}) {
@@ -1426,6 +1436,16 @@ async function runLaunch({ id, username, demo: demoOverride, quickPlay, settings
   const skin = account?.type === 'offline' && account.uuid && skins.customSync(paths.shared, account.uuid)
     ? { dir: skins.dirFor(paths.shared), uuid: account.uuid, name: account.name, model: skins.modelSync(paths.shared, account.uuid) }
     : null
+  if (skin) {
+    skins.read({ shared: paths.shared, uuid: account.uuid })
+      .then((data) => {
+        if (data?.ok && (data.skin || data.cape)) {
+          return skinshare.share({ uuid: account.uuid, name: account.name, model: data.model, skin: data.skin, cape: data.cape })
+        }
+        return null
+      })
+      .catch(() => {})
+  }
   const { args, pathFix } = buildLaunch({
     chain,
     paths,
