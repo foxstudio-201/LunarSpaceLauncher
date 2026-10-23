@@ -391,6 +391,7 @@ function registerIpc() {
   ipcMain.handle('update:check', () => ({ ...updater.check() }))
   ipcMain.handle('update:download', () => ({ ...updater.download() }))
   ipcMain.handle('update:install', () => ({ ...updater.install() }))
+  ipcMain.handle('update:auto-apply', (_e, opts) => ({ ...updater.setAutoApply(opts?.auto) }))
   ipcMain.handle('update:release-notes', (_e, opts) => updater.releaseNotes(opts || {}))
   ipcMain.handle('update:whats-new', () => {
     const current = app.getVersion()

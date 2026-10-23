@@ -159,6 +159,7 @@ export default function SettingsPage({ theme, lang, version, system, storage, on
       return vn(lang, `Đang tải v${upd.version} · ${Math.round(upd.percent || 0)}%${size}`, `Downloading v${upd.version} · ${Math.round(upd.percent || 0)}%${size}`)
     }
     if (updateState === 'ready') return vn(lang, `Đã tải v${upd.version} — sẽ tự cài khi bạn thoát launcher.`, `v${upd.version} downloaded — installs when you quit the launcher.`)
+    if (updateState === 'installing') return vn(lang, 'Đang cài bản cập nhật và khởi động lại…', 'Installing update and restarting…')
     if (updateState === 'error') return upd.error || vn(lang, 'Cập nhật lỗi.', 'Update failed.')
     if (updateState === 'current') return vn(lang, 'Bạn đang dùng bản mới nhất.', 'You are on the latest version.')
     return vn(lang, 'Chưa kiểm tra.', 'Not checked yet.')

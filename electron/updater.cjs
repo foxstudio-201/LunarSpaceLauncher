@@ -12,7 +12,8 @@ try {
 }
 
 const CHECK_EVERY_MS = 30 * 60 * 1000
-const BOOT_DELAY_MS = 12 * 1000
+const BOOT_DELAY_MS = 400
+const AUTO_INSTALL_DELAY_MS = 800
 
 const state = {
   enabled: true,
@@ -31,7 +32,9 @@ const state = {
 let emit = () => {}
 let timer = null
 let bootTimer = null
+let autoTimer = null
 let installing = false
+let autoApply = false
 
 function snapshot() {
   return { ...state }
@@ -71,6 +74,7 @@ function attach() {
     if (state.enabled) download()
   })
   updater.on('update-not-available', () => {
+    autoApply = false
     setState({ phase: 'current', version: '', checkedAt: new Date().toISOString(), error: '' }, { event: 'current' })
   })
   updater.on('download-progress', (p) => {
@@ -85,9 +89,20 @@ function attach() {
     )
   })
   updater.on('update-downloaded', (info) => {
-    setState({ phase: 'ready', version: info?.version || state.version, percent: 100 }, { event: 'ready' })
+    setState(
+      { phase: 'ready', version: info?.version || state.version, percent: 100 },
+      { event: 'ready', auto: autoApply },
+    )
+    if (autoApply && state.enabled) {
+      if (autoTimer) clearTimeout(autoTimer)
+      autoTimer = setTimeout(() => {
+        autoTimer = null
+        if (autoApply) applyAndQuit()
+      }, AUTO_INSTALL_DELAY_MS)
+    }
   })
   updater.on('error', (err) => {
+    autoApply = false
     setState({ phase: 'error', error: String(err?.message || err).slice(0, 300) }, { event: 'error' })
   })
 }
@@ -98,7 +113,8 @@ function schedule() {
   timer = setInterval(() => check(), CHECK_EVERY_MS)
 }
 
-function check() {
+function check(options = {}) {
+  autoApply = options.auto === true
   if (!state.supported) {
     return { ok: false, error: 'Launcher chưa được cài (chỉ cập nhật được khi chạy bản đã cài).' }
   }
@@ -133,7 +149,12 @@ function spawnInstaller() {
   const file = installerFile()
   if (!file) return false
   try {
-    spawn(file, ['--update'], { detached: true, stdio: 'ignore' }).unref()
+    spawn(file, ['--update'], {
+      cwd: path.dirname(file),
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: false,
+    }).unref()
     return true
   } catch {
     return false
@@ -147,15 +168,7 @@ function install() {
   if (installing) return { ok: true }
   if (state.phase !== 'ready') return { ok: false, error: 'Chưa có bản cập nhật nào sẵn sàng.' }
   if (!installerFile()) return { ok: false, error: 'Không tìm thấy bộ cài đã tải.' }
-  installing = true
-  setImmediate(() => {
-    if (!spawnInstaller()) {
-      installing = false
-      setState({ phase: 'error', error: 'Không mở được trình cài đặt.' }, { event: 'error' })
-      return
-    }
-    setTimeout(() => app.quit(), 350)
-  })
+  setImmediate(() => applyAndQuit())
   return { ok: true }
 }
 
@@ -167,6 +180,32 @@ function autoInstall() {
     return false
   }
   return true
+}
+
+function applyAndQuit() {
+  if (installing || !state.supported) return false
+  if (!installerFile()) {
+    setState({ phase: 'error', error: 'Không tìm thấy bộ cài đã tải.' }, { event: 'error' })
+    return false
+  }
+  installing = true
+  setState({ phase: 'installing' }, { event: 'installing' })
+  if (!spawnInstaller()) {
+    installing = false
+    setState({ phase: 'error', error: 'Không mở được trình cài đặt.' }, { event: 'error' })
+    return false
+  }
+  setTimeout(() => app.quit(), 1200)
+  return true
+}
+
+function setAutoApply(value) {
+  autoApply = value === true
+  if (!autoApply && autoTimer) {
+    clearTimeout(autoTimer)
+    autoTimer = null
+  }
+  return { ok: true, auto: autoApply }
 }
 
 function configure(settings = {}) {
@@ -196,15 +235,18 @@ function init({ settings, onEvent } = {}) {
   }
   schedule()
   bootTimer = setTimeout(() => {
-    if (state.enabled) check()
+    if (state.enabled) check({ auto: true })
   }, BOOT_DELAY_MS)
 }
 
 function shutdown() {
   if (timer) clearInterval(timer)
   if (bootTimer) clearTimeout(bootTimer)
+  if (autoTimer) clearTimeout(autoTimer)
   timer = null
   bootTimer = null
+  autoTimer = null
+  autoApply = false
 }
 
 
@@ -283,4 +325,15 @@ async function releaseNotes({ version, force = false } = {}) {
   return { ok: true, cached: false, ...payload }
 }
 
-module.exports = { init, configure, check, download, install, autoInstall, status: snapshot, shutdown, releaseNotes }
+module.exports = {
+  init,
+  configure,
+  check,
+  download,
+  install,
+  autoInstall,
+  setAutoApply,
+  status: snapshot,
+  shutdown,
+  releaseNotes,
+}

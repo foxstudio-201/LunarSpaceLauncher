@@ -20,6 +20,7 @@ import { launchBannerLines } from './lib/asciiLogo'
 import * as api from './api/client.js'
 
 const SPLASH_MIN_MS = 1000
+const SPLASH_MAX_HOLD_MS = 180000
 const SPLASH_FADE_MS = 380
 const PAGE_FADE_MS = 200
 const DEFAULT_MEMORY = 4096
@@ -69,6 +70,8 @@ function AppContent() {
 
   const [boot, setBoot] = useState('splash')
   const [bootStatus, setBootStatus] = useState('boot')
+  const [bootMin, setBootMin] = useState(false)
+  const [bootHoldOver, setBootHoldOver] = useState(false)
 
   const selectedRef = useRef(null)
   const snapshotsRef = useRef(false)
@@ -76,6 +79,7 @@ function AppContent() {
   const instancesRef = useRef([])
   const versionRef = useRef('')
   const langRef = useRef(lang)
+  const bootRef = useRef(boot)
   const packsRef = useRef(new Set())
 
   const refreshInstances = useCallback(async () => {
@@ -114,6 +118,10 @@ function AppContent() {
   useEffect(() => {
     langRef.current = lang
   }, [lang])
+
+  useEffect(() => {
+    bootRef.current = boot
+  }, [boot])
 
   useEffect(() => {
     const inst = selectedInstance
@@ -286,6 +294,7 @@ function AppContent() {
       if (ev.type === 'update') {
         setUpdate(ev)
         const key = 'dl:update'
+        if (bootRef.current !== 'done' && ev.event !== 'error') return
         if (ev.event === 'available') {
           toast.download(key, {
             title: vn(L, 'Có bản cập nhật mới', 'Update available'),
@@ -307,7 +316,9 @@ function AppContent() {
           toast.finish(key, {
             tone: 'ok',
             title: vn(L, 'Đã tải xong bản cập nhật', 'Update downloaded'),
-            message: vn(L, `v${ev.version || ''} · sẽ tự cài khi bạn thoát launcher`, `v${ev.version || ''} · installs when you quit the launcher`),
+            message: ev.auto
+              ? vn(L, `v${ev.version || ''} · đang tự cài lại launcher`, `v${ev.version || ''} · relaunching the installer`)
+              : vn(L, `v${ev.version || ''} · sẽ tự cài khi bạn thoát launcher`, `v${ev.version || ''} · installs when you quit the launcher`),
             duration: 9000,
           })
         } else if (ev.event === 'error') {
@@ -348,15 +359,43 @@ function AppContent() {
     return off
   }, [refreshInstances])
 
+  const updateBusy =
+    update.phase === 'checking' ||
+    update.phase === 'available' ||
+    update.phase === 'downloading' ||
+    update.phase === 'ready' ||
+    update.phase === 'installing'
+
   useEffect(() => {
-    let alive = true
-    const fadeTimer = setTimeout(() => {
-      if (!alive) return
-      setBoot('leaving')
-      setTimeout(() => { if (alive) setBoot('done') }, SPLASH_FADE_MS)
-    }, SPLASH_MIN_MS)
-    return () => { alive = false; clearTimeout(fadeTimer) }
+    const minTimer = setTimeout(() => setBootMin(true), SPLASH_MIN_MS)
+    api.updateStatus().then((res) => {
+      if (res?.ok) setUpdate((u) => ({ ...u, ...res }))
+    }).catch(() => {})
+    return () => clearTimeout(minTimer)
   }, [])
+
+  useEffect(() => {
+    if (!updateBusy) {
+      setBootHoldOver(false)
+      return undefined
+    }
+    const holdTimer = setTimeout(() => {
+      setBootHoldOver(true)
+      api.updateAutoApply(false).catch(() => {})
+    }, SPLASH_MAX_HOLD_MS)
+    return () => clearTimeout(holdTimer)
+  }, [updateBusy])
+
+  useEffect(() => {
+    if (boot === 'done' || boot === 'leaving') return undefined
+    if (!bootMin) return undefined
+    if (updateBusy && !bootHoldOver) return undefined
+    const fadeTimer = setTimeout(() => {
+      setBoot('leaving')
+      setTimeout(() => setBoot('done'), SPLASH_FADE_MS)
+    }, 80)
+    return () => clearTimeout(fadeTimer)
+  }, [boot, bootMin, updateBusy, bootHoldOver])
 
   useEffect(() => {
     if (boot === 'done') return
@@ -659,7 +698,7 @@ function AppContent() {
       </div>
 
       {boot !== 'done' && (
-        <SplashScreen lang={lang} leaving={boot === 'leaving'} status={bootStatus} version={version} />
+        <SplashScreen lang={lang} leaving={boot === 'leaving'} status={bootStatus} version={version} update={update} />
       )}
 
       {whatsNew && (

@@ -123,6 +123,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   updateCheck: () => ipcRenderer.invoke('update:check'),
   updateDownload: () => ipcRenderer.invoke('update:download'),
   updateInstall: () => ipcRenderer.invoke('update:install'),
+  updateAutoApply: (opts) => ipcRenderer.invoke('update:auto-apply', opts),
   releaseNotes: (opts) => ipcRenderer.invoke('update:release-notes', opts),
   whatsNew: () => ipcRenderer.invoke('update:whats-new'),
   whatsNewSeen: (opts) => ipcRenderer.invoke('update:whats-new-seen', opts),

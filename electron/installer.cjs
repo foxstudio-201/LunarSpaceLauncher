@@ -279,7 +279,14 @@ function createWindow() {
       spellcheck: false,
     },
   })
-  installerWindow.once('ready-to-show', () => installerWindow.show())
+  installerWindow.once('ready-to-show', () => {
+    installerWindow.show()
+    installerWindow.focus()
+    installerWindow.setAlwaysOnTop(true)
+    setTimeout(() => {
+      if (installerWindow && !installerWindow.isDestroyed()) installerWindow.setAlwaysOnTop(false)
+    }, 900)
+  })
   installerWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url)
     return { action: 'deny' }

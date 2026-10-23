@@ -9,12 +9,34 @@ const STATUS = {
 
 const SUBTITLE = { vi: 'Trình khởi chạy Minecraft', en: 'Minecraft Launcher' }
 
-export default function SplashScreen({ lang, leaving, status = 'boot', version }) {
+function updateLabel(update, lang) {
+  const vi = lang !== 'en'
+  const phase = update?.phase
+  const version = update?.version ? `v${update.version}` : ''
+  if (phase === 'checking') return vi ? 'Đang kiểm tra cập nhật…' : 'Checking for updates…'
+  if (phase === 'available') return vi ? `Có bản cập nhật ${version}` : `Update ${version} available`
+  if (phase === 'downloading') {
+    const percent = Math.round(update?.percent || 0)
+    return vi ? `Đang tải cập nhật ${version} · ${percent}%` : `Downloading ${version} · ${percent}%`
+  }
+  if (phase === 'ready' || phase === 'installing') return vi ? 'Đang cài bản cập nhật…' : 'Installing update…'
+  return ''
+}
+
+function updateProgress(update) {
+  const phase = update?.phase
+  if (phase === 'downloading') return Math.max(0, Math.min(100, update?.percent || 0))
+  if (phase === 'ready' || phase === 'installing') return 100
+  return null
+}
+
+export default function SplashScreen({ lang, leaving, status = 'boot', version, update }) {
   useLayoutEffect(() => {
     document.getElementById('boot-splash')?.remove()
   }, [])
 
-  const label = STATUS[status]?.[lang] || STATUS[status]?.en || ''
+  const label = updateLabel(update, lang) || STATUS[status]?.[lang] || STATUS[status]?.en || ''
+  const progress = updateProgress(update)
 
   return (
     <div
@@ -40,7 +62,9 @@ export default function SplashScreen({ lang, leaving, status = 'boot', version }
       <div className="splash-foot">
         <p className="splash-status">{label}</p>
         <div className="splash-track">
-          <div className="splash-sweep" />
+          {progress === null
+            ? <div className="splash-sweep" />
+            : <div className="splash-fill" style={{ width: `${progress}%` }} />}
         </div>
         <p className="splash-version">{version ? `v${version}` : ''}</p>
       </div>

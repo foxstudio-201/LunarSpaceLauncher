@@ -683,6 +683,11 @@ export async function updateInstall() {
   return { ok: false, error: NEEDS_APP }
 }
 
+export async function updateAutoApply(auto) {
+  if (bridge?.updateAutoApply) return bridge.updateAutoApply({ auto: auto === true })
+  return { ok: false }
+}
+
 export async function releaseNotes(opts) {
   if (bridge?.releaseNotes) return bridge.releaseNotes(opts)
   return { ok: false, error: 'Chưa chạy trong ứng dụng.' }
