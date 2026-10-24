@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="vi" data-skin="pixel">
+<html lang="vi" data-skin="pixel" data-font="default">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -14,9 +14,11 @@
       var q = new URLSearchParams(location.search)
       var theme = q.get('theme') === 'light' ? 'light' : q.get('theme') === 'dark' ? 'dark' : ''
       var lang = q.get('lang') === 'en' ? 'en' : q.get('lang') === 'vi' ? 'vi' : ''
+      var font = q.get('font') === 'pixel' ? 'pixel' : q.get('font') === 'default' ? 'default' : ''
       if (theme) document.documentElement.setAttribute('data-theme', theme)
       document.documentElement.setAttribute('data-skin', 'pixel')
-      window.__boot = { theme: theme || 'dark', lang: lang || 'vi' }
+      if (font) document.documentElement.setAttribute('data-font', font)
+      window.__boot = { theme: theme || 'dark', lang: lang || 'vi', font: font || 'default' }
     })()
   </script>
   <style>
@@ -35,6 +37,9 @@
       background: #edf2f9;
     }
     html[data-skin="pixel"] body {
+      font-family: 'Be Vietnam Pro', 'Segoe UI', system-ui, sans-serif;
+    }
+    html[data-skin="pixel"][data-font="pixel"] body {
       font-family: 'VT323', ui-monospace, monospace;
     }
 

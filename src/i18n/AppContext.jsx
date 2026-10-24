@@ -9,6 +9,7 @@ const isElectron = typeof window !== 'undefined' && window.electronAPI
 export function AppProvider({ children }) {
   const [lang, setLang] = useState(() => (window.__boot?.lang === 'en' ? 'en' : 'vi'))
   const [theme, setTheme] = useState(() => (window.__boot?.theme === 'light' ? 'light' : 'dark'))
+  const [font, setFont] = useState(() => (window.__boot?.font === 'pixel' ? 'pixel' : 'default'))
   useEffect(() => {
     const load = async () => {
       if (!isElectron) return
@@ -16,6 +17,7 @@ export function AppProvider({ children }) {
       if (!s) return
       if (s.language) setLang(s.language)
       if (s.theme) setTheme(s.theme)
+      if (s.font) setFont(s.font === 'pixel' ? 'pixel' : 'default')
     }
     load()
   }, [])
@@ -29,6 +31,10 @@ export function AppProvider({ children }) {
       document.body.style.color = '#fff'
     }
   }, [theme])
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-font', font)
+  }, [font])
 
   const saveLang = async (next) => {
     setLang(next)
@@ -49,8 +55,17 @@ export function AppProvider({ children }) {
     })
   }
 
+  const saveFont = async (next) => {
+    const value = next === 'pixel' ? 'pixel' : 'default'
+    if (value === font) return
+    setFont(value)
+    if (!isElectron) return
+    const s = await window.electronAPI.getSettings()
+    await window.electronAPI.saveSettings({ ...s, font: value })
+  }
+
   return (
-    <AppContext.Provider value={{ lang, theme, setLang: saveLang, setTheme: saveTheme }}>
+    <AppContext.Provider value={{ lang, theme, font, setLang: saveLang, setTheme: saveTheme, setFont: saveFont }}>
       {children}
     </AppContext.Provider>
   )

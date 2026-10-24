@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   Translate, MoonStars, Sun, Coffee, DownloadSimple, Trash, ArrowsClockwise,
   SpinnerGap, CheckCircle, FloppyDisk, HardDrive, WarningCircle, DiscordLogo,
-  Tray, Sparkle,
+  Tray, Sparkle, TextAa,
 } from '@phosphor-icons/react'
 import { useApp } from '../../i18n/AppContext'
 import { t } from '../../i18n/translations'
@@ -65,7 +65,7 @@ function Segmented({ c, value, onChange, options }) {
 const smallBtn = (c) => ({ background: c.input, border: `1px solid ${c.border}`, color: c.label })
 
 export default function SettingsPage({ theme, lang, version, system, storage, onSave, onShowWhatsNew, update: updateEvent }) {
-  const { setLang, setTheme } = useApp()
+  const { setLang, setTheme, font, setFont } = useApp()
   const c = palette(theme)
   const [javaPath, setJavaPath] = useState(storage?.javaPath || '')
   const [saved, setSaved] = useState(false)
@@ -362,6 +362,22 @@ export default function SettingsPage({ theme, lang, version, system, storage, on
                     options={[
                       { value: 'dark', label: t(lang, 'settings.theme.dark') },
                       { value: 'light', label: t(lang, 'settings.theme.light') },
+                    ]}
+                  />
+                </Row>
+                <Row
+                  c={c}
+                  icon={<TextAa size={15} weight="duotone" />}
+                  title={t(lang, 'settings.font')}
+                  desc={t(lang, 'settings.fontHint')}
+                >
+                  <Segmented
+                    c={c}
+                    value={font}
+                    onChange={setFont}
+                    options={[
+                      { value: 'default', label: t(lang, 'settings.font.default') },
+                      { value: 'pixel', label: t(lang, 'settings.font.pixel') },
                     ]}
                   />
                 </Row>

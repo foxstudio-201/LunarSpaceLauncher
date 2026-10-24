@@ -825,11 +825,13 @@ function createWindow() {
   const saved = readSettings()
   const bootTheme = saved.theme === 'light' ? 'light' : 'dark'
   const bootLang = saved.language === 'en' ? 'en' : 'vi'
+  const bootFont = saved.font === 'pixel' ? 'pixel' : 'default'
   const BOOT_BG = { dark: '#0a0d12', light: '#edf2f9' }
   const withBootParams = (raw) => {
     const url = new URL(raw)
     url.searchParams.set('theme', bootTheme)
     url.searchParams.set('lang', bootLang)
+    url.searchParams.set('font', bootFont)
     return url.toString()
   }
 
@@ -866,7 +868,7 @@ function createWindow() {
     mainWindow.webContents.openDevTools({ mode: 'detach' })
   } else {
     mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'), {
-      query: { theme: bootTheme, lang: bootLang },
+      query: { theme: bootTheme, lang: bootLang, font: bootFont },
     })
   }
 
