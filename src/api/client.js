@@ -708,6 +708,21 @@ export async function exportProfile(opts = {}) {
   return { ok: false, error: NEEDS_APP }
 }
 
+export async function shareInstance(opts = {}) {
+  if (bridge?.shareInstance) return bridge.shareInstance(opts)
+  return { ok: false, error: NEEDS_APP }
+}
+
+export async function setInstanceIcon(opts = {}) {
+  if (bridge?.setInstanceIcon) return bridge.setInstanceIcon(opts)
+  return { ok: false, error: NEEDS_APP }
+}
+
+export async function clearInstanceIcon(opts = {}) {
+  if (bridge?.clearInstanceIcon) return bridge.clearInstanceIcon(opts)
+  return { ok: false, error: NEEDS_APP }
+}
+
 export async function serverpackPlan(opts = {}) {
   if (bridge?.serverpackPlan) return bridge.serverpackPlan(opts)
   return { ok: false, error: NEEDS_APP, files: [], folders: {} }

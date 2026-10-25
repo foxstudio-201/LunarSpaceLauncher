@@ -17,6 +17,7 @@ const boost = require('./mc/boost.cjs')
 const presence = require('./presence.cjs')
 const modpack = require('./mc/modpack.cjs')
 const content = require('./mc/content.cjs')
+const lunarModpacks = require('./mc/lunar-modpacks.cjs')
 const contentIcons = require('./mc/icons.cjs')
 const filehash = require('./mc/filehash.cjs')
 const iconRemote = require('./mc/iconremote.cjs')
@@ -201,20 +202,34 @@ function listInstances(settings) {
   const list = index.map((entry) => {
     const isRunning = running.has(entry.id)
     const row = { ...entry, running: isRunning }
-    if (!row.icon) {
+    let icon = ''
+    try {
       const local = path.join(entry.dir, 'icon.png')
-      try {
-        if (fs.existsSync(local)) row.icon = `file:///${String(entry.dir).split('\\').join('/')}/icon.png`
-      } catch {}
+      const stat = fs.statSync(local)
+      if (stat.isFile() && stat.size > 0 && stat.size <= 2097152) {
+        icon = `data:image/png;base64,${fs.readFileSync(local).toString('base64')}`
+      }
+    } catch {}
+    if (!icon && entry.icon && !/^(file|data):/i.test(String(entry.icon))) {
+      icon = String(entry.icon)
     }
-    if (!row.icon) scheduleInstanceIcon(entry)
+    if (entry.icon && /^file:/i.test(String(entry.icon))) dirty = true
+    row.icon = icon
+    if (!icon) scheduleInstanceIcon(entry)
     if (!isRunning && !installingIds.has(entry.id) && (entry.status === 'running' || entry.status === 'stopping' || entry.status === 'starting' || entry.status === 'installing')) {
       row.status = 'ready'
       dirty = true
     }
     return row
   })
-  if (dirty) writeIndex(list.map(({ running: _running, ...rest }) => rest))
+  if (dirty) {
+    const originals = new Map(index.map((entry) => [entry.id, entry]))
+    writeIndex(list.map(({ running: _running, ...rest }) => {
+      const original = originals.get(rest.id) || {}
+      const originalIcon = original.icon && !/^(file|data):/i.test(String(original.icon)) ? String(original.icon) : ''
+      return { ...rest, icon: originalIcon || undefined }
+    }))
+  }
   return { ok: true, instances: list, sharedDir: shared, defaultInstanceDir }
 }
 
@@ -1708,7 +1723,9 @@ function normalizePackPlan(plan) {
 
 async function modpackSearch({ source, query = '', sort = 'relevance', offset = 0, limit = 24, game, loader, category, environment } = {}) {
   try {
-    const res = await modpack.search({ source, query, sort, offset, limit, game, loader, category, environment })
+    const res = source === 'lunar'
+      ? await lunarModpacks.search({ query, sort, offset, limit, game, loader })
+      : await modpack.search({ source, query, sort, offset, limit, game, loader, category, environment })
     return { ok: true, ...res }
   } catch (err) {
     return { ok: false, error: err.message, hits: [], total: 0 }
@@ -1716,6 +1733,9 @@ async function modpackSearch({ source, query = '', sort = 'relevance', offset = 
 }
 
 async function modpackTags({ source } = {}) {
+  if (source === 'lunar') {
+    return { ok: true, options: [], environment: false }
+  }
   try {
     return { ok: true, ...(await modpack.packTags({ source })) }
   } catch (err) {
@@ -1726,7 +1746,8 @@ async function modpackTags({ source } = {}) {
 async function modpackVersions({ source, id } = {}) {
   if (!id) return { ok: false, error: 'Thiếu modpack.', versions: [] }
   try {
-    return { ok: true, versions: await modpack.versions({ source, id }) }
+    const versions = source === 'lunar' ? await lunarModpacks.versions(id) : await modpack.versions({ source, id })
+    return { ok: true, versions }
   } catch (err) {
     return { ok: false, error: err.message, versions: [] }
   }
@@ -1737,13 +1758,29 @@ async function modpackResolve({ source, packId, fileId, settings } = {}) {
   const { shared } = storageFor(settings)
   const { notes, onLog } = packNotes()
   try {
-    const plan = await modpack.resolvePlan({
-      source,
-      packId,
-      fileId,
-      cacheDir: path.join(shared, 'modpacks'),
-      onLog,
-    })
+    let plan
+    if (source === 'lunar') {
+      const cacheDir = path.join(shared, 'modpacks')
+      await fsp.mkdir(cacheDir, { recursive: true })
+      const versionTarget = String(fileId || packId)
+      const zipPath = path.join(cacheDir, `lunar-${versionTarget.replace(/[^a-z0-9._-]/gi, '')}.zip`)
+      await lunarModpacks.download({ id: versionTarget, dest: zipPath, onProgress: (p) => { if (p.total && p.done >= p.total) onLog?.(`[LunarSpace] Đã tải modpack (${p.done} byte)`) } })
+      plan = await modpack.planFromCurseforgeZip({ zipPath, onLog })
+      plan.source = 'lunar'
+      try {
+        const lunarVersions = await lunarModpacks.versions(packId)
+        const picked = lunarVersions.find((row) => row.id === versionTarget)
+        if (picked) plan.version = picked.versionNumber
+      } catch {}
+    } else {
+      plan = await modpack.resolvePlan({
+        source,
+        packId,
+        fileId,
+        cacheDir: path.join(shared, 'modpacks'),
+        onLog,
+      })
+    }
     normalizePackPlan(plan)
     plan.notes = notes
     plan.packId = String(packId)
@@ -1815,6 +1852,7 @@ async function modpackInstall({ token, name, dir, icon = '', memoryMb = 4096, se
   pendingPacks.delete(token)
 
   const entry = created.instance
+  if (icon) cacheInstanceIcon({ id: entry.id, url: icon }).catch(() => {})
   const log = (line) => {
     pushLog(entry.id, line)
     emit?.({ type: 'log', id: entry.id, line })
@@ -1918,7 +1956,18 @@ async function readPackMarker(dir) {
 }
 
 async function resolvePackIdentity(entry, marker) {
-  if (!marker || !['modrinth', 'curseforge'].includes(marker.source)) return null
+  if (!marker || !['modrinth', 'curseforge', 'lunar'].includes(marker.source)) return null
+  if (marker.source === 'lunar') {
+    return {
+      source: 'lunar',
+      id: String(marker.projectId || ''),
+      slug: marker.slug || '',
+      projectUrl: marker.projectUrl || '',
+      versions: null,
+      installedVersionId: marker.versionId || null,
+      trusted: true,
+    }
+  }
   if (marker.projectId) {
     return {
       source: marker.source,
@@ -2043,7 +2092,7 @@ async function modpackInstanceInfo({ id } = {}) {
     return { ok: false, isModpack: false, error: err.message }
   }
   const marker = await readPackMarker(entry.dir)
-  if (!marker || !['modrinth', 'curseforge'].includes(marker.source)) return { ok: true, isModpack: false }
+  if (!marker || !['modrinth', 'curseforge', 'lunar'].includes(marker.source)) return { ok: true, isModpack: false }
   let ident = null
   let resolveError = ''
   try {
@@ -2103,15 +2152,17 @@ async function modpackInstanceUpdate({ id, versionId, settings } = {}, emit) {
   }
   if (!versionId) return { ok: false, error: 'Thiếu bản modpack cần cập nhật.' }
   const marker = await readPackMarker(entry.dir)
-  if (!marker || !['modrinth', 'curseforge'].includes(marker.source)) {
-    return { ok: false, error: 'Instance này không phải modpack tải từ Modrinth/CurseForge.' }
+  if (!marker || !['modrinth', 'curseforge', 'lunar'].includes(marker.source)) {
+    return { ok: false, error: 'Instance này không phải modpack tải từ Modrinth/CurseForge/LunarSpace.' }
   }
   const ident = await resolvePackIdentity(entry, marker)
   if (!ident) return { ok: false, error: 'Không xác định được modpack nguồn để cập nhật.' }
   let versions = ident.versions
   if (!versions) {
     try {
-      versions = (await modpack.versions({ source: marker.source, id: ident.id })) || []
+      versions = marker.source === 'lunar'
+        ? (await lunarModpacks.versions(ident.id)) || []
+        : (await modpack.versions({ source: marker.source, id: ident.id })) || []
     } catch {
       versions = []
     }
@@ -2142,14 +2193,25 @@ async function modpackInstanceUpdate({ id, versionId, settings } = {}, emit) {
   stream({ phase: 'download', done: 0, total: 0 })
   try {
     log(`[LunarSpace] Cập nhật modpack: ${marker.version || '?'} → ${label}`)
-    const plan = await modpack.resolvePlan({
-      source: marker.source,
-      packId: ident.id,
-      fileId: versionId,
-      cacheDir: path.join(shared, 'modpacks'),
-      onLog: log,
-      onProgress: stream,
-    })
+    let plan
+    if (marker.source === 'lunar') {
+      const cacheDir = path.join(shared, 'modpacks')
+      await fsp.mkdir(cacheDir, { recursive: true })
+      const zipPath = path.join(cacheDir, `lunar-${String(versionId).replace(/[^a-z0-9._-]/gi, '')}.zip`)
+      await lunarModpacks.download({ id: versionId, dest: zipPath, onProgress: (p) => stream({ phase: 'download', ...p }) })
+      plan = await modpack.planFromCurseforgeZip({ zipPath, onLog: log })
+      plan.source = 'lunar'
+      plan.version = target.name || target.versionNumber || ''
+    } else {
+      plan = await modpack.resolvePlan({
+        source: marker.source,
+        packId: ident.id,
+        fileId: versionId,
+        cacheDir: path.join(shared, 'modpacks'),
+        onLog: log,
+        onProgress: stream,
+      })
+    }
     normalizePackPlan(plan)
     const res = await modpack.applyPlan({
       plan,
@@ -2654,6 +2716,161 @@ async function exportProfile({ id, format = 'zip', targetPath } = {}, emit) {
   }
 }
 
+async function shareInstance({ id, name = '', author = '', summary = '', description = '', descriptionFormat = 'plain', images = [], gallery = [], version = '' } = {}, emit) {
+  let entry
+  try {
+    entry = findEntry(id)
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+  const zipPath = path.join(os.tmpdir(), `lunar-share-${entry.id.replace(/[^a-z0-9-]/gi, '')}-${Date.now()}.zip`)
+  const log = (line) => {
+    pushLog(entry.id, line)
+    emit?.({ type: 'log', id: entry.id, line })
+  }
+  try {
+    emit?.({ type: 'share', id: entry.id, phase: 'export', done: 0, total: 0 })
+    const exportEntry = name ? { ...entry, name } : entry
+    const pack = await profileExport.exportProfile({
+      entry: exportEntry,
+      format: 'share',
+      targetPath: zipPath,
+      onProgress: (p) => emit?.({ type: 'share', id: entry.id, phase: 'export', ...p }),
+      onLog: log,
+    })
+    const iconPath = path.join(entry.dir, 'icon.png')
+    const iconBuffer = await readInstanceIconBuffer(entry).catch(() => null)
+    emit?.({ type: 'share', id: entry.id, phase: 'upload', done: 0, total: pack.bytes || 0 })
+    const res = await lunarModpacks.upload({
+      zipPath,
+      iconPath,
+      iconBuffer,
+      meta: {
+        name: name || entry.name,
+        packKey: entry.id,
+        author,
+        summary,
+        description,
+        descriptionFormat,
+        images: Array.isArray(images) ? images : [],
+        gallery: Array.isArray(gallery) ? gallery : [],
+        minecraft: entry.version,
+        loader: entry.loader,
+        loaderVersion: entry.loaderVersion || '',
+        version: version || '1.0.0',
+      },
+      onProgress: (p) => emit?.({ type: 'share', id: entry.id, phase: 'upload', ...p }),
+    })
+    log(`[LunarSpace] Đã chia sẻ modpack: ${res.url}`)
+    emit?.({ type: 'share', id: entry.id, phase: 'done', url: res.url, bytes: pack.bytes })
+    return { ok: true, ...res, bytes: pack.bytes }
+  } catch (err) {
+    log(`[LunarSpace] Chia sẻ modpack lỗi: ${err.message}`)
+    emit?.({ type: 'share', id: entry.id, phase: 'error', error: err.message })
+    return { ok: false, error: err.message }
+  } finally {
+    try {
+      await fsp.unlink(zipPath)
+    } catch {}
+  }
+}
+
+function pngDataUrl(buffer) {
+  return `data:image/png;base64,${buffer.toString('base64')}`
+}
+
+async function readInstanceIconBuffer(entry) {
+  try {
+    const local = path.join(entry.dir, 'icon.png')
+    const stat = await fsp.stat(local)
+    if (stat.isFile() && stat.size > 0 && stat.size <= 2097152) {
+      return await fsp.readFile(local)
+    }
+  } catch {}
+  const ref = String(entry.icon || '')
+  if (/^data:image\/png;base64,/i.test(ref)) {
+    try {
+      const buffer = Buffer.from(ref.split(',')[1] || '', 'base64')
+      return buffer.length ? buffer : null
+    } catch {
+      return null
+    }
+  }
+  if (/^https?:\/\//i.test(ref)) {
+    try {
+      const res = await fetch(ref, { headers: { 'User-Agent': 'LunarSpaceLauncher' }, signal: AbortSignal.timeout(10000) })
+      if (!res.ok) return null
+      const buffer = Buffer.from(await res.arrayBuffer())
+      if (buffer.length > 0 && buffer.length <= 2097152 && buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
+        return buffer
+      }
+    } catch {}
+  }
+  return null
+}
+
+async function cacheInstanceIcon({ id, url } = {}) {
+  if (!id || !/^https?:\/\//i.test(String(url || ''))) return { ok: false }
+  let entry
+  try {
+    entry = findEntry(id)
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+  try {
+    const local = path.join(entry.dir, 'icon.png')
+    const stat = await fsp.stat(local).catch(() => null)
+    if (stat?.isFile() && stat.size > 0) return { ok: true, cached: false }
+  } catch {}
+  try {
+    const res = await fetch(url, { headers: { 'User-Agent': 'LunarSpaceLauncher' }, signal: AbortSignal.timeout(10000) })
+    if (!res.ok) return { ok: false }
+    const buffer = Buffer.from(await res.arrayBuffer())
+    if (!buffer.length || buffer.length > 2097152) return { ok: false }
+    if (!buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return { ok: false }
+    await fsp.writeFile(path.join(entry.dir, 'icon.png'), buffer)
+    updateEntry(entry.id, { icon: '' })
+    return { ok: true, cached: true, icon: pngDataUrl(buffer) }
+  } catch {
+    return { ok: false }
+  }
+}
+
+async function setInstanceIcon({ id, png } = {}) {
+  let entry
+  try {
+    entry = findEntry(id)
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+  if (!Buffer.isBuffer(png) || png.length === 0) {
+    return { ok: false, error: 'Thiếu dữ liệu ảnh.' }
+  }
+  const target = path.join(entry.dir, 'icon.png')
+  try {
+    await fsp.writeFile(target, png)
+  } catch (err) {
+    return { ok: false, error: `Không ghi được icon: ${err.message}` }
+  }
+  const icon = `data:image/png;base64,${png.toString('base64')}`
+  const next = updateEntry(entry.id, { icon: '' })
+  return { ok: true, instance: { ...next, icon }, icon }
+}
+
+async function clearInstanceIcon({ id } = {}) {
+  let entry
+  try {
+    entry = findEntry(id)
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+  try {
+    await fsp.unlink(path.join(entry.dir, 'icon.png'))
+  } catch {}
+  const next = updateEntry(entry.id, { icon: '' })
+  return { ok: true, instance: next, icon: '' }
+}
+
 function serverpackSource({ id, serverId } = {}) {
   if (serverId) {
     const entry = findServerTest(serverId)
@@ -2762,6 +2979,9 @@ async function serverpackExport({ id, serverId, include = [], props = null, raw 
 
 async function contentProject({ kind, source, id } = {}) {
   try {
+    if (kind === 'modpacks' && source === 'lunar') {
+      return { ok: true, project: await lunarModpacks.project(id) }
+    }
     return { ok: true, project: await content.project({ kind, source, id }) }
   } catch (err) {
     return { ok: false, error: err.message }
@@ -3475,6 +3695,9 @@ module.exports = {
   modpackInstanceInfo,
   modpackInstanceUpdate,
   exportProfile,
+  shareInstance,
+  setInstanceIcon,
+  clearInstanceIcon,
   serverpackPlan,
   instanceTree,
   serverpackWalk,

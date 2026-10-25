@@ -208,6 +208,40 @@ function AppContent() {
         if (ev.phase === 'done' || ev.phase === 'error') refreshInstances()
         return
       }
+      if (ev.type === 'share') {
+        const key = `share:${ev.id}`
+        const who = nameOf(ev.id)
+        if (ev.phase === 'error') {
+          toast.finish(key, {
+            tone: 'bad',
+            title: vn(L, 'Chia sẻ modpack thất bại', 'Modpack share failed'),
+            message: [who, ev.error].filter(Boolean).join(' · '),
+          })
+        } else if (ev.phase === 'done') {
+          toast.finish(key, {
+            tone: 'ok',
+            title: vn(L, 'Đã chia sẻ modpack', 'Modpack shared'),
+            message: [who, ev.url].filter(Boolean).join(' · '),
+            duration: 9000,
+          })
+        } else {
+          const upload = ev.phase === 'upload'
+          const total = Number(ev.total) || 0
+          const done = Number(ev.done) || 0
+          toast.download(key, {
+            title: upload
+              ? vn(L, 'Đang tải modpack lên LunarSpace', 'Uploading modpack to LunarSpace')
+              : vn(L, 'Đang nén instance', 'Packing instance'),
+            message: who,
+            percent: total ? Math.max(0, Math.min(100, (done / total) * 100)) : 0,
+            indeterminate: !total,
+            detail: upload && total
+              ? `${Math.round(done / 104857.6) / 10} / ${Math.round(total / 104857.6) / 10} MB`
+              : fileNameOf(ev.file),
+          })
+        }
+        return
+      }
       if (ev.type === 'progress') {
         const key = `dl:${ev.id}`
         const who = nameOf(ev.id)
@@ -690,7 +724,13 @@ function AppContent() {
                 onBack={handleBack}
                 onOpenAccounts={() => navigateTo('accounts')}
                 onRemove={handleRemove}
-                onSaveInstance={(patch) => setSelectedInstance((s) => (s ? { ...s, ...patch } : s))}
+                onSaveInstance={(patch) => {
+                  setSelectedInstance((s) => (s ? { ...s, ...patch } : s))
+                  const id = selectedRef.current?.id
+                  if (id && patch && typeof patch === 'object') {
+                    setInstances((list) => list.map((item) => (item.id === id ? { ...item, ...patch } : item)))
+                  }
+                }}
               />
             )}
           </div>

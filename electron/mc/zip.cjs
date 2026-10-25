@@ -1,4 +1,5 @@
 const fs = require('fs')
+const fsp = fs.promises
 const path = require('path')
 const zlib = require('zlib')
 
@@ -128,8 +129,137 @@ class ZipWriter {
     this.push({ name, method: 8, crc, comp: deflated.length, size: raw.length, offset: start, mtime })
   }
 
-  close() {
+
+  putAsync(buf) {
+    return new Promise((resolve, reject) => {
+      fs.write(this.fd, buf, 0, buf.length, this.offset, (err, written) => {
+        if (err) return reject(err)
+        this.offset += written
+        resolve(written)
+      })
+    })
+  }
+
+  localHeaderAsync({ name, method, useDescriptor, size, crc, mtime }) {
+    const { time, date } = timeParts(mtime)
+    const nameBuf = Buffer.from(name, 'utf8')
+    const head = Buffer.alloc(30)
+    head.writeUInt32LE(0x04034b50, 0)
+    head.writeUInt16LE(20, 4)
+    head.writeUInt16LE(0x0800 | (useDescriptor ? 0x0008 : 0), 6)
+    head.writeUInt16LE(method, 8)
+    head.writeUInt16LE(time, 10)
+    head.writeUInt16LE(date, 12)
+    head.writeUInt32LE(useDescriptor ? 0 : crc >>> 0, 14)
+    head.writeUInt32LE(useDescriptor ? 0 : size >>> 0, 18)
+    head.writeUInt32LE(useDescriptor ? 0 : size >>> 0, 22)
+    head.writeUInt16LE(nameBuf.length, 26)
+    head.writeUInt16LE(0, 28)
+    return this.putAsync(head).then(() => this.putAsync(nameBuf))
+  }
+
+  async addFileAsync(zipPath, absPath) {
+    const name = zipPath.split(path.sep).join('/')
+    const stat = await fsp.stat(absPath)
+    const method = STORED_EXT.has(path.extname(absPath).toLowerCase()) ? 0 : 8
+    const mtime = stat.mtime
+
+    if (method === 8 && stat.size <= MAX_DEFLATE) {
+      const raw = await fsp.readFile(absPath)
+      const deflated = await new Promise((resolve, reject) => {
+        zlib.deflateRaw(raw, { level: 6 }, (err, out) => (err ? reject(err) : resolve(out)))
+      })
+      const crc = (crcUpdate(~0, raw) ^ 0xffffffff) >>> 0
+      const start = this.offset
+      await this.localHeaderAsync({ name, method: 8, useDescriptor: false, size: deflated.length, crc, mtime })
+      await this.putAsync(deflated)
+      this.push({ name, method: 8, crc, comp: deflated.length, size: raw.length, offset: start, mtime })
+      return
+    }
+
+    const start = this.offset
+    await this.localHeaderAsync({ name, method: 0, useDescriptor: true, size: 0, crc: 0, mtime })
+    let crc = ~0
+    let size = 0
+    const handle = await fsp.open(absPath, 'r')
+    try {
+      const buf = Buffer.allocUnsafe(CHUNK)
+      for (;;) {
+        const { bytesRead } = await handle.read(buf, 0, CHUNK, size)
+        if (!bytesRead) break
+        const slice = bytesRead === CHUNK ? buf : buf.subarray(0, bytesRead)
+        crc = crcUpdate(crc, slice)
+        await this.putAsync(slice)
+        size += bytesRead
+      }
+    } finally {
+      await handle.close()
+    }
+    const finalCrc = (crc ^ 0xffffffff) >>> 0
+    const desc = Buffer.alloc(16)
+    desc.writeUInt32LE(0x08074b50, 0)
+    desc.writeUInt32LE(finalCrc, 4)
+    desc.writeUInt32LE(size >>> 0, 8)
+    desc.writeUInt32LE(size >>> 0, 12)
+    await this.putAsync(desc)
+    this.push({ name, method: 0, crc: finalCrc, comp: size, size, offset: start, mtime })
+  }
+
+  async addBufferAsync(zipPath, buffer, mtime) {
+    const name = zipPath.split(path.sep).join('/')
+    const raw = Buffer.isBuffer(buffer) ? buffer : Buffer.from(String(buffer), 'utf8')
+    const deflated = await new Promise((resolve, reject) => {
+      zlib.deflateRaw(raw, { level: 6 }, (err, out) => (err ? reject(err) : resolve(out)))
+    })
+    const crc = (crcUpdate(~0, raw) ^ 0xffffffff) >>> 0
+    const start = this.offset
+    await this.localHeaderAsync({ name, method: 8, useDescriptor: false, size: deflated.length, crc, mtime })
+    await this.putAsync(deflated)
+    this.push({ name, method: 8, crc, comp: deflated.length, size: raw.length, offset: start, mtime })
+  }
+
+  async closeAsync() {
     const cdStart = this.offset
+    for (const entry of this.entries) {
+      const { time, date } = timeParts(entry.mtime)
+      const nameBuf = Buffer.from(entry.name, 'utf8')
+      const head = Buffer.alloc(46)
+      head.writeUInt32LE(0x02014b50, 0)
+      head.writeUInt16LE(20, 4)
+      head.writeUInt16LE(20, 6)
+      head.writeUInt16LE(0x0800 | (entry.method === 0 ? 0x0008 : 0), 8)
+      head.writeUInt16LE(entry.method, 10)
+      head.writeUInt16LE(time, 12)
+      head.writeUInt16LE(date, 14)
+      head.writeUInt32LE(entry.crc >>> 0, 16)
+      head.writeUInt32LE(entry.comp >>> 0, 20)
+      head.writeUInt32LE(entry.size >>> 0, 24)
+      head.writeUInt16LE(nameBuf.length, 28)
+      head.writeUInt16LE(0, 30)
+      head.writeUInt16LE(0, 32)
+      head.writeUInt16LE(0, 34)
+      head.writeUInt16LE(0, 36)
+      head.writeUInt32LE(0, 38)
+      head.writeUInt32LE(entry.offset >>> 0, 42)
+      await this.putAsync(head)
+      await this.putAsync(nameBuf)
+    }
+    const cdSize = this.offset - cdStart
+    const eocd = Buffer.alloc(22)
+    eocd.writeUInt32LE(0x06054b50, 0)
+    eocd.writeUInt16LE(0, 4)
+    eocd.writeUInt16LE(0, 6)
+    eocd.writeUInt16LE(this.entries.length, 8)
+    eocd.writeUInt16LE(this.entries.length, 10)
+    eocd.writeUInt32LE(cdSize, 12)
+    eocd.writeUInt32LE(cdStart, 16)
+    eocd.writeUInt16LE(0, 20)
+    await this.putAsync(eocd)
+    await new Promise((resolve, reject) => fs.close(this.fd, (err) => (err ? reject(err) : resolve())))
+    return { entries: this.entries.length, bytes: this.offset }
+  }
+
+  close() {    const cdStart = this.offset
     for (const entry of this.entries) {
       const { time, date } = timeParts(entry.mtime)
       const nameBuf = Buffer.from(entry.name, 'utf8')

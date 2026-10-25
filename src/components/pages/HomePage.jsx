@@ -502,7 +502,7 @@ export default function HomePage({
                       className="group flex items-center gap-3 px-3.5 h-12"
                       style={{ borderTop: i === 0 ? 'none' : `1px solid ${c.border}` }}
                     >
-                      <img src={loaderIcon(inst.loader)} alt="" className="w-6 h-6 rounded object-contain shrink-0" />
+                      <img src={inst.icon || loaderIcon(inst.loader)} alt="" className="w-7 h-7 rounded-md object-cover shrink-0" onError={(e) => { e.currentTarget.src = loaderIcon(inst.loader) }} />
                       <button onClick={() => onSelectInstance(inst)} className="min-w-0 flex-1 text-left">
                         <p className="text-[11px] font-bold truncate" style={{ color: c.text }}>{inst.name}</p>
                         <p className="text-[10px] font-mono truncate" style={{ color: c.faint }}>

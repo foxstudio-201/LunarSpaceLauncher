@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { GearSix, FolderOpen, Trash, Terminal, FloppyDisk, CheckCircle, WarningCircle, PlayCircle, UserCircle, RocketLaunch, Lightning, Package, X, FileArrowUp, ArrowsClockwise, SpinnerGap, Coffee } from '@phosphor-icons/react'
+import { useEffect, useRef, useState } from 'react'
+import { GearSix, FolderOpen, Trash, Terminal, FloppyDisk, CheckCircle, WarningCircle, PlayCircle, UserCircle, RocketLaunch, Lightning, Package, X, FileArrowUp, ArrowsClockwise, SpinnerGap, Coffee, ShareNetwork, Copy, ArrowSquareOut, ImageSquare, TextB, TextItalic, TextUnderline, TextStrikethrough, ListBullets, ListNumbers, Quotes, Code, LinkSimple, ArrowCounterClockwise, ArrowClockwise, TextHOne, TextHTwo, Eraser, Plus, Eye } from '@phosphor-icons/react'
 import { t } from '../../i18n/translations'
 import { palette } from '../../lib/palette'
 import HeadSkin from '../ui/HeadSkin'
@@ -35,7 +35,44 @@ const EXPORT_FORMATS = [
     hintVi: 'Nén mod, config, gói tài nguyên, shader… của phiên bản (bỏ saves và logs) + lunarspace-profile.json để nhận diện khi nhập lại.',
     hintEn: 'Zips the instance mods, configs, resource packs and shader packs (saves and logs excluded) plus lunarspace-profile.json for re-import.',
   },
+  {
+    id: 'share',
+    vi: 'Chia sẻ lên LunarSpace',
+    en: 'Share to LunarSpace',
+    hintVi: 'Mở form chia sẻ: ảnh, tên, phiên bản, mô tả… rồi tải instance lên trang Modpack của lunarspace.site. Người khác mở Modpack → LunarModpack để cài.',
+    hintEn: 'Opens the share form: image, name, version, description… then uploads the instance to LunarSpace. Others install it from Modpack → LunarModpack.',
+  },
 ]
+
+function readImageFile(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file)
+    const image = new Image()
+    image.onload = () => {
+      try {
+        const max = 1600
+        const scale = Math.min(1, max / Math.max(image.width || 1, image.height || 1))
+        const canvas = document.createElement('canvas')
+        canvas.width = Math.max(1, Math.round((image.width || 1) * scale))
+        canvas.height = Math.max(1, Math.round((image.height || 1) * scale))
+        const ctx = canvas.getContext('2d')
+        ctx.fillStyle = '#0b0e12'
+        ctx.fillRect(0, 0, canvas.width, canvas.height)
+        ctx.drawImage(image, 0, 0, canvas.width, canvas.height)
+        URL.revokeObjectURL(url)
+        resolve(canvas.toDataURL('image/jpeg', 0.84))
+      } catch (err) {
+        URL.revokeObjectURL(url)
+        reject(err)
+      }
+    }
+    image.onerror = () => {
+      URL.revokeObjectURL(url)
+      reject(new Error('Không đọc được ảnh.'))
+    }
+    image.src = url
+  })
+}
 
 function Switch({ on, onClick, c, tip }) {
   return (
@@ -72,6 +109,19 @@ const BOOST_MODS = {
   neoforge: ['Embeddium', 'FerriteCore', 'ModernFix', 'EntityCulling', 'ImmediatelyFast', 'Clumps'],
 }
 
+const SHARE_TOOLS = [
+  { cmd: 'bold', icon: TextB, title: ['Đậm', 'Bold'] },
+  { cmd: 'italic', icon: TextItalic, title: ['Nghiêng', 'Italic'] },
+  { cmd: 'underline', icon: TextUnderline, title: ['Gạch chân', 'Underline'] },
+  { cmd: 'strikeThrough', icon: TextStrikethrough, title: ['Gạch ngang', 'Strikethrough'] },
+  { cmd: 'formatBlock', value: 'H2', icon: TextHOne, title: ['Tiêu đề lớn', 'Heading 1'] },
+  { cmd: 'formatBlock', value: 'H3', icon: TextHTwo, title: ['Tiêu đề nhỏ', 'Heading 2'] },
+  { cmd: 'insertUnorderedList', icon: ListBullets, title: ['Gạch đầu dòng', 'Bullet list'] },
+  { cmd: 'insertOrderedList', icon: ListNumbers, title: ['Danh sách số', 'Numbered list'] },
+  { cmd: 'formatBlock', value: 'BLOCKQUOTE', icon: Quotes, title: ['Trích dẫn', 'Quote'] },
+  { cmd: 'formatBlock', value: 'PRE', icon: Code, title: ['Code', 'Code'] },
+]
+
 const JVM_DEFAULT = '-XX:+UseG1GC -XX:MaxGCPauseMillis=50'
 
 export default function InstanceSettingsPage({ instance, theme, lang, account, onNavigate, onRemove, onOpenAccounts, onSaveInstance }) {
@@ -101,6 +151,80 @@ export default function InstanceSettingsPage({ instance, theme, lang, account, o
   const [loaderNote, setLoaderNote] = useState('')
   const [javaPath, setJavaPath] = useState(instance.javaPath || '')
   const [javaList, setJavaList] = useState([])
+  const [iconUrl, setIconUrl] = useState(instance.icon && !/^file:/i.test(instance.icon) ? instance.icon : '')
+  const [iconBusy, setIconBusy] = useState(false)
+  const descRef = useRef(null)
+  const inlineFileRef = useRef(null)
+  const galleryFileRef = useRef(null)
+  const tokenRef = useRef(0)
+  const inlineSelectionRef = useRef(null)
+  const [shareOpen, setShareOpen] = useState(false)
+  const [shareName, setShareName] = useState(instance.name)
+  const [shareVersion, setShareVersion] = useState('1.0.0')
+  const [shareAuthor, setShareAuthor] = useState(account?.name || '')
+  const [shareSummary, setShareSummary] = useState('')
+  const [shareDescription, setShareDescription] = useState('')
+  const [shareGallery, setShareGallery] = useState([])
+  const [shareInlineImages, setShareInlineImages] = useState({})
+  const [sharePreview, setSharePreview] = useState('')
+  const [shareBusy, setShareBusy] = useState(false)
+  const [shareError, setShareError] = useState('')
+  const [shareResult, setShareResult] = useState(null)
+
+  useEffect(() => {
+    setIconUrl(instance.icon && !/^file:/i.test(instance.icon) ? instance.icon : '')
+  }, [instance.id, instance.icon])
+
+  useEffect(() => {
+    if (!shareOpen) return
+    setShareName(instance.name)
+    setShareVersion('1.0.0')
+    setShareAuthor(account?.name || '')
+    setShareSummary('')
+    setShareDescription('')
+    setShareGallery([])
+    setShareInlineImages((prev) => {
+      Object.values(prev).forEach((item) => { if (item?.previewUrl) URL.revokeObjectURL(item.previewUrl) })
+      return {}
+    })
+    setSharePreview('')
+    setShareBusy(false)
+    setShareError('')
+    setShareResult(null)
+    tokenRef.current = 0
+    requestAnimationFrame(() => {
+      if (descRef.current) descRef.current.innerHTML = ''
+    })
+  }, [shareOpen, instance.id, instance.name, account?.name])
+
+  const changeIcon = async () => {
+    if (iconBusy) return
+    setIconBusy(true)
+    setError('')
+    const res = await api.setInstanceIcon({ id: instance.id }).catch((err) => ({ ok: false, error: err.message }))
+    setIconBusy(false)
+    if (res?.canceled) return res
+    if (!res?.ok) {
+      setError(res?.error || 'Không đổi được icon.')
+      return res
+    }
+    setIconUrl(res.icon || '')
+    onSaveInstance?.({ icon: res.icon || '' })
+    return res
+  }
+
+  const removeIcon = async () => {
+    if (iconBusy) return
+    setIconBusy(true)
+    const res = await api.clearInstanceIcon({ id: instance.id }).catch((err) => ({ ok: false, error: err.message }))
+    setIconBusy(false)
+    if (!res?.ok) {
+      setError(res?.error || 'Không xoá được icon.')
+      return
+    }
+    setIconUrl('')
+    onSaveInstance?.({ icon: '' })
+  }
 
   useEffect(() => {
     if (!instance.loader || instance.loader === 'vanilla') return undefined
@@ -229,6 +353,11 @@ export default function InstanceSettingsPage({ instance, theme, lang, account, o
       onNavigate?.('instance-serverpack')
       return
     }
+    if (exportFormat === 'share') {
+      setExportOpen(false)
+      setShareOpen(true)
+      return
+    }
     setExporting(true)
     setExportError('')
     setExportDone(null)
@@ -240,6 +369,113 @@ export default function InstanceSettingsPage({ instance, theme, lang, account, o
     }
     setExportDone(res)
     onSaveInstance?.()
+  }
+
+  const saveInlineSelection = () => {
+    const selection = window.getSelection()
+    const editor = descRef.current
+    if (selection && editor && selection.rangeCount && editor.contains(selection.anchorNode)) {
+      inlineSelectionRef.current = selection.getRangeAt(0).cloneRange()
+    }
+  }
+
+  const execShare = (command, value = null) => {
+    const editor = descRef.current
+    if (!editor) return
+    editor.focus()
+    document.execCommand(command, false, value)
+    setShareDescription(editor.innerHTML)
+  }
+
+  const addShareLink = () => {
+    const url = window.prompt(lang === 'vi' ? 'Nhập URL liên kết:' : 'Enter link URL:', 'https://')
+    if (!url) return
+    if (!/^https?:\/\//i.test(url)) {
+      setShareError(lang === 'vi' ? 'Link phải bắt đầu bằng http:// hoặc https://.' : 'Link must start with http:// or https://.')
+      return
+    }
+    execShare('createLink', url)
+  }
+
+  const insertShareImage = async (file) => {
+    if (Object.keys(shareInlineImages).length >= 8) {
+      setShareError(lang === 'vi' ? 'Tối đa 8 ảnh trong mô tả.' : 'Up to 8 images in the description.')
+      return
+    }
+    try {
+      const data = await readImageFile(file)
+      const token = `i${++tokenRef.current}`
+      const previewUrl = URL.createObjectURL(await (await fetch(data)).blob())
+      setShareInlineImages((prev) => ({ ...prev, [token]: { data, previewUrl } }))
+      const editor = descRef.current
+      editor?.focus()
+      const selection = window.getSelection()
+      if (selection && inlineSelectionRef.current) {
+        selection.removeAllRanges()
+        selection.addRange(inlineSelectionRef.current)
+      }
+      document.execCommand('insertHTML', false, `<img src="${previewUrl}" data-luna-token="${token}" alt="">`)
+      setShareDescription(editor?.innerHTML || '')
+    } catch (err) {
+      setShareError(err.message || 'error')
+    }
+  }
+
+  const addShareGallery = async (files) => {
+    const free = 8 - shareGallery.length
+    if (free <= 0) {
+      setShareError(lang === 'vi' ? 'Tối đa 8 ảnh preview.' : 'Up to 8 preview images.')
+      return
+    }
+    const picked = Array.from(files || []).slice(0, free)
+    for (const file of picked) {
+      try {
+        const data = await readImageFile(file)
+        const token = `g${++tokenRef.current}`
+        setShareGallery((prev) => [...prev, { token, data }])
+      } catch (err) {
+        setShareError(err.message || 'error')
+      }
+    }
+  }
+
+  const submitShare = async () => {
+    if (shareBusy) return
+    if (!shareName.trim()) {
+      setShareError(lang === 'vi' ? 'Nhập tên modpack trước khi chia sẻ.' : 'Enter a modpack name first.')
+      return
+    }
+    const html = descRef.current?.innerHTML || shareDescription
+    const inlineImages = Object.entries(shareInlineImages)
+      .filter(([token]) => html.includes(token))
+      .map(([token, item]) => ({ token, data: item.data }))
+    const gallery = shareGallery.map(({ token, data }) => ({ token, data }))
+    const mediaSize = inlineImages.reduce((sum, item) => sum + item.data.length, 0)
+      + gallery.reduce((sum, item) => sum + item.data.length, 0)
+    if (mediaSize > 16 * 1024 * 1024) {
+      setShareError(lang === 'vi' ? 'Tổng dung lượng ảnh vượt 16 MB.' : 'Total image size exceeds 16 MB.')
+      return
+    }
+    setShareBusy(true)
+    setShareError('')
+    setShareResult(null)
+    const res = await api.shareInstance({
+      id: instance.id,
+      name: shareName.trim(),
+      author: shareAuthor.trim(),
+      summary: shareSummary.trim(),
+      description: html,
+      descriptionFormat: 'html',
+      images: inlineImages,
+      gallery,
+      version: shareVersion.trim() || '1.0.0',
+    }).catch((err) => ({ ok: false, error: err.message }))
+    setShareBusy(false)
+    if (!res?.ok) {
+      setShareError(res?.error || 'error')
+      return
+    }
+    setShareResult(res)
   }
 
   return (
@@ -280,6 +516,42 @@ export default function InstanceSettingsPage({ instance, theme, lang, account, o
                 </p>
               </div>
               <span className="text-[10px] font-mono" style={{ color: c.label }}>{instance.created?.slice(0, 10)}</span>
+            </div>
+
+            <div className="flex items-center gap-4 px-4 py-3.5" style={rowStyle}>
+              <img
+                src={iconUrl || `./${loader.image}`}
+                alt=""
+                className="w-14 h-14 rounded-xl object-cover shrink-0"
+                style={{ border: `1px solid ${c.border}`, background: c.input }}
+              />
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-semibold" style={{ color: c.text }}>
+                  {lang === 'vi' ? 'Icon phiên bản' : 'Instance icon'}
+                </p>
+                <p className="text-[10px] leading-relaxed" style={{ color: c.faint }}>
+                  {lang === 'vi'
+                    ? 'Dùng ảnh PNG/JPG/WebP từ máy. Ảnh được cắt vuông và thu về 256×256.'
+                    : 'Use a PNG/JPG/WebP image. It is center-cropped and resized to 256×256.'}
+                </p>
+              </div>
+              <button
+                onClick={changeIcon}
+                disabled={iconBusy}
+                className="h-8 px-3 rounded-lg text-[11px] font-bold flex items-center gap-1.5 disabled:opacity-50 shrink-0"
+                style={{ background: c.accent, color: '#0a0a0a' }}
+              >
+                {iconBusy ? <ArrowsClockwise size={13} weight="bold" className="animate-spin" /> : <ImageSquare size={13} weight="duotone" />}
+                {lang === 'vi' ? 'Đổi icon' : 'Change icon'}
+              </button>
+              <button
+                onClick={removeIcon}
+                disabled={iconBusy || !iconUrl}
+                className="h-8 px-3 rounded-lg text-[11px] font-semibold disabled:opacity-35 shrink-0"
+                style={{ background: c.input, border: `1px solid ${c.border}`, color: c.label }}
+              >
+                {lang === 'vi' ? 'Xoá' : 'Remove'}
+              </button>
             </div>
 
             {instance.loader !== 'vanilla' && (
@@ -664,7 +936,38 @@ export default function InstanceSettingsPage({ instance, theme, lang, account, o
                 </div>
               )}
 
-              {exportDone && (
+              {exportDone?.url && (
+                <div className="rounded-lg px-3 py-2.5 flex flex-col gap-2" style={{ background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.3)' }}>
+                  <div className="flex items-center gap-2">
+                    <CheckCircle size={13} weight="fill" style={{ color: '#22c55e' }} />
+                    <span className="text-[10px] font-semibold" style={{ color: '#22c55e' }}>
+                      {lang === 'vi' ? 'Đã chia sẻ lên LunarSpace' : 'Shared to LunarSpace'}
+                    </span>
+                    <span className="ml-auto text-[10px] font-mono" style={{ color: c.label }}>
+                      {Math.round((exportDone.bytes || 0) / 104857.6) / 10} MB
+                    </span>
+                  </div>
+                  <p className="text-[9px] font-mono break-all" style={{ color: c.label }}>{exportDone.url}</p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => api.copyText(exportDone.url).catch(() => {})}
+                      className="h-7 px-2.5 rounded-md text-[10px] font-bold flex items-center gap-1"
+                      style={{ background: c.input, border: `1px solid ${c.border}`, color: c.label }}
+                    >
+                      <Copy size={11} /> {lang === 'vi' ? 'Copy link' : 'Copy link'}
+                    </button>
+                    <button
+                      onClick={() => api.openExternal(exportDone.url).catch(() => {})}
+                      className="h-7 px-2.5 rounded-md text-[10px] font-bold flex items-center gap-1"
+                      style={{ background: c.input, border: `1px solid ${c.border}`, color: c.label }}
+                    >
+                      <ArrowSquareOut size={11} /> {lang === 'vi' ? 'Mở trang' : 'Open page'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {exportDone && !exportDone.url && (
                 <div className="rounded-lg px-3 py-2.5 flex flex-col gap-1" style={{ background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.3)' }}>
                   <div className="flex items-center gap-2">
                     <CheckCircle size={13} weight="fill" style={{ color: '#22c55e' }} />
@@ -702,13 +1005,247 @@ export default function InstanceSettingsPage({ instance, theme, lang, account, o
               >
                 {exporting ? <ArrowsClockwise size={13} weight="bold" className="animate-spin" /> : <FileArrowUp size={13} weight="bold" />}
                 {exporting
-                  ? (lang === 'vi' ? 'Đang xuất…' : 'Exporting…')
+                  ? (exportFormat === 'share'
+                    ? (lang === 'vi' ? 'Đang chia sẻ…' : 'Sharing…')
+                    : (lang === 'vi' ? 'Đang xuất…' : 'Exporting…'))
                   : exportFormat === 'serverpack'
                     ? (lang === 'vi' ? 'Mở trang serverpack' : 'Open server pack page')
-                    : (lang === 'vi' ? 'Xuất profile' : 'Export profile')}
+                    : exportFormat === 'share'
+                      ? (lang === 'vi' ? 'Chia sẻ lên web' : 'Share to web')
+                      : (lang === 'vi' ? 'Xuất profile' : 'Export profile')}
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {shareOpen && (
+        <div
+          className="modal-backdrop fixed inset-0 z-[215] flex items-center justify-center p-4"
+          onClick={() => { if (!shareBusy) setShareOpen(false) }}
+        >
+          <div
+            className="modal-content w-full max-w-[640px] max-h-[92vh] rounded-2xl flex flex-col overflow-hidden"
+            style={{ background: c.surface, border: `1px solid ${c.border}` }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2 px-4 py-3" style={{ borderBottom: `1px solid ${c.border}` }}>
+              <ShareNetwork size={15} weight="duotone" style={{ color: c.accent }} />
+              <p className="text-[12px] font-bold flex-1" style={{ color: c.text }}>
+                {lang === 'vi' ? 'Chia sẻ modpack lên LunarSpace' : 'Share modpack to LunarSpace'}
+              </p>
+              <button
+                onClick={() => { if (!shareBusy) setShareOpen(false) }}
+                className="w-6 h-6 rounded-md flex items-center justify-center"
+                style={{ color: c.faint }}
+                disabled={shareBusy}
+              >
+                <X size={13} weight="bold" />
+              </button>
+            </div>
+
+            <div className="flex-1 min-h-0 overflow-y-auto p-4 flex flex-col gap-3">
+              <div className="flex items-center gap-4">
+                <img
+                  src={iconUrl || `./${loader.image}`}
+                  alt=""
+                  className="w-20 h-20 rounded-2xl object-cover shrink-0"
+                  style={{ background: c.input, border: `1px solid ${c.border}` }}
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-bold" style={{ color: c.text }}>
+                    {lang === 'vi' ? 'Ảnh đại diện modpack' : 'Modpack cover'}
+                  </p>
+                  <p className="mt-1 text-[10px] leading-relaxed" style={{ color: c.faint }}>
+                    {lang === 'vi'
+                      ? 'Ảnh được lưu trong instance và hiển thị trên web. Dùng PNG/JPG/WebP, tự cắt vuông 256×256.'
+                      : 'Stored in the instance and shown on the web. PNG/JPG/WebP, center-cropped to 256×256.'}
+                  </p>
+                </div>
+                <button
+                  onClick={async () => {
+                    const res = await changeIcon()
+                    if (res && !res.ok && !res.canceled) setShareError(res.error || 'error')
+                  }}
+                  disabled={iconBusy || shareBusy}
+                  className="h-8 px-3 rounded-lg text-[11px] font-bold flex items-center gap-1.5 shrink-0 disabled:opacity-50"
+                  style={{ background: c.input, border: `1px solid ${c.border}`, color: c.label }}
+                >
+                  {iconBusy ? <ArrowsClockwise size={13} weight="bold" className="animate-spin" /> : <ImageSquare size={13} weight="duotone" />}
+                  {lang === 'vi' ? 'Đổi ảnh' : 'Change image'}
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <label className="flex flex-col gap-1">
+                  <span className="text-[10px] font-semibold" style={{ color: c.label }}>{lang === 'vi' ? 'Tên modpack' : 'Modpack name'}</span>
+                  <input value={shareName} onChange={(e) => setShareName(e.target.value)} maxLength={80} className="h-8 px-2.5 rounded-lg text-[11px] outline-none" style={{ background: c.input, border: `1px solid ${c.border}`, color: c.text }} />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-[10px] font-semibold" style={{ color: c.label }}>{lang === 'vi' ? 'Phiên bản modpack' : 'Modpack version'}</span>
+                  <input value={shareVersion} onChange={(e) => setShareVersion(e.target.value)} maxLength={40} placeholder="1.0.0" className="h-8 px-2.5 rounded-lg text-[11px] font-mono outline-none" style={{ background: c.input, border: `1px solid ${c.border}`, color: c.text }} />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-[10px] font-semibold" style={{ color: c.label }}>{lang === 'vi' ? 'Người chia sẻ' : 'Author'}</span>
+                  <input value={shareAuthor} onChange={(e) => setShareAuthor(e.target.value)} maxLength={40} placeholder={account?.name || ''} className="h-8 px-2.5 rounded-lg text-[11px] outline-none" style={{ background: c.input, border: `1px solid ${c.border}`, color: c.text }} />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-[10px] font-semibold" style={{ color: c.label }}>{lang === 'vi' ? 'Mô tả ngắn' : 'Short summary'}</span>
+                  <input value={shareSummary} onChange={(e) => setShareSummary(e.target.value)} maxLength={280} placeholder={lang === 'vi' ? 'Vài dòng giới thiệu…' : 'A short introduction…'} className="h-8 px-2.5 rounded-lg text-[11px] outline-none" style={{ background: c.input, border: `1px solid ${c.border}`, color: c.text }} />
+                </label>
+              </div>
+
+              <div className="lshare-editor flex flex-col gap-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] font-semibold" style={{ color: c.label }}>{lang === 'vi' ? 'Mô tả đầy đủ' : 'Full description'}</span>
+                  <span className="text-[9px]" style={{ color: c.faint }}>{lang === 'vi' ? 'Có thể chèn ảnh vào mô tả' : 'Images can be inserted'}</span>
+                </div>
+                <div className="rounded-lg overflow-hidden" style={{ border: `1px solid ${c.border}`, background: c.input }}>
+                  <div className="flex flex-wrap items-center gap-0.5 px-1.5 py-1" style={{ borderBottom: `1px solid ${c.border}`, background: c.surface }}>
+                    <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => execShare('undo')} title={lang === 'vi' ? 'Hoàn tác' : 'Undo'} className="w-7 h-7 rounded-md flex items-center justify-center hover:opacity-70" style={{ color: c.label }}>
+                      <ArrowCounterClockwise size={13} />
+                    </button>
+                    <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => execShare('redo')} title={lang === 'vi' ? 'Làm lại' : 'Redo'} className="w-7 h-7 rounded-md flex items-center justify-center hover:opacity-70" style={{ color: c.label }}>
+                      <ArrowClockwise size={13} />
+                    </button>
+                    <span className="w-px h-5 mx-1" style={{ background: c.border }} />
+                    {SHARE_TOOLS.map((tool) => {
+                      const Icon = tool.icon
+                      return (
+                        <button key={`${tool.cmd}-${tool.value || ''}`} type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => execShare(tool.cmd, tool.value || null)} title={lang === 'vi' ? tool.title[0] : tool.title[1]} className="w-7 h-7 rounded-md flex items-center justify-center hover:opacity-70" style={{ color: c.label }}>
+                          <Icon size={14} />
+                        </button>
+                      )
+                    })}
+                    <span className="w-px h-5 mx-1" style={{ background: c.border }} />
+                    <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={addShareLink} title={lang === 'vi' ? 'Chèn liên kết' : 'Insert link'} className="w-7 h-7 rounded-md flex items-center justify-center hover:opacity-70" style={{ color: c.label }}>
+                      <LinkSimple size={14} />
+                    </button>
+                    <button type="button" onMouseDown={(e) => { e.preventDefault(); saveInlineSelection() }} onClick={() => inlineFileRef.current?.click()} title={lang === 'vi' ? 'Chèn ảnh vào mô tả' : 'Insert image'} className="w-7 h-7 rounded-md flex items-center justify-center hover:opacity-70" style={{ color: c.accent }}>
+                      <ImageSquare size={14} />
+                    </button>
+                    <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => execShare('removeFormat')} title={lang === 'vi' ? 'Xoá định dạng' : 'Clear formatting'} className="w-7 h-7 rounded-md flex items-center justify-center hover:opacity-70" style={{ color: c.label }}>
+                      <Eraser size={14} />
+                    </button>
+                    <input ref={inlineFileRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) insertShareImage(file); e.target.value = '' }} />
+                  </div>
+                  <div
+                    ref={descRef}
+                    contentEditable
+                    suppressContentEditableWarning
+                    role="textbox"
+                    aria-multiline="true"
+                    onInput={(e) => setShareDescription(e.currentTarget.innerHTML)}
+                    className="px-3 py-2.5 text-[11px] leading-relaxed outline-none min-h-[180px] max-h-[340px] overflow-y-auto"
+                    style={{ color: c.text }}
+                    data-placeholder={lang === 'vi' ? 'Giới thiệu nội dung, mod, cách chơi, lưu ý khi cài…' : 'Content, mods, gameplay, install notes…'}
+                  />
+                </div>
+                <style>{`.lshare-editor [contenteditable]:empty::before{content:attr(data-placeholder);color:var(--faint);pointer-events:none}`}</style>
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] font-semibold" style={{ color: c.label }}>{lang === 'vi' ? 'Ảnh preview' : 'Preview images'}</span>
+                  <button type="button" onClick={() => galleryFileRef.current?.click()} disabled={shareGallery.length >= 8} className="h-7 px-2.5 rounded-md text-[10px] font-bold flex items-center gap-1 disabled:opacity-40" style={{ background: c.input, border: `1px solid ${c.border}`, color: c.label }}>
+                    <Plus size={11} /> {lang === 'vi' ? 'Thêm ảnh' : 'Add images'}
+                  </button>
+                  <input ref={galleryFileRef} type="file" accept="image/png,image/jpeg,image/webp" multiple className="hidden" onChange={(e) => { addShareGallery(e.target.files); e.target.value = '' }} />
+                </div>
+                {shareGallery.length === 0 ? (
+                  <p className="text-[9px] leading-relaxed" style={{ color: c.faint }}>
+                    {lang === 'vi' ? 'Thêm vài ảnh chụp để người khác xem trước modpack. Tối đa 8 ảnh.' : 'Add screenshots so others can preview the pack. Up to 8 images.'}
+                  </p>
+                ) : (
+                  <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+                    {shareGallery.map((item) => (
+                      <div key={item.token} className="relative group rounded-lg overflow-hidden" style={{ border: `1px solid ${c.border}` }}>
+                        <img src={item.data} alt="" className="w-full h-16 object-cover" />
+                        <div className="absolute inset-0 flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity" style={{ background: 'rgba(0,0,0,0.55)' }}>
+                          <button type="button" onClick={() => setSharePreview(item.data)} title="Preview" className="w-6 h-6 rounded-md flex items-center justify-center" style={{ background: 'rgba(255,255,255,0.16)', color: '#fff' }}>
+                            <Eye size={11} />
+                          </button>
+                          <button type="button" onClick={() => setShareGallery((prev) => prev.filter((row) => row.token !== item.token))} title="Remove" className="w-6 h-6 rounded-md flex items-center justify-center" style={{ background: 'rgba(239,68,68,0.72)', color: '#fff' }}>
+                            <Trash size={11} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 rounded-lg px-3 py-2" style={{ background: c.input, border: `1px solid ${c.border}` }}>
+                <span className="text-[9px] font-mono px-1.5 py-0.5 rounded" style={{ background: c.surface, color: c.label }}>MC {instance.version}</span>
+                <span className="text-[9px] font-mono px-1.5 py-0.5 rounded" style={{ background: c.surface, color: c.label }}>{instance.loader}{instance.loaderVersion ? ` ${instance.loaderVersion}` : ''}</span>
+                <span className="text-[9px] font-mono px-1.5 py-0.5 rounded" style={{ background: c.surface, color: c.label }}>{instance.memoryMb} MB</span>
+              </div>
+
+              {shareError && (
+                <div className="flex items-start gap-2 rounded-lg px-3 py-2" style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.28)' }}>
+                  <WarningCircle size={13} weight="duotone" className="shrink-0 mt-0.5" style={{ color: '#f87171' }} />
+                  <span className="text-[10px] leading-relaxed" style={{ color: '#f87171' }}>{shareError}</span>
+                </div>
+              )}
+
+              {shareResult && (
+                <div className="rounded-lg px-3 py-2.5 flex flex-col gap-2" style={{ background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.3)' }}>
+                  <div className="flex items-center gap-2">
+                    <CheckCircle size={13} weight="fill" style={{ color: '#22c55e' }} />
+                    <span className="text-[10px] font-semibold" style={{ color: '#22c55e' }}>
+                      {lang === 'vi' ? 'Đã chia sẻ lên LunarSpace' : 'Shared to LunarSpace'}
+                    </span>
+                    <span className="ml-auto text-[10px] font-mono" style={{ color: c.label }}>
+                      {Math.round((shareResult.bytes || 0) / 104857.6) / 10} MB
+                    </span>
+                  </div>
+                  <p className="text-[9px] font-mono break-all" style={{ color: c.label }}>{shareResult.url}</p>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => api.copyText(shareResult.url).catch(() => {})} className="h-7 px-2.5 rounded-md text-[10px] font-bold flex items-center gap-1" style={{ background: c.input, border: `1px solid ${c.border}`, color: c.label }}>
+                      <Copy size={11} /> Copy link
+                    </button>
+                    <button onClick={() => api.openExternal(shareResult.url).catch(() => {})} className="h-7 px-2.5 rounded-md text-[10px] font-bold flex items-center gap-1" style={{ background: c.input, border: `1px solid ${c.border}`, color: c.label }}>
+                      <ArrowSquareOut size={11} /> {lang === 'vi' ? 'Mở trang' : 'Open page'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="px-4 py-3 flex items-center gap-2 justify-end" style={{ borderTop: `1px solid ${c.border}` }}>
+              <button
+                onClick={() => { if (!shareBusy) setShareOpen(false) }}
+                disabled={shareBusy}
+                className="h-8 px-3 rounded-lg text-[11px] font-semibold disabled:opacity-50"
+                style={{ background: c.input, border: `1px solid ${c.border}`, color: c.label }}
+              >
+                {lang === 'vi' ? 'Đóng' : 'Close'}
+              </button>
+              {!shareResult && (
+                <button
+                  onClick={submitShare}
+                  disabled={shareBusy || !shareName.trim()}
+                  className="h-8 px-4 rounded-lg text-[11px] font-bold flex items-center gap-2 disabled:opacity-60"
+                  style={{ background: c.accent, color: '#0a0a0a' }}
+                >
+                  {shareBusy ? <ArrowsClockwise size={13} weight="bold" className="animate-spin" /> : <ShareNetwork size={13} weight="bold" />}
+                  {shareBusy
+                    ? (lang === 'vi' ? 'Đang chia sẻ…' : 'Sharing…')
+                    : (lang === 'vi' ? 'Chia sẻ lên web' : 'Share to web')}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {sharePreview && (
+        <div
+          className="fixed inset-0 z-[230] flex items-center justify-center p-8"
+          style={{ background: 'rgba(0,0,0,0.82)' }}
+          onClick={() => setSharePreview('')}
+        >
+          <img src={sharePreview} alt="" className="max-w-full max-h-full rounded-xl object-contain" style={{ border: `1px solid ${c.border}` }} onClick={(e) => e.stopPropagation()} />
         </div>
       )}
     </div>

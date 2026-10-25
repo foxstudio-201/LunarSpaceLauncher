@@ -7,6 +7,7 @@ const { MODRINTH, CF, cfJson, normName } = require('./modpack.cjs')
 const { UA } = require('./net.cjs')
 
 const SKIP_TOP = new Set(['logs', 'crash-reports', 'screenshots', 'saves', 'instance.json', 'launcher_profiles.json'])
+const SHARE_SKIP_TOP = new Set([...SKIP_TOP, 'resourcepacks', 'shaderpacks', 'local-captures', 'replay_recordings'])
 
 const PLAN_FILES = ['.lunaspace-modpack.json']
 
@@ -14,6 +15,7 @@ const FORMATS = {
   mrpack: { ext: '.mrpack', label: 'Modrinth .mrpack' },
   curseforge: { ext: '.zip', label: 'CurseForge .zip' },
   zip: { ext: '.zip', label: 'Zip cơ bản' },
+  share: { ext: '.zip', label: 'LunarSpace Modpack .zip' },
 }
 
 async function postJson(url, body) {
@@ -36,7 +38,7 @@ function loaderKey(loader) {
   return ['forge', 'fabric', 'quilt', 'neoforge'].includes(value) ? value : null
 }
 
-async function walk(root, rel = '', out = []) {
+async function walk(root, rel = '', out = [], skipTop = SKIP_TOP) {
   const dir = path.join(root, rel)
   let entries = []
   try {
@@ -46,10 +48,10 @@ async function walk(root, rel = '', out = []) {
   }
   for (const entry of entries) {
     const next = rel ? `${rel}/${entry.name}` : entry.name
-    if (!rel && SKIP_TOP.has(entry.name)) continue
+    if (!rel && skipTop.has(entry.name)) continue
     if (entry.name.startsWith('.')) continue
     if (entry.isDirectory()) {
-      await walk(root, next, out)
+      await walk(root, next, out, skipTop)
     } else if (entry.isFile()) {
       out.push(next)
     }
@@ -234,7 +236,8 @@ function modlistHtml(rows) {
 async function exportProfile({ entry, format = 'zip', targetPath, onProgress, onLog } = {}) {
   const dir = entry?.dir
   if (!dir) throw new Error('Phiên bản chưa có thư mục.')
-  const kind = FORMATS[format] ? format : 'zip'
+  const kind = format === 'share' ? 'zip' : (FORMATS[format] ? format : 'zip')
+  const share = format === 'share'
   const plan = kind === 'zip' ? null : await readPlan(dir)
   const mc = plan?.mc || entry.version || ''
   const loader = plan?.loader || entry.loader || 'vanilla'
@@ -242,7 +245,7 @@ async function exportProfile({ entry, format = 'zip', targetPath, onProgress, on
   const packName = plan?.name || entry.name || 'Modpack'
   const packVersion = plan?.version || '1.0.0'
 
-  const files = await walk(dir)
+  const files = await walk(dir, '', [], share ? SHARE_SKIP_TOP : SKIP_TOP)
   const mods = files.filter((rel) => /^mods\/.+\.jar$/i.test(rel))
   const others = files.filter((rel) => !/^mods\//i.test(rel))
 
@@ -264,24 +267,25 @@ async function exportProfile({ entry, format = 'zip', targetPath, onProgress, on
 
   try {
     if (kind === 'zip') {
-      zip.addBuffer(
-        'lunarspace-profile.json',
-        JSON.stringify(
-          {
-            formatVersion: 1,
-            exportedBy: 'LunarSpace Launcher',
-            name: entry.name,
-            minecraft: entry.version,
-            loader: entry.loader,
-            loaderVersion: entry.loaderVersion || null,
-            exportedAt: new Date().toISOString(),
-          },
-          null,
-          2,
-        ),
+      const profileJson = JSON.stringify(
+        {
+          formatVersion: 1,
+          exportedBy: 'LunarSpace Launcher',
+          shared: share,
+          name: entry.name,
+          minecraft: entry.version,
+          loader: entry.loader,
+          loaderVersion: entry.loaderVersion || null,
+          exportedAt: new Date().toISOString(),
+        },
+        null,
+        2,
       )
+      if (share) await zip.addBufferAsync('lunarspace-profile.json', profileJson)
+      else zip.addBuffer('lunarspace-profile.json', profileJson)
       for (const rel of files) {
-        zip.addFile(rel, path.join(dir, rel))
+        if (share) await zip.addFileAsync(rel, path.join(dir, rel))
+        else zip.addFile(rel, path.join(dir, rel))
         tick(rel)
       }
       report.overrides = total
@@ -386,7 +390,7 @@ async function exportProfile({ entry, format = 'zip', targetPath, onProgress, on
       onLog?.(`[LunarSpace] Xuất zip CurseForge: ${report.identified}/${mods.length} mod theo ID, ${report.overrides} tệp trong overrides.`)
     }
 
-    const out = zip.close()
+    const out = share ? await zip.closeAsync() : zip.close()
     return {
       ok: true,
       format: kind,

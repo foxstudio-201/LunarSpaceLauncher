@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, clipboard, safeStorage, dialog, protocol } = require('electron')
+const { app, BrowserWindow, ipcMain, shell, clipboard, safeStorage, dialog, protocol, nativeImage } = require('electron')
 const path = require('path')
 const fs = require('fs')
 
@@ -648,6 +648,32 @@ function registerIpc() {
     if (picked.canceled || !picked.filePath) return { ok: false, canceled: true }
     return launcher.exportProfile({ id, format, targetPath: picked.filePath, settings }, emitLauncher)
   })
+
+  ipcMain.handle('launcher:share-instance', (_e, opts) => launcher.shareInstance(opts || {}, emitLauncher))
+
+  ipcMain.handle('launcher:set-instance-icon', async (_e, { id } = {}) => {
+    const picked = await dialog.showOpenDialog(mainWindow, {
+      title: 'Chọn ảnh icon cho instance',
+      properties: ['openFile'],
+      filters: [{ name: 'Ảnh', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
+      buttonLabel: 'Dùng ảnh này',
+    })
+    if (picked.canceled || !picked.filePaths?.[0]) return { ok: false, canceled: true }
+    const img = nativeImage.createFromPath(picked.filePaths[0])
+    if (img.isEmpty()) return { ok: false, error: 'Không đọc được ảnh.' }
+    const size = img.getSize()
+    const side = Math.max(1, Math.min(size.width, size.height))
+    const cropped = img.crop({
+      x: Math.max(0, Math.floor((size.width - side) / 2)),
+      y: Math.max(0, Math.floor((size.height - side) / 2)),
+      width: side,
+      height: side,
+    })
+    const png = cropped.resize({ width: 256, height: 256, quality: 'best' }).toPNG()
+    return launcher.setInstanceIcon({ id, png })
+  })
+
+  ipcMain.handle('launcher:clear-instance-icon', (_e, opts) => launcher.clearInstanceIcon(opts || {}))
 
   ipcMain.handle('launcher:serverpack-plan', (_e, opts) => launcher.serverpackPlan({ ...(opts || {}), settings: readSettings() }))
   ipcMain.handle('launcher:instance-tree', (_e, opts) => launcher.instanceTree(opts || {}))

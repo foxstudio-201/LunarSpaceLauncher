@@ -726,7 +726,8 @@ function profilePlan({ zipPath, entries, onLog }) {
   }
   const mc = String(profile.minecraft || '')
   if (!mc) throw new Error('Profile này không ghi phiên bản Minecraft.')
-  const loader = LOADER_IDS.includes(String(profile.loader || '').toLowerCase()) ? String(profile.loader).toLowerCase() : 'vanilla'
+  const rawLoader = String(profile.loader || '').toLowerCase()
+  const loader = rawLoader === 'lunar' ? 'lunar' : (LOADER_IDS.includes(rawLoader) ? rawLoader : 'vanilla')
   const overrides = []
   let count = 0
   for (const entry of entries) {

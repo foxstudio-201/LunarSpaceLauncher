@@ -125,9 +125,16 @@ export default function OverviewPage({
   const defaultPick = hasUpdate ? latest?.id : installedVersion?.id || latest?.id || ''
   const pickValue = pickId || defaultPick
   const pickedVersion = usable.find((v) => v.id === pickValue) || null
+  const packSourceName = pack?.source === 'curseforge'
+    ? 'CurseForge'
+    : pack?.source === 'lunar'
+      ? 'LunarSpace'
+      : 'Modrinth'
   const pageLink = packDetail?.links?.[0]?.url || (pack?.source === 'curseforge'
     ? `https://www.curseforge.com/minecraft/modpacks/${packDetail?.slug || pack?.projectId || ''}`
-    : `https://modrinth.com/modpack/${packDetail?.slug || pack?.projectId || ''}`)
+    : pack?.source === 'lunar'
+      ? `https://lunarspace.site/modpacks/${packDetail?.slug || pack?.projectId || ''}`
+      : `https://modrinth.com/modpack/${packDetail?.slug || pack?.projectId || ''}`)
   const updating = updateBusy || (!locked && instProgress?.label === 'update')
   const canUpdate = !!pickValue && !busy && !locked && !updateBusy
 
@@ -200,12 +207,12 @@ export default function OverviewPage({
                     <span
                       className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide"
                       style={{
-                        background: pack?.source === 'curseforge' ? 'rgba(245,158,11,0.16)' : 'rgba(34,197,94,0.16)',
-                        border: `1px solid ${pack?.source === 'curseforge' ? 'rgba(245,158,11,0.4)' : 'rgba(34,197,94,0.4)'}`,
-                        color: pack?.source === 'curseforge' ? '#fbbf24' : '#4ade80',
+                        background: pack?.source === 'curseforge' ? 'rgba(245,158,11,0.16)' : pack?.source === 'lunar' ? 'rgba(167,139,250,0.16)' : 'rgba(34,197,94,0.16)',
+                        border: `1px solid ${pack?.source === 'curseforge' ? 'rgba(245,158,11,0.4)' : pack?.source === 'lunar' ? 'rgba(167,139,250,0.4)' : 'rgba(34,197,94,0.4)'}`,
+                        color: pack?.source === 'curseforge' ? '#fbbf24' : pack?.source === 'lunar' ? '#c4b5fd' : '#4ade80',
                       }}
                     >
-                      {pack?.source === 'curseforge' ? 'CurseForge' : 'Modrinth'}
+                      {packSourceName}
                     </span>
                     {hasUpdate && (
                       <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide" style={{ background: 'rgba(167,139,250,0.16)', border: `1px solid ${c.accent}55`, color: c.accent }}>
@@ -253,7 +260,7 @@ export default function OverviewPage({
 
               <div className="grid grid-cols-4 gap-3">
                 {[
-                  { label: vn(lang, 'Nguồn', 'Source'), value: pack?.source === 'curseforge' ? 'CurseForge' : 'Modrinth' },
+                  { label: vn(lang, 'Nguồn', 'Source'), value: packSourceName },
                   { label: vn(lang, 'Đã cài', 'Installed'), value: installedName || '—' },
                   { label: vn(lang, 'Bản mới nhất', 'Latest'), value: latest ? latest.name || latest.versionNumber : '—' },
                   { label: vn(lang, 'Tệp trong pack', 'Pack files'), value: pack?.marker?.files ? String(pack.marker.files) : '—' },

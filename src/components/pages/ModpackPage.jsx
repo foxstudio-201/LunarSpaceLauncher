@@ -31,11 +31,16 @@ const KIND = 'modpacks'
 const SOURCES = [
   { id: 'modrinth', name: 'Modrinth', host: 'modrinth.com' },
   { id: 'curseforge', name: 'CurseForge', host: 'curseforge.com' },
+  { id: 'lunar', name: 'LunarModpack', host: 'lunarspace.site' },
 ]
+
+const SOURCE_NAMES = { modrinth: 'Modrinth', curseforge: 'CurseForge', lunar: 'LunarModpack' }
+const sourceName = (source) => SOURCE_NAMES[source] || 'LunarSpace'
 
 const SORTS = {
   modrinth: ['relevance', 'downloads', 'follows', 'newest', 'updated'],
   curseforge: ['relevance', 'downloads', 'updated'],
+  lunar: ['newest', 'downloads', 'name'],
 }
 
 const SORT_LABELS = {
@@ -44,6 +49,7 @@ const SORT_LABELS = {
   follows: ['Theo dõi', 'Most followed'],
   newest: ['Mới nhất', 'Newest'],
   updated: ['Vừa cập nhật', 'Recently updated'],
+  name: ['Tên A–Z', 'Name A–Z'],
 }
 
 const LOADERS = { vanilla: 'Vanilla', fabric: 'Fabric', quilt: 'Quilt', forge: 'Forge', neoforge: 'NeoForge' }
@@ -199,8 +205,11 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
   const pickSource = useCallback((next) => {
     if (next === source) return
     setSource(next)
+    setSort((SORTS[next] || SORTS.modrinth)[0])
     setFilterTag('')
     setFilterEnv('')
+    setFilterGame('')
+    setFilterLoaderOuter('')
   }, [source])
 
   const swap = useCallback((next) => {
@@ -538,7 +547,7 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
             <p className="text-[10px] truncate" style={{ color: c.faint }}>
               {imported
                 ? vn(lang, 'Modpack từ tệp', 'Modpack from file')
-                : `${selected?.author || '—'} · ${selected?.source === 'curseforge' ? 'CurseForge' : 'Modrinth'}`}
+                : `${selected?.author || '—'} · ${sourceName(selected?.source)}`}
             </p>
           </div>
           {!imported && latest && (
@@ -644,7 +653,7 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
                       <span className="font-mono break-all">{imported.path}</span>
                     ) : (
                       <>
-                        {selected?.author || '—'} · {selected?.source === 'curseforge' ? 'CurseForge' : 'Modrinth'} ·{' '}
+                        {selected?.author || '—'} · {sourceName(selected?.source)} ·{' '}
                         <span className="font-mono">{compact(selected?.downloads)}</span> {vn(lang, 'lượt tải', 'downloads')}
                         {selected?.updated ? ` · ${timeAgo(selected.updated, lang)}` : ''}
                       </>
@@ -740,7 +749,9 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
                 ) : tab === 'about' && (
                   <div className="flex flex-col gap-5">
                     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-                      <Stat c={c} label={vn(lang, 'Nguồn', 'Source')} value={selected?.source === 'curseforge' ? 'CurseForge' : 'Modrinth'} />
+                      <Stat c={c} label={vn(lang, 'Nguồn', 'Source')} value={sourceName(selected?.source)} />
+                      <Stat c={c} label={vn(lang, 'Phiên bản', 'Version')} value={detail?.version || selected?.version || '—'} />
+                      <Stat c={c} label={vn(lang, 'Tác giả', 'Author')} value={detail?.author || selected?.author || '—'} />
                       <Stat c={c} label={vn(lang, 'Lượt tải', 'Downloads')} value={compact(selected?.downloads)} />
                       <Stat c={c} label={vn(lang, 'Theo dõi', 'Followers')} value={followersOf(detail, selected)} />
                       <Stat c={c} label={vn(lang, 'Phát hành', 'Published')} value={detail?.created ? formatDate(detail.created, lang) : '—'} />
@@ -1017,7 +1028,7 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
                                           className="text-[10px] font-semibold flex items-center gap-1 shrink-0"
                                           style={{ color: c.accent }}
                                         >
-                                          {vn(lang, 'Xem trên', 'View on')} {selected?.source === 'curseforge' ? 'CurseForge' : 'Modrinth'}
+                                          {vn(lang, 'Xem trên', 'View on')} {sourceName(selected?.source)}
                                           <ArrowSquareOut size={10} />
                                         </button>
                                       )}
@@ -1270,6 +1281,11 @@ function PackCard({ c, lang, hit, onOpen }) {
           <p className="text-[11px] font-bold truncate leading-tight" style={{ color: c.text }}>{hit.name}</p>
           <p className="mt-0.5 text-[10px] truncate" style={{ color: c.faint }}>{hit.author || '—'}</p>
         </div>
+        {hit.versionCount > 1 && (
+          <span className="text-[9px] font-mono px-1.5 py-0.5 rounded shrink-0" style={{ background: c.input, color: c.label }}>
+            {hit.versionCount} bản
+          </span>
+        )}
         <span className="flex items-center gap-1 text-[9px] font-mono tabular-nums shrink-0" style={{ color: c.faint }}>
           <DownloadSimple size={10} />
           {compact(hit.downloads)}
