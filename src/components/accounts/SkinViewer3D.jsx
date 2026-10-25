@@ -716,17 +716,17 @@ export default function SkinViewer3D({
     }
     state.requestRender = requestRender
 
-    const makeBox = ({ width, height, depth, u, v, x, y, z, material, layer, assetKey, part, withBase = false }) => {
+    const makeBox = ({ width, height, depth, u, v, x, y, z, material, layer, assetKey, part, withBase = false, uvWidth = width, uvHeight = height, uvDepth = depth }) => {
       const geometry = new THREE.BoxGeometry(width, height, depth)
       const textureWidth = 64
       const textureHeight = assetKey === 'cape' ? 32 : 64
-      applyUVs(geometry, u, v, width, height, depth, textureWidth, textureHeight)
+      applyUVs(geometry, u, v, uvWidth, uvHeight, uvDepth, textureWidth, textureHeight)
       const mesh = new THREE.Mesh(geometry, material)
       mesh.position.set(x, y, z)
       mesh.userData = {
         textureWidth,
         textureHeight,
-        rects: faceRects(u, v, width, height, depth),
+        rects: faceRects(u, v, uvWidth, uvHeight, uvDepth),
         bases: faceBases(geometry),
         layer,
         asset: assetKey,
@@ -770,12 +770,12 @@ export default function SkinViewer3D({
         inner.push(mesh)
       }
       const outerParts = [
-        { part: 'head', width: 9, height: 9, depth: 9, u: 32, v: 0, x: 0, y: 12, z: 0 },
-        { part: 'body', width: 8.5, height: 12.5, depth: 4.5, u: 16, v: 32, x: 0, y: 2, z: 0 },
-        { part: 'rightArm', width: armWidth + 0.5, height: 12.5, depth: 4.5, u: 40, v: 32, x: -armX, y: 2, z: 0 },
-        { part: 'leftArm', width: armWidth + 0.5, height: 12.5, depth: 4.5, u: 48, v: 48, x: armX, y: 2, z: 0 },
-        { part: 'rightLeg', width: 4.5, height: 12.5, depth: 4.5, u: 0, v: 32, x: -2.075, y: -10, z: -0.1 },
-        { part: 'leftLeg', width: 4.5, height: 12.5, depth: 4.5, u: 0, v: 48, x: 2.075, y: -10, z: -0.1 },
+        { part: 'head', width: 9, height: 9, depth: 9, uvWidth: 8, uvHeight: 8, uvDepth: 8, u: 32, v: 0, x: 0, y: 12, z: 0 },
+        { part: 'body', width: 8.5, height: 12.5, depth: 4.5, uvWidth: 8, uvHeight: 12, uvDepth: 4, u: 16, v: 32, x: 0, y: 2, z: 0 },
+        { part: 'rightArm', width: armWidth + 0.5, height: 12.5, depth: 4.5, uvWidth: armWidth, uvHeight: 12, uvDepth: 4, u: 40, v: 32, x: -armX, y: 2, z: 0 },
+        { part: 'leftArm', width: armWidth + 0.5, height: 12.5, depth: 4.5, uvWidth: armWidth, uvHeight: 12, uvDepth: 4, u: 48, v: 48, x: armX, y: 2, z: 0 },
+        { part: 'rightLeg', width: 4.5, height: 12.5, depth: 4.5, uvWidth: 4, uvHeight: 12, uvDepth: 4, u: 0, v: 32, x: -2.075, y: -10, z: -0.1 },
+        { part: 'leftLeg', width: 4.5, height: 12.5, depth: 4.5, uvWidth: 4, uvHeight: 12, uvDepth: 4, u: 0, v: 48, x: 2.075, y: -10, z: -0.1 },
       ]
       for (const part of outerParts) {
         const mesh = makeBox({ ...part, material: outerMaterial, layer: 'outer', assetKey: 'skin' })
