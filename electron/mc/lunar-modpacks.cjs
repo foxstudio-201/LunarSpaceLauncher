@@ -117,24 +117,70 @@ async function download({ id, dest, onProgress } = {}) {
   if (!id) throw new Error('Thiếu modpack.')
   if (!dest) throw new Error('Thiếu đường dẫn tải.')
   await fsp.mkdir(path.dirname(dest), { recursive: true })
-  const res = await fetch(downloadUrl(id), {
-    headers: { 'User-Agent': UA },
-    signal: AbortSignal.timeout(600000),
-  })
-  if (!res.ok || !res.body) {
-    throw new Error(`Tải modpack thất bại (HTTP ${res.status})`)
+  const url = downloadUrl(id)
+  const headers = { 'User-Agent': UA, Accept: '*/*' }
+
+  const streamFull = async (response) => {
+    if (!response.ok || !response.body) {
+      throw new Error(`Tải modpack thất bại (HTTP ${response.status})`)
+    }
+    const total = Number(response.headers.get('content-length') || 0)
+    let done = 0
+    const counter = new Transform({
+      transform(chunk, _encoding, callback) {
+        done += chunk.length
+        onProgress?.({ done, total })
+        callback(null, chunk)
+      },
+    })
+    await pipeline(Readable.fromWeb(response.body), counter, fs.createWriteStream(dest))
+    return { ok: true, path: dest, bytes: done || (await fsp.stat(dest)).size }
   }
-  const total = Number(res.headers.get('content-length') || 0)
-  let done = 0
-  const counter = new Transform({
-    transform(chunk, _encoding, callback) {
-      done += chunk.length
-      onProgress?.({ done, total })
-      callback(null, chunk)
-    },
-  })
-  await pipeline(Readable.fromWeb(res.body), counter, fs.createWriteStream(dest))
-  return { ok: true, path: dest, bytes: done || (await fsp.stat(dest)).size }
+
+  let total = 0
+  try {
+    const head = await fetch(url, { method: 'HEAD', headers, signal: AbortSignal.timeout(30000) })
+    if (head.ok) total = Number(head.headers.get('content-length') || 0)
+  } catch {}
+
+  if (!total) {
+    const response = await fetch(url, { headers, signal: AbortSignal.timeout(600000) })
+    return streamFull(response)
+  }
+
+  const handle = await fsp.open(dest, 'w')
+  let offset = 0
+  try {
+    while (offset < total) {
+      const end = Math.min(offset + 8388608 - 1, total - 1)
+      const response = await fetch(url, {
+        headers: { ...headers, Range: `bytes=${offset}-${end}` },
+        signal: AbortSignal.timeout(120000),
+      })
+      if (response.status === 200) {
+        await handle.close()
+        return streamFull(response)
+      }
+      if (response.status !== 206) {
+        throw new Error(`Tải modpack thất bại (HTTP ${response.status})`)
+      }
+      const contentRange = String(response.headers.get('content-range') || '')
+      const rangeMatch = contentRange.match(/\/(\d+)$/)
+      if (rangeMatch) total = Number(rangeMatch[1]) || total
+      const buffer = Buffer.from(await response.arrayBuffer())
+      if (!buffer.length) break
+      let written = 0
+      while (written < buffer.length) {
+        const result = await handle.write(buffer, written, buffer.length - written, offset + written)
+        written += result.bytesWritten
+      }
+      offset += written
+      onProgress?.({ done: offset, total })
+    }
+    return { ok: true, path: dest, bytes: offset }
+  } finally {
+    await handle.close().catch(() => {})
+  }
 }
 
 async function upload({ zipPath, meta = {}, iconPath = '', iconBuffer = null, onProgress } = {}) {
