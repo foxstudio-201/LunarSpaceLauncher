@@ -41,6 +41,7 @@ export default function ContentFolderPage({
   const instProgress = progress?.[instance.id]
   const [entries, setEntries] = useState([])
   const [query, setQuery] = useState('')
+  const [view, setView] = useState('active')
   const [sortBy, setSortBy] = useState(lastSortBy)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -206,6 +207,12 @@ export default function ContentFolderPage({
     }
   }, [selectMode])
 
+  useEffect(() => {
+    setSelected([])
+    setPending(null)
+    setMenu(null)
+  }, [view])
+
   const notify = (message, tone = 'ok') => {
     setFlash({ message, tone })
     setTimeout(() => setFlash(null), 2600)
@@ -274,9 +281,16 @@ export default function ContentFolderPage({
     setSelected((prev) => (prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]))
   }
 
+  const activeCount = useMemo(() => entries.filter((entry) => !entry.disabled).length, [entries])
+  const disabledCount = entries.length - activeCount
+  const viewEntries = useMemo(
+    () => entries.filter((entry) => (view === 'disabled' ? !!entry.disabled : !entry.disabled)),
+    [entries, view],
+  )
+
   const needle = query.trim().toLowerCase()
   const shown = useMemo(() => {
-    const base = needle ? entries.filter((entry) => String(entry.name || '').toLowerCase().includes(needle)) : entries
+    const base = needle ? viewEntries.filter((entry) => String(entry.name || '').toLowerCase().includes(needle)) : viewEntries
     const list = [...base]
     const byName = (a, b) => String(a.name || '').localeCompare(String(b.name || ''))
     if (sortBy === 'size-asc') list.sort((a, b) => (a.size || 0) - (b.size || 0) || byName(a, b))
@@ -284,7 +298,7 @@ export default function ContentFolderPage({
     else if (sortBy === 'time-asc') list.sort((a, b) => (a.mtime || 0) - (b.mtime || 0) || byName(a, b))
     else if (sortBy === 'time-desc' || sortBy === 'recent') list.sort((a, b) => (b.mtime || 0) - (a.mtime || 0) || byName(a, b))
     return list
-  }, [entries, needle, sortBy])
+  }, [viewEntries, needle, sortBy])
 
   const setSort = (value) => {
     lastSortBy = value
@@ -301,7 +315,7 @@ export default function ContentFolderPage({
   ]
   const virtual = useVirtual({ containerRef: listRef, wrapRef: rowsRef, count: shown.length, rowHeight: 41, overscan: 6 })
   const allSelected = shown.length > 0 && selected.every((name) => shown.some((entry) => entry.name === name))
-  const toggleAll = () => setSelected(allSelected ? [] : entries.map((e) => e.name))
+  const toggleAll = () => setSelected(allSelected ? [] : viewEntries.map((e) => e.name))
 
   const onRowClick = (entry) => {
     setMenu(null)
@@ -414,7 +428,7 @@ export default function ContentFolderPage({
           style={{ background: c.input, border: `1px solid ${c.border}`, color: c.text }}
         />
         <span className="text-[10px]" style={{ color: c.label }}>
-          {entries.length} {t(lang, 'files.items')}
+          {viewEntries.length} {t(lang, 'files.items')}
         </span>
         <button
           onClick={() => reveal('')}
@@ -439,12 +453,36 @@ export default function ContentFolderPage({
         </button>
       </div>
 
-      <div className="shrink-0 flex items-center gap-1.5 px-4 py-2.5 mx-3 mt-3 rounded-lg" style={{ background: c.surface, border: `1px solid ${c.border}` }}>
-        <Icon size={14} weight="duotone" style={{ color: c.accent }} />
-        <span className="text-[12px] font-bold px-1 py-0.5" style={{ color: c.accent }}>~</span>
-        <span style={{ color: c.label, opacity: 0.45 }}>/</span>
-        <span className="text-[12px] font-medium px-1 py-0.5" style={{ color: c.text }}>{folder}</span>
-        <span className="text-[10px] font-mono truncate ml-auto" style={{ color: c.faint }}>{instance.dir}\{folder}</span>
+      <div className="shrink-0 flex items-center gap-1 mx-3 mt-3 p-1 rounded-lg" style={{ background: c.surface, border: `1px solid ${c.border}` }}>
+        {[
+          { key: 'active', label: vn(lang, 'Đang dùng', 'Active'), count: activeCount, icon: Power, tone: '#22c55e' },
+          { key: 'disabled', label: vn(lang, 'Đã tắt', 'Disabled'), count: disabledCount, icon: ProhibitInset, tone: c.label },
+        ].map((tab) => {
+          const on = view === tab.key
+          const TabIcon = tab.icon
+          return (
+            <button
+              key={tab.key}
+              onClick={() => setView(tab.key)}
+              aria-pressed={on}
+              className="h-8 px-3 rounded-md text-[11px] font-semibold flex items-center gap-1.5 transition-colors"
+              style={{
+                background: on ? c.input : 'transparent',
+                color: on ? c.accent : c.label,
+                boxShadow: on ? `inset 0 -2px 0 ${c.accent}` : 'none',
+              }}
+            >
+              <TabIcon size={13} weight={on ? 'bold' : 'regular'} style={{ color: on ? c.accent : tab.tone }} />
+              {tab.label}
+              <span
+                className="min-w-[18px] h-[16px] px-1 rounded text-[9px] font-bold flex items-center justify-center"
+                style={{ background: on ? 'rgba(167,139,250,0.18)' : c.border, color: on ? c.accent : c.label }}
+              >
+                {tab.count}
+              </span>
+            </button>
+          )
+        })}
       </div>
 
       {selectMode && (
@@ -546,7 +584,9 @@ export default function ContentFolderPage({
         ) : shown.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 gap-2">
             <Icon size={28} weight="duotone" style={{ color: c.label, opacity: 0.4 }} />
-            <span className="text-[12px]" style={{ color: c.label }}>{emptyHint}</span>
+            <span className="text-[12px]" style={{ color: c.label }}>
+              {view === 'disabled' ? vn(lang, 'Không có mục nào bị tắt.', 'Nothing is disabled.') : emptyHint}
+            </span>
           </div>
         ) : (
           <div ref={rowsRef} className="stream-items">
