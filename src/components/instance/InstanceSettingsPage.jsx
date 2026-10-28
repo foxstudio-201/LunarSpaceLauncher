@@ -5,6 +5,7 @@ import { palette } from '../../lib/palette'
 import HeadSkin from '../ui/HeadSkin'
 import Select from '../ui/Select'
 import * as api from '../../api/client.js'
+import ShareSelectModal from './ShareSelectModal'
 
 const EXPORT_FORMATS = [
   {
@@ -170,13 +171,33 @@ export default function InstanceSettingsPage({ instance, theme, lang, account, o
   const [shareBusy, setShareBusy] = useState(false)
   const [shareError, setShareError] = useState('')
   const [shareResult, setShareResult] = useState(null)
+  const [shareSelectOpen, setShareSelectOpen] = useState(false)
+  const [shareInclude, setShareInclude] = useState([])
+  const [sharePackKey, setSharePackKey] = useState('')
+  const [shareChangelog, setShareChangelog] = useState('')
+  const [shareUpdate, setShareUpdate] = useState(null)
+  const shareKeepRef = useRef(false)
+
+  useEffect(() => {
+    setShareSelectOpen(false)
+    setShareInclude([])
+    setSharePackKey('')
+    setShareChangelog('')
+    setShareUpdate(null)
+    shareKeepRef.current = false
+  }, [instance.id])
 
   useEffect(() => {
     setIconUrl(instance.icon && !/^file:/i.test(instance.icon) ? instance.icon : '')
   }, [instance.id, instance.icon])
 
   useEffect(() => {
-    if (!shareOpen) return
+    if (!shareOpen) return undefined
+    if (shareKeepRef.current) {
+      shareKeepRef.current = false
+      return undefined
+    }
+    let alive = true
     setShareName(instance.name)
     setShareVersion('1.0.0')
     setShareAuthor(account?.name || '')
@@ -191,10 +212,40 @@ export default function InstanceSettingsPage({ instance, theme, lang, account, o
     setShareBusy(false)
     setShareError('')
     setShareResult(null)
+    setSharePackKey('')
+    setShareChangelog('')
+    setShareUpdate(null)
     tokenRef.current = 0
     requestAnimationFrame(() => {
       if (descRef.current) descRef.current.innerHTML = ''
     })
+    ;(async () => {
+      const info = await api.modpackShareInfo({ id: instance.id }).catch(() => null)
+      if (!alive || !info?.ok) return
+      const mine = (value) => String(value || '').trim().toLowerCase()
+      const own = info.project || (
+        info.candidate && (
+          mine(info.candidate.author) === mine(account?.name) ||
+          mine(info.candidate.author) === mine(instance.name)
+        ) ? info.candidate : null
+      )
+      if (!own) return
+      const raw = String(own.descriptionRaw || '')
+      setSharePackKey(String(own.id || info.sharedKey || ''))
+      setShareUpdate({ name: own.name || instance.name, version: own.version || '', page: own.page || '', author: own.author || '' })
+      setShareName(own.name || instance.name)
+      setShareVersion(own.version || '1.0.0')
+      setShareAuthor(own.author || account?.name || '')
+      setShareSummary(own.summary || '')
+      requestAnimationFrame(() => {
+        const editor = descRef.current
+        if (!editor) return
+        if (String(own.descriptionFormat || '') === 'html') editor.innerHTML = raw
+        else editor.textContent = raw
+        setShareDescription(editor.innerHTML)
+      })
+    })()
+    return () => { alive = false }
   }, [shareOpen, instance.id, instance.name, account?.name])
 
   const changeIcon = async () => {
@@ -355,7 +406,7 @@ export default function InstanceSettingsPage({ instance, theme, lang, account, o
     }
     if (exportFormat === 'share') {
       setExportOpen(false)
-      setShareOpen(true)
+      setShareSelectOpen(true)
       return
     }
     setExporting(true)
@@ -445,6 +496,10 @@ export default function InstanceSettingsPage({ instance, theme, lang, account, o
       setShareError(lang === 'vi' ? 'Nhập tên modpack trước khi chia sẻ.' : 'Enter a modpack name first.')
       return
     }
+    if (shareUpdate && !shareChangelog.trim()) {
+      setShareError(lang === 'vi' ? 'Nhập nhật ký thay đổi cho phiên bản cập nhật.' : 'Enter a changelog for this update.')
+      return
+    }
     const html = descRef.current?.innerHTML || shareDescription
     const inlineImages = Object.entries(shareInlineImages)
       .filter(([token]) => html.includes(token))
@@ -469,6 +524,9 @@ export default function InstanceSettingsPage({ instance, theme, lang, account, o
       images: inlineImages,
       gallery,
       version: shareVersion.trim() || '1.0.0',
+      include: shareInclude,
+      packKey: sharePackKey,
+      changelog: shareChangelog.trim(),
     }).catch((err) => ({ ok: false, error: err.message }))
     setShareBusy(false)
     if (!res?.ok) {
@@ -1032,7 +1090,9 @@ export default function InstanceSettingsPage({ instance, theme, lang, account, o
             <div className="flex items-center gap-2 px-4 py-3" style={{ borderBottom: `1px solid ${c.border}` }}>
               <ShareNetwork size={15} weight="duotone" style={{ color: c.accent }} />
               <p className="text-[12px] font-bold flex-1" style={{ color: c.text }}>
-                {lang === 'vi' ? 'Chia sẻ modpack lên LunarSpace' : 'Share modpack to LunarSpace'}
+                {shareUpdate
+                  ? (lang === 'vi' ? 'Cập nhật modpack lên LunarSpace' : 'Update modpack on LunarSpace')
+                  : (lang === 'vi' ? 'Chia sẻ modpack lên LunarSpace' : 'Share modpack to LunarSpace')}
               </p>
               <button
                 onClick={() => { if (!shareBusy) setShareOpen(false) }}
@@ -1045,6 +1105,33 @@ export default function InstanceSettingsPage({ instance, theme, lang, account, o
             </div>
 
             <div className="flex-1 min-h-0 overflow-y-auto p-4 flex flex-col gap-3">
+              <div className="flex items-center gap-2 px-2.5 py-2 rounded-lg" style={{ background: c.input, border: `1px solid ${c.border}` }}>
+                <Package size={13} weight="duotone" style={{ color: c.accent }} />
+                <span className="text-[10px] font-semibold" style={{ color: c.label }}>
+                  {lang === 'vi' ? `Đã chọn ${shareInclude.length} tệp để chia sẻ` : `${shareInclude.length} files selected`}
+                </span>
+                <div className="flex-1" />
+                <button
+                  onClick={() => { if (!shareBusy) { shareKeepRef.current = true; setShareOpen(false); setShareSelectOpen(true) } }}
+                  disabled={shareBusy}
+                  className="h-6 px-2 rounded-md text-[10px] font-bold disabled:opacity-50"
+                  style={{ background: c.surface, border: `1px solid ${c.border}`, color: c.text }}
+                >
+                  {lang === 'vi' ? 'Chọn lại' : 'Change'}
+                </button>
+              </div>
+
+              {shareUpdate && (
+                <div className="flex items-center gap-2 px-2.5 py-2 rounded-lg" style={{ background: 'rgba(167,139,250,0.10)', border: `1px solid ${c.border}` }}>
+                  <ArrowsClockwise size={13} weight="duotone" style={{ color: c.accent }} />
+                  <span className="text-[10px] leading-relaxed" style={{ color: c.label }}>
+                    {lang === 'vi'
+                      ? `Đang cập nhật "${shareUpdate.name}" · bản hiện tại v${shareUpdate.version || '?'} → phiên bản mới bên dưới.`
+                      : `Updating "${shareUpdate.name}" · current v${shareUpdate.version || '?'} → new version below.`}
+                  </span>
+                </div>
+              )}
+
               <div className="flex items-center gap-4">
                 <img
                   src={iconUrl || `./${loader.image}`}
@@ -1094,6 +1181,23 @@ export default function InstanceSettingsPage({ instance, theme, lang, account, o
                   <input value={shareSummary} onChange={(e) => setShareSummary(e.target.value)} maxLength={280} placeholder={lang === 'vi' ? 'Vài dòng giới thiệu…' : 'A short introduction…'} className="h-8 px-2.5 rounded-lg text-[11px] outline-none" style={{ background: c.input, border: `1px solid ${c.border}`, color: c.text }} />
                 </label>
               </div>
+
+              <label className="flex flex-col gap-1">
+                <span className="text-[10px] font-semibold" style={{ color: c.label }}>
+                  {shareUpdate
+                    ? (lang === 'vi' ? 'Nhật ký thay đổi (bắt buộc)' : 'Changelog (required)')
+                    : (lang === 'vi' ? 'Nhật ký thay đổi' : 'Changelog')}
+                </span>
+                <textarea
+                  value={shareChangelog}
+                  onChange={(e) => setShareChangelog(e.target.value)}
+                  maxLength={4000}
+                  rows={3}
+                  placeholder={lang === 'vi' ? 'Bản này thêm/sửa/xoá những gì…' : 'What changed in this version…'}
+                  className="px-2.5 py-2 rounded-lg text-[11px] outline-none resize-y"
+                  style={{ background: c.input, border: `1px solid ${c.border}`, color: c.text, minHeight: 64 }}
+                />
+              </label>
 
               <div className="lshare-editor flex flex-col gap-1">
                 <div className="flex items-center justify-between gap-2">
@@ -1238,6 +1342,20 @@ export default function InstanceSettingsPage({ instance, theme, lang, account, o
           </div>
         </div>
       )}
+
+      <ShareSelectModal
+        open={shareSelectOpen}
+        instance={instance}
+        theme={theme}
+        lang={lang}
+        initial={shareInclude}
+        onClose={() => setShareSelectOpen(false)}
+        onContinue={(list) => {
+          setShareInclude(list)
+          setShareSelectOpen(false)
+          setShareOpen(true)
+        }}
+      />
 
       {sharePreview && (
         <div

@@ -1,6 +1,7 @@
 const fs = require('fs')
 const fsp = fs.promises
 const path = require('path')
+const crypto = require('crypto')
 const AdmZip = require('adm-zip')
 const { downloadAll, fetchJson, UA } = require('./net.cjs')
 
@@ -373,12 +374,12 @@ function overridePrefixes(list) {
 }
 
 async function extractOverrides({ entries, prefixes, targetDir, tree = false }) {
-  if (!tree && !prefixes.length) return 0
+  const written = []
+  if (!tree && !prefixes.length) return { count: 0, files: written }
   const needles = prefixes.map((p) => `${p}/`)
-  let count = 0
   for (const entry of entries) {
     if (entry.isDirectory) continue
-    const name = entry.entryName.replace(/\\/g, '/')
+    const name = entry.entryName.split(String.fromCharCode(92)).join('/')
     const low = name.toLowerCase()
     let rel = null
     if (tree) {
@@ -391,11 +392,12 @@ async function extractOverrides({ entries, prefixes, targetDir, tree = false }) 
     }
     if (!rel || rel.split('/').includes('..')) continue
     const dest = path.join(targetDir, rel)
+    const data = entry.getData()
     await fsp.mkdir(path.dirname(dest), { recursive: true })
-    await fsp.writeFile(dest, entry.getData())
-    count += 1
+    await fsp.writeFile(dest, data)
+    written.push({ rel, sha1: crypto.createHash('sha1').update(data).digest('hex'), size: data.length })
   }
-  return count
+  return { count: written.length, files: written }
 }
 
 function parseModlist(html) {
@@ -836,6 +838,54 @@ async function repairPlan({ planPath, onProgress, onLog }) {
   return { ok: true, total: tasks.length, missing, downloaded: tasks.length - failed.length, repaired: missing - failed.length, failed }
 }
 
+function zipOwnedRels({ zipPath, plan }) {
+  const zip = new AdmZip(zipPath)
+  const tree = !!plan?.tree
+  const needles = (plan?.overrides || []).map((p) => `${String(p).toLowerCase()}/`)
+  const out = []
+  for (const entry of zip.getEntries()) {
+    if (entry.isDirectory) continue
+    const name = entry.entryName.split(String.fromCharCode(92)).join('/')
+    const low = name.toLowerCase()
+    if (low === PROFILE_FILE) continue
+    let rel = null
+    if (tree) {
+      rel = name
+    } else {
+      const hit = needles.find((p) => low.startsWith(p))
+      if (!hit) continue
+      rel = name.slice(hit.length)
+    }
+    if (!rel || rel.split('/').includes('..')) continue
+    out.push(rel)
+  }
+  return out
+}
+
+function zipOwnedMeta({ zipPath, plan }) {
+  const zip = new AdmZip(zipPath)
+  const tree = !!plan?.tree
+  const needles = (plan?.overrides || []).map((p) => `${String(p).toLowerCase()}/`)
+  const out = []
+  for (const entry of zip.getEntries()) {
+    if (entry.isDirectory) continue
+    const name = entry.entryName.split(String.fromCharCode(92)).join('/')
+    const low = name.toLowerCase()
+    if (low === PROFILE_FILE) continue
+    let rel = null
+    if (tree) {
+      rel = name
+    } else {
+      const hit = needles.find((p) => low.startsWith(p))
+      if (!hit) continue
+      rel = name.slice(hit.length)
+    }
+    if (!rel || rel.split('/').includes('..')) continue
+    out.push({ rel, size: Number(entry.header?.size || 0) })
+  }
+  return out
+}
+
 async function applyPlan({ plan, instanceDir, onProgress, onLog }) {
   await fsp.mkdir(instanceDir, { recursive: true })
   const tasks = plan.files.map((f) => ({
@@ -875,7 +925,13 @@ async function applyPlan({ plan, instanceDir, onProgress, onLog }) {
   })
   const failed = [...new Set(errors.map((e) => path.basename(e.file)))]
   if (failed.length) onLog?.(`[LunarSpace] Tải lỗi ${failed.length} tệp: ${failed.slice(0, 6).join(', ')}`)
-  return { files: tasks.length, downloaded: tasks.length - failed.length, overrides, errors, failed }
+  const owned = []
+  for (const task of tasks) {
+    if (failed.includes(path.basename(task.dest))) continue
+    owned.push({ rel: path.relative(instanceDir, task.dest).split(path.sep).join('/'), sha1: task.sha1 || null, size: task.size || 0 })
+  }
+  owned.push(...overrides.files)
+  return { files: tasks.length, downloaded: tasks.length - failed.length, overrides: overrides.count, errors, failed, owned }
 }
 
 module.exports = {
@@ -896,6 +952,8 @@ module.exports = {
   versions,
   resolvePlan,
   applyPlan,
+  zipOwnedRels,
+  zipOwnedMeta,
   repairPlan,
   planFromMrpack,
   planFromCurseforgeZip,

@@ -1900,7 +1900,7 @@ async function modpackInstall({ token, name, dir, icon = '', memoryMb = 4096, se
           versionId: plan.fileId || null,
           projectUrl: plan.projectUrl || null,
           slug: plan.slug || null,
-          files: plan.files,
+          files: res.owned || plan.files,
           missing: plan.missing || [],
         }),
         'utf8',
@@ -2140,6 +2140,7 @@ async function sha1Of(file) {
   return hash.digest('hex')
 }
 
+
 async function modpackInstanceUpdate({ id, versionId, settings } = {}, emit) {
   let entry
   try {
@@ -2213,32 +2214,40 @@ async function modpackInstanceUpdate({ id, versionId, settings } = {}, emit) {
       })
     }
     normalizePackPlan(plan)
+    let oldFiles = Array.isArray(marker.files) ? marker.files : []
+    if (!oldFiles.length && marker.source === 'lunar' && marker.versionId) {
+      const oldZip = path.join(shared, 'modpacks', `lunar-${String(marker.versionId).replace(/[^a-z0-9._-]/gi, '')}.zip`)
+      try {
+        oldFiles = modpack.zipOwnedMeta({ zipPath: oldZip, plan: { tree: true } })
+        if (oldFiles.length) log(`[LunarSpace] Đọc được ${oldFiles.length} tệp của bản cũ từ bộ đệm.`)
+      } catch {}
+    }
+    const oldOwned = new Set()
+    for (const file of oldFiles) {
+      if (file?.rel) oldOwned.add(String(file.rel).split(path.sep).join('/'))
+    }
+    const newOwned = new Set()
+    for (const file of plan.files || []) {
+      if (file?.rel) newOwned.add(String(file.rel).split(path.sep).join('/'))
+    }
+    try {
+      for (const rel of modpack.zipOwnedRels({ zipPath: plan.zipPath, plan })) newOwned.add(rel)
+    } catch {}
     const res = await modpack.applyPlan({
       plan,
       instanceDir: entry.dir,
       onProgress: stream,
       onLog: log,
     })
-    const oldFiles = Array.isArray(marker.files) ? marker.files : []
-    const nextRels = new Set(plan.files.map((f) => f.rel))
-    const removable = []
-    for (const old of oldFiles) {
-      if (!old?.rel || nextRels.has(old.rel)) continue
-      const full = path.join(entry.dir, old.rel)
+    const removed = []
+    for (const rel of oldOwned) {
+      if (newOwned.has(rel)) continue
       try {
-        const st = await fsp.stat(full)
-        if (!st.isFile()) continue
-        let same = false
-        if (old.sha1) same = (await sha1Of(full)) === old.sha1
-        else if (old.size) same = st.size === old.size
-        if (same) removable.push(old.rel)
-        else log(`[LunarSpace] Giữ tệp đã chỉnh tay: ${old.rel}`)
+        await fsp.rm(path.join(entry.dir, rel), { force: true })
+        removed.push(rel)
       } catch {}
     }
-    if (removable.length) {
-      const trashed = await trashFiles({ id: entry.id, rels: removable })
-      log(`[LunarSpace] Đã chuyển ${trashed?.trashed ?? removable.length} tệp không còn trong bản mới vào Thùng rác.`)
-    }
+    if (removed.length) log(`[LunarSpace] Đã xoá ${removed.length} tệp không còn trong bản mới.`)
     try {
       await fsp.writeFile(
         path.join(entry.dir, PACK_PLAN_FILE),
@@ -2252,7 +2261,7 @@ async function modpackInstanceUpdate({ id, versionId, settings } = {}, emit) {
           versionId,
           slug: plan.slug || marker.slug || null,
           projectUrl: plan.projectUrl || marker.projectUrl || null,
-          files: plan.files,
+          files: res.owned || plan.files,
           missing: plan.missing || [],
         }),
         'utf8',
@@ -2273,7 +2282,7 @@ async function modpackInstanceUpdate({ id, versionId, settings } = {}, emit) {
     return {
       ok: true,
       info: await modpackInstanceInfo({ id: entry.id }),
-      applied: { planned: plan.files.length, downloaded: res.downloaded, failed: res.failed.length, removed: removable.length },
+      applied: { planned: plan.files.length, downloaded: res.downloaded, failed: res.failed.length, removed: removed.length },
     }
   } catch (err) {
     log(`[LunarSpace] Lỗi cập nhật modpack: ${err.message}`)
@@ -2716,7 +2725,37 @@ async function exportProfile({ id, format = 'zip', targetPath } = {}, emit) {
   }
 }
 
-async function shareInstance({ id, name = '', author = '', summary = '', description = '', descriptionFormat = 'plain', images = [], gallery = [], version = '' } = {}, emit) {
+async function modpackShareInfo({ id } = {}) {
+  let entry
+  try {
+    entry = findEntry(id)
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+  const marker = (await readPackMarker(entry.dir)) || {}
+  const sharedKey = String(marker.sharedKey || '')
+  let project = null
+  if (sharedKey) {
+    try {
+      project = await lunarModpacks.project(sharedKey)
+    } catch {}
+  }
+  let candidate = null
+  if (!project && marker.source === 'lunar' && marker.projectId) {
+    try {
+      candidate = await lunarModpacks.project(String(marker.projectId))
+    } catch {}
+  }
+  return {
+    ok: true,
+    sharedKey,
+    project,
+    candidate,
+    installedFrom: marker.source === 'lunar' ? String(marker.projectId || '') : '',
+  }
+}
+
+async function shareInstance({ id, name = '', author = '', summary = '', description = '', descriptionFormat = 'plain', images = [], gallery = [], version = '', include = [], packKey = '', changelog = '' } = {}, emit) {
   let entry
   try {
     entry = findEntry(id)
@@ -2735,6 +2774,7 @@ async function shareInstance({ id, name = '', author = '', summary = '', descrip
       entry: exportEntry,
       format: 'share',
       targetPath: zipPath,
+      include,
       onProgress: (p) => emit?.({ type: 'share', id: entry.id, phase: 'export', ...p }),
       onLog: log,
     })
@@ -2747,7 +2787,8 @@ async function shareInstance({ id, name = '', author = '', summary = '', descrip
       iconBuffer,
       meta: {
         name: name || entry.name,
-        packKey: entry.id,
+        packKey: packKey || entry.id,
+        changelog,
         author,
         summary,
         description,
@@ -2761,6 +2802,21 @@ async function shareInstance({ id, name = '', author = '', summary = '', descrip
       },
       onProgress: (p) => emit?.({ type: 'share', id: entry.id, phase: 'upload', ...p }),
     })
+    try {
+      const marker = (await readPackMarker(entry.dir)) || {}
+      const sharedKey = String(res?.modpack?.id || packKey || entry.id)
+      await fsp.writeFile(
+        path.join(entry.dir, PACK_PLAN_FILE),
+        JSON.stringify({
+          ...marker,
+          sharedKey,
+          sharedVersionId: String(res?.modpack?.versionId || ''),
+          sharedVersion: version || '1.0.0',
+          sharedAt: new Date().toISOString(),
+        }, null, 2),
+        'utf8',
+      )
+    } catch {}
     log(`[LunarSpace] Đã chia sẻ modpack: ${res.url}`)
     emit?.({ type: 'share', id: entry.id, phase: 'done', url: res.url, bytes: pack.bytes })
     return { ok: true, ...res, bytes: pack.bytes }
@@ -3696,6 +3752,7 @@ module.exports = {
   modpackInstanceUpdate,
   exportProfile,
   shareInstance,
+  modpackShareInfo,
   setInstanceIcon,
   clearInstanceIcon,
   serverpackPlan,

@@ -233,11 +233,14 @@ function modlistHtml(rows) {
   return `<ul>\n${items}\n</ul>\n`
 }
 
-async function exportProfile({ entry, format = 'zip', targetPath, onProgress, onLog } = {}) {
+async function exportProfile({ entry, format = 'zip', targetPath, onProgress, onLog, include = null } = {}) {
   const dir = entry?.dir
   if (!dir) throw new Error('Phiên bản chưa có thư mục.')
   const kind = format === 'share' ? 'zip' : (FORMATS[format] ? format : 'zip')
   const share = format === 'share'
+  const allow = Array.isArray(include) && include.length
+    ? new Set(include.map((rel) => String(rel).split(path.sep).join('/')).filter((rel) => rel && !rel.startsWith('/') && !rel.split('/').includes('..')))
+    : null
   const plan = kind === 'zip' ? null : await readPlan(dir)
   const mc = plan?.mc || entry.version || ''
   const loader = plan?.loader || entry.loader || 'vanilla'
@@ -245,7 +248,9 @@ async function exportProfile({ entry, format = 'zip', targetPath, onProgress, on
   const packName = plan?.name || entry.name || 'Modpack'
   const packVersion = plan?.version || '1.0.0'
 
-  const files = await walk(dir, '', [], share ? SHARE_SKIP_TOP : SKIP_TOP)
+  const skipTop = allow ? SKIP_TOP : (share ? SHARE_SKIP_TOP : SKIP_TOP)
+  const walked = await walk(dir, '', [], skipTop)
+  const files = allow ? walked.filter((rel) => allow.has(rel)) : walked
   const mods = files.filter((rel) => /^mods\/.+\.jar$/i.test(rel))
   const others = files.filter((rel) => !/^mods\//i.test(rel))
 

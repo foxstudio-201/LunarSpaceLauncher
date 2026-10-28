@@ -209,6 +209,7 @@ async function upload({ zipPath, meta = {}, iconPath = '', iconBuffer = null, on
       loader: String(meta.loader || 'vanilla'),
       loaderVersion: String(meta.loaderVersion || ''),
       version: String(meta.version || '1.0.0'),
+      changelog: String(meta.changelog || ''),
       descriptionFormat: String(meta.descriptionFormat || 'plain'),
       size: stat.size,
       ...(icon ? { icon } : {}),

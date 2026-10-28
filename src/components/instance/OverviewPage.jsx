@@ -573,8 +573,8 @@ export default function OverviewPage({
             <p className="text-[10px] leading-relaxed" style={{ color: c.faint }}>
               {vn(
                 lang,
-                'Tệp pack cũ không còn trong bản mới sẽ được chuyển vào Thùng rác (khôi phục được). Tệp bạn sửa tay được giữ nguyên. Tiến trình sẽ chạy trong nền và báo khi xong.',
-                'Old pack files missing from the new version are moved to Trash (recoverable). Files you edited are kept. The process runs in the background and reports when done.',
+                'Tệp pack cũ không còn trong bản mới (mod, config, resourcepack, shader…) sẽ bị xoá. Tệp pack mới ghi đè trực tiếp, không sao lưu. Saves và tệp bạn tự thêm không bị đụng.',
+                'Old pack files missing from the new version (mods, configs, resource packs, shaders…) are deleted. New pack files overwrite directly, with no backup. Saves and your own files are untouched.',
               )}
             </p>
             <div className="flex justify-end gap-2 pt-1">

@@ -708,6 +708,11 @@ export async function exportProfile(opts = {}) {
   return { ok: false, error: NEEDS_APP }
 }
 
+export async function modpackShareInfo(opts = {}) {
+  if (bridge?.modpackShareInfo) return bridge.modpackShareInfo(opts)
+  return { ok: false }
+}
+
 export async function shareInstance(opts = {}) {
   if (bridge?.shareInstance) return bridge.shareInstance(opts)
   return { ok: false, error: NEEDS_APP }

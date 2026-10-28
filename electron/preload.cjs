@@ -101,6 +101,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   chooseModpack: () => ipcRenderer.invoke('launcher:choose-modpack'),
   exportProfile: (opts) => ipcRenderer.invoke('launcher:export-profile', opts),
   shareInstance: (opts) => ipcRenderer.invoke('launcher:share-instance', opts),
+  modpackShareInfo: (opts) => ipcRenderer.invoke('launcher:modpack-share-info', opts),
   setInstanceIcon: (opts) => ipcRenderer.invoke('launcher:set-instance-icon', opts),
   clearInstanceIcon: (opts) => ipcRenderer.invoke('launcher:clear-instance-icon', opts),
   serverpackPlan: (opts) => ipcRenderer.invoke('launcher:serverpack-plan', opts),

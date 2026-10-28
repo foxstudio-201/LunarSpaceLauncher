@@ -650,6 +650,7 @@ function registerIpc() {
   })
 
   ipcMain.handle('launcher:share-instance', (_e, opts) => launcher.shareInstance(opts || {}, emitLauncher))
+  ipcMain.handle('launcher:modpack-share-info', (_e, opts) => launcher.modpackShareInfo(opts || {}))
 
   ipcMain.handle('launcher:set-instance-icon', async (_e, { id } = {}) => {
     const picked = await dialog.showOpenDialog(mainWindow, {
