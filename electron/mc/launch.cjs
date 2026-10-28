@@ -334,7 +334,14 @@ function buildLaunch({ chain, paths, nativesDir, instanceDir, username, memoryMb
     game.push('--quickPlayMultiplayer', `${quickPlay.host}:${Number(quickPlay.port) || 25565}`)
   }
 
-  const jvmArgs = [`-Xmx${memoryMb}M`, ...extraJvm.filter(Boolean), ...jvm]
+  const jvmArgs = [
+    `-Xmx${memoryMb}M`,
+    ...extraJvm.filter(Boolean),
+    '-Dfile.encoding=UTF-8',
+    '-Dsun.stdout.encoding=UTF-8',
+    '-Dsun.stderr.encoding=UTF-8',
+    ...jvm,
+  ]
   return { args: [...jvmArgs, chain.mainClass, ...game], classpath, uuid, pathFix }
 }
 

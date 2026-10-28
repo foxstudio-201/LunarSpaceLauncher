@@ -18,7 +18,7 @@ const FONT_STACK = () =>
 
 const TERM_THEME = {
   background: '#0a0a0a',
-  foreground: '#22c55e',
+  foreground: '#d4d4d8',
   cursor: '#a78bfa',
   cursorAccent: '#0a0a0a',
   selectionBackground: 'rgba(255,255,255,0.3)',
@@ -43,6 +43,33 @@ const TERM_THEME = {
 
 const CURSOR = /\x1b\[\?25[hl]/g
 const ANSI_RE = /\x1b\[[0-9;?]*[a-zA-Z]/g
+const RESET = '\x1b[0m'
+const LOG_LINE_RE = /^(\[[^\]]+\])\s+\[([^\]]+)\]\s+(\[[^\]]+\])(?::)?\s?(.*)$/
+
+function levelColor(level) {
+  if (level === 'ERROR' || level === 'FATAL') return '\x1b[31m'
+  if (level === 'WARN' || level === 'WARNING') return '\x1b[33m'
+  if (level === 'DEBUG' || level === 'TRACE') return '\x1b[90m'
+  return '\x1b[32m'
+}
+
+function formatLogLine(line) {
+  const text = String(line ?? '')
+  if (!text || text.startsWith(BANNER_MARK)) return text
+  if (text.startsWith('[LunarSpace]')) return `\x1b[35m${text}${RESET}`
+  const match = LOG_LINE_RE.exec(text)
+  if (!match) return text
+  const [, stamp, threadLevel, logger, message] = match
+  const slash = threadLevel.lastIndexOf('/')
+  if (slash < 0) return text
+  const thread = threadLevel.slice(0, slash)
+  const level = threadLevel.slice(slash + 1)
+  const color = levelColor(level)
+  const bold = level === 'ERROR' || level === 'FATAL' ? '\x1b[1m' : ''
+  const strong = bold || level === 'WARN'
+  const messageColor = strong ? color : ''
+  return `\x1b[90m${stamp}${RESET} \x1b[2m${thread}/${RESET}${bold}${color}${level}${RESET}\x1b[2m]${RESET} \x1b[38;2;125;135;150m${logger}${RESET} ${messageColor}${message}${messageColor ? RESET : ''}`
+}
 
 export default function ConsolePage({ instance, theme, lang, logs, launchError, crash, onOpenCrash, onLaunch, onStop, onRestart }) {
   const { skin } = useApp()
@@ -102,7 +129,7 @@ export default function ConsolePage({ instance, theme, lang, logs, launchError, 
         i = j
         continue
       }
-      writeRaw(lines[i])
+      writeRaw(formatLogLine(lines[i]))
       i += 1
     }
   }, [writeRaw])
