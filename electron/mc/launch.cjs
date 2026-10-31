@@ -2,6 +2,7 @@ const fs = require('fs')
 const fsp = fs.promises
 const path = require('path')
 const crypto = require('crypto')
+const { StringDecoder } = require('string_decoder')
 const { spawn, execFile, execFileSync } = require('child_process')
 const { OS_NAME, ruleAllows } = require('./install.cjs')
 
@@ -372,17 +373,32 @@ function spawnGame({ javaPath, args, cwd, onLog, onExit }) {
     detached: process.platform !== 'win32',
     stdio: ['ignore', 'pipe', 'pipe'],
   })
-  const push = (chunk) => {
-    const lines = stripAnsi(chunk.toString('utf8')).split(/\r?\n/).filter((l) => l.length)
-    for (const line of lines) onLog(line)
+  const readers = [
+    { stream: child.stdout, decoder: new StringDecoder('utf8'), rest: '' },
+    { stream: child.stderr, decoder: new StringDecoder('utf8'), rest: '' },
+  ]
+  const push = (reader, chunk) => {
+    const text = reader.rest + reader.decoder.write(chunk)
+    const parts = text.split(/\r?\n/)
+    reader.rest = parts.pop() || ''
+    for (const part of parts) {
+      const line = stripAnsi(part)
+      if (line.length) onLog(line)
+    }
   }
-  child.stdout.on('data', push)
-  child.stderr.on('data', push)
+  for (const reader of readers) reader.stream.on('data', (chunk) => push(reader, chunk))
   child.on('error', (err) => {
     onLog(`[LunarSpace] Không chạy được Java: ${err.message}`)
     onExit(-1)
   })
-  child.on('exit', (code, signal) => onExit(code ?? -1, signal))
+  child.on('exit', (code, signal) => {
+    for (const reader of readers) {
+      const tail = stripAnsi(reader.rest + reader.decoder.end())
+      reader.rest = ''
+      if (tail.length) onLog(tail)
+    }
+    onExit(code ?? -1, signal)
+  })
   return child
 }
 

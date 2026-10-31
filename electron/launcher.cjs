@@ -33,6 +33,8 @@ const { ensureGameGpu } = require('./gpupref.cjs')
 
 let broadcast = () => {}
 
+const gpuCacheFile = () => path.join(app.getPath('userData'), 'gpu-pref.json')
+
 function setBroadcast(fn) {
   if (typeof fn === 'function') broadcast = fn
   serverlocal.configure({ emit: (payload) => broadcast(payload) })
@@ -969,6 +971,25 @@ async function accountAuth(account) {
   }
 }
 
+const authFlights = new Map()
+
+function authFor(account) {
+  if (!account || !['microsoft', 'ely'].includes(account.type)) return accountAuth(account)
+  const active = authFlights.get(account.id)
+  if (active) return active
+  const promise = accountAuth(account).finally(() => {
+    if (authFlights.get(account.id) === promise) authFlights.delete(account.id)
+  })
+  authFlights.set(account.id, promise)
+  return promise
+}
+
+async function accountWarm(settings) {
+  const account = resolveAccount(settings || {})
+  if (!account) return { ok: true }
+  return authFor(account)
+}
+
 async function accountRefresh({ id, accounts } = {}) {
   const account = (Array.isArray(accounts) ? accounts : []).find((a) => a.id === id)
   if (!account) return { ok: false, error: 'Không tìm thấy tài khoản.' }
@@ -1375,16 +1396,39 @@ async function launchInstance(opts, emit) {
   const entry = readIndex().find((i) => i.id === (opts || {}).id) || null
   if (entry) presence.starting(entry)
   const res = await runLaunch(opts, emit)
-  if (res?.ok) presence.playing(entry || { name: 'LunarSpace', version: '', loader: 'vanilla' })
+  if (res?.ok && !res.cancelled) presence.playing(entry || { name: 'LunarSpace', version: '', loader: 'vanilla' })
   else presence.stopped()
   return res
 }
 
-async function runLaunch({ id, username, demo: demoOverride, quickPlay, settings }, emit) {
+const pendingLaunches = new Set()
+const cancelledLaunches = new Set()
+
+async function runLaunch(opts, emit) {
+  const id = (opts || {}).id
+  if (pendingLaunches.has(id)) return { ok: false, error: 'Instance đang khởi chạy.' }
+  pendingLaunches.add(id)
+  try {
+    return await runLaunchSteps(opts, emit)
+  } finally {
+    pendingLaunches.delete(id)
+    cancelledLaunches.delete(id)
+  }
+}
+
+async function runLaunchSteps({ id, username, demo: demoOverride, quickPlay, settings }, emit) {
   const { paths } = storageFor(settings)
   const entry = readIndex().find((i) => i.id === id)
   if (!entry) return { ok: false, error: 'Không tìm thấy instance.' }
   if (running.has(id)) return { ok: false, error: 'Instance đang chạy.' }
+
+  logs.set(id, [])
+  emit?.({ type: 'banner', id })
+  const preparing = '[LunarSpace] Đang chuẩn bị khởi chạy…'
+  pushLog(id, preparing)
+  emit?.({ type: 'log', id, line: preparing })
+  updateEntry(id, { status: 'starting' })
+  emit?.({ type: 'state', id, status: 'starting' })
 
   if (!entry.versionId && (entry.loader === 'forge' || entry.loader === 'neoforge')) {
     try {
@@ -1438,14 +1482,28 @@ async function runLaunch({ id, username, demo: demoOverride, quickPlay, settings
   const found = { java: resolved.java }
 
   const account = resolveAccount(settings)
-  const auth = await accountAuth(account)
+  const auth = await authFor(account)
   if (!auth.ok) return { ok: false, error: auth.error }
   const nativesDir = path.join(paths.natives, chain._id)
   const player = String(auth.name || username || entry.username || 'Player')
   const demo = !!(entry.demo || demoOverride)
+  let queuedLogs = []
+  let logTimer = null
+  const flushLogs = () => {
+    if (logTimer) {
+      clearTimeout(logTimer)
+      logTimer = null
+    }
+    if (!queuedLogs.length) return
+    const lines = queuedLogs
+    queuedLogs = []
+    emit?.({ type: 'log-batch', id: entry.id, lines })
+  }
   const emitLog = (line) => {
     pushLog(entry.id, line)
-    emit?.({ type: 'log', id: entry.id, line })
+    queuedLogs.push(line)
+    if (queuedLogs.length >= 200) flushLogs()
+    else if (!logTimer) logTimer = setTimeout(flushLogs, 80)
   }
   const userJvm = entry.jvmArgs ? entry.jvmArgs.split(/\s+/).filter(Boolean) : []
   const skin = account?.type === 'offline' && account.uuid && skins.customSync(paths.shared, account.uuid)
@@ -1476,17 +1534,16 @@ async function runLaunch({ id, username, demo: demoOverride, quickPlay, settings
     skin,
   })
 
-  logs.set(id, [])
   if (pathFix) {
-    pushLog(
-      id,
+    emitLog(
       `[LunarSpace] Đường dẫn có ký tự đặc biệt (một số bản Java không đọc được) — dùng đường dẫn rút gọn: ${pathFix.to}`,
     )
   }
-  emit?.({ type: 'banner', id })
 
-  updateEntry(id, { status: 'starting' })
-  emit?.({ type: 'state', id, status: 'starting' })
+  if (!cancelledLaunches.has(id)) {
+    updateEntry(id, { status: 'starting' })
+    emit?.({ type: 'state', id, status: 'starting' })
+  }
 
   let settled = false
   let settleTimer = null
@@ -1507,20 +1564,21 @@ async function runLaunch({ id, username, demo: demoOverride, quickPlay, settings
   } else if (quickPlay?.type === 'server' && quickPlay.host) {
     recordRecent(id, 'server', { host: quickPlay.host, port: Number(quickPlay.port) || 25565, name: quickPlay.name || '' })
   }
+  if (cancelledLaunches.has(id)) {
+    updateEntry(id, { status: 'ready' })
+    emit?.({ type: 'state', id, status: 'ready' })
+    return { ok: true, cancelled: true }
+  }
   try {
-    const gpu = await ensureGameGpu(found.java.path).catch(() => false)
-    if (gpu) {
-      pushLog(id, '[LunarSpace] Đã ưu tiên GPU rời cho Java (Windows Graphics).')
-      emit?.({ type: 'log', id, line: '[LunarSpace] Đã ưu tiên GPU rời cho Java (Windows Graphics).' })
-    }
+    const gpu = await ensureGameGpu(found.java.path, gpuCacheFile()).catch(() => false)
+    if (gpu) emitLog('[LunarSpace] Đã ưu tiên GPU rời cho Java (Windows Graphics).')
     child = spawnGame({
       javaPath: found.java.path,
       args,
       cwd: entry.dir,
       onLog: (line) => {
         markRunning()
-        pushLog(id, line)
-        emit?.({ type: 'log', id, line })
+        emitLog(line)
         const serverMatch = line.match(/Connecting to ([^,\s]+), (\d+)/)
         if (serverMatch) {
           recordRecent(id, 'server', { host: serverMatch[1], port: Number(serverMatch[2]) || 25565 })
@@ -1545,8 +1603,8 @@ async function runLaunch({ id, username, demo: demoOverride, quickPlay, settings
           playtimeMs: (current?.playtimeMs || 0) + elapsed,
         })
         syncProfiles(settings).catch(() => {})
-        pushLog(id, `[LunarSpace] Tiến trình kết thúc (code ${code})`)
-        emit?.({ type: 'log', id, line: `[LunarSpace] Tiến trình kết thúc (code ${code})` })
+        emitLog(`[LunarSpace] Tiến trình kết thúc (code ${code})`)
+        flushLogs()
         emit?.({ type: 'exit', id, code })
         presence.stopped()
         const userStopped = stoppingIds.delete(id)
@@ -1559,6 +1617,11 @@ async function runLaunch({ id, username, demo: demoOverride, quickPlay, settings
     return { ok: false, error: err.message }
   }
 
+  if (cancelledLaunches.has(id)) {
+    killTree(child.pid)
+    return { ok: true, cancelled: true }
+  }
+
   if (entry.boost) {
     boost.setHighPriority(child.pid).then((done) => {
       if (done) emitLog(`[LunarSpace] Tăng FPS: đã đặt ưu tiên cao cho tiến trình game (pid ${child.pid}).`)
@@ -1567,7 +1630,7 @@ async function runLaunch({ id, username, demo: demoOverride, quickPlay, settings
 
   running.set(id, { pid: child.pid, startedAt })
   await syncProfiles(settings)
-  emit?.({ type: 'state', id, status: 'starting', pid: child.pid })
+  if (!settled) emit?.({ type: 'state', id, status: 'starting', pid: child.pid })
   return { ok: true, pid: child.pid, java: found.java.major, versionId: chain.id }
 }
 
@@ -1575,6 +1638,12 @@ function stopInstance({ id }, emit) {
   const child = running.get(id)
   const entry = readIndex().find((i) => i.id === id)
   if (!child) {
+    if (pendingLaunches.has(id)) {
+      cancelledLaunches.add(id)
+      updateEntry(id, { status: 'ready' })
+      emit?.({ type: 'state', id, status: 'ready' })
+      return { ok: true, alreadyStopped: true }
+    }
     if (entry && (entry.status === 'running' || entry.status === 'stopping' || entry.status === 'starting')) {
       updateEntry(id, { status: 'ready' })
       emit?.({ type: 'state', id, status: 'ready' })
@@ -3725,6 +3794,7 @@ module.exports = {
   accountSetActive,
   accountAuth,
   accountRefresh,
+  accountWarm,
   accountSignIn,
   resolveAccount,
   readTextFile,

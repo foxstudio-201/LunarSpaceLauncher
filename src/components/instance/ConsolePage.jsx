@@ -108,15 +108,10 @@ export default function ConsolePage({ instance, theme, lang, logs, launchError, 
     return String(line).toLowerCase().includes(f)
   }, [])
 
-  const writeRaw = useCallback((text) => {
-    const term = termRef.current
-    if (!term) return
-    term.write(`${String(text ?? '').replace(CURSOR, '').replace(/\r?\n/g, '\r\n')}\r\n`)
-  }, [])
-
   const writeLines = useCallback((lines) => {
     const term = termRef.current
     if (!term) return
+    const parts = []
     let i = 0
     while (i < lines.length) {
       if (String(lines[i]).startsWith(BANNER_MARK)) {
@@ -125,14 +120,16 @@ export default function ConsolePage({ instance, theme, lang, logs, launchError, 
         const block = lines.slice(i, j).map((line) => String(line).slice(BANNER_MARK.length))
         const width = block.reduce((max, line) => Math.max(max, line.replace(ANSI_RE, '').length), 0)
         const indent = ' '.repeat(Math.max(0, Math.floor((term.cols - width) / 2)))
-        for (const line of block) writeRaw(`${indent}${line}`)
+        for (const line of block) parts.push(`${indent}${line}`)
         i = j
         continue
       }
-      writeRaw(formatLogLine(lines[i]))
+      parts.push(formatLogLine(lines[i]))
       i += 1
     }
-  }, [writeRaw])
+    if (!parts.length) return
+    term.write(`${parts.join('\r\n').replace(CURSOR, '').replace(/\r?\n/g, '\r\n')}\r\n`)
+  }, [])
 
   const rewriteAll = useCallback((lines) => {
     const term = termRef.current
@@ -293,7 +290,7 @@ export default function ConsolePage({ instance, theme, lang, logs, launchError, 
       lastLineRef.current = live.length ? live[live.length - 1] : null
       return
     }
-    const start = last == null ? live.length : live.lastIndexOf(last) + 1
+    const start = last == null ? 0 : live.lastIndexOf(last) + 1
     writeLines(live.slice(start).filter((line) => matches(line)))
     if (live.length) lastLineRef.current = live[live.length - 1]
     if (autoScrollRef.current) {

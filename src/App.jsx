@@ -373,6 +373,12 @@ function AppContent() {
         setLogs((l) => ({ ...l, [ev.id]: launchBannerLines(inst, versionRef.current) }))
         return
       }
+      if (ev.type === 'log-batch') {
+        const lines = Array.isArray(ev.lines) ? ev.lines : []
+        if (!lines.length) return
+        setLogs((l) => ({ ...l, [ev.id]: [...(l[ev.id] || []), ...lines].slice(-600) }))
+        return
+      }
       if (ev.type === 'log') {
         setLogs((l) => ({ ...l, [ev.id]: [...(l[ev.id] || []), ev.line].slice(-600) }))
         return
