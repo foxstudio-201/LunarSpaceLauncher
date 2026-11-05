@@ -1263,6 +1263,32 @@ pub fn confirm_modal(app: &mut LauncherApp, _window: &mut Window, cx: &mut Conte
     })
 }
 
+pub fn hide_launcher_window() {
+    #[cfg(windows)]
+    unsafe {
+        use windows::core::PCWSTR;
+        use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, ShowWindow, SW_HIDE};
+        if let Ok(hwnd) = FindWindowW(PCWSTR::null(), windows::core::w!("XyoLauncher")) {
+            let _ = ShowWindow(hwnd, SW_HIDE);
+        }
+    }
+}
+
+pub fn show_launcher_window() {
+    #[cfg(windows)]
+    unsafe {
+        use windows::core::PCWSTR;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            FindWindowW, SW_RESTORE, SW_SHOW, SetForegroundWindow, ShowWindow,
+        };
+        if let Ok(hwnd) = FindWindowW(PCWSTR::null(), windows::core::w!("XyoLauncher")) {
+            let _ = ShowWindow(hwnd, SW_SHOW);
+            let _ = ShowWindow(hwnd, SW_RESTORE);
+            let _ = SetForegroundWindow(hwnd);
+        }
+    }
+}
+
 impl LauncherApp {
     pub fn run_confirm(&mut self, cx: &mut Context<Self>) {
         let action = match &self.modal {
@@ -1334,20 +1360,6 @@ impl LauncherApp {
         cx.notify();
     }
 
-    fn minimize_launcher() {
-        #[cfg(windows)]
-        {
-            use windows::core::PCWSTR;
-            use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, ShowWindow, SW_MINIMIZE};
-            let title: Vec<u16> = "XyoLauncher ".encode_utf16().collect();
-            unsafe {
-                if let Ok(hwnd) = FindWindowW(PCWSTR::null(), PCWSTR(title.as_ptr())) {
-                    let _ = ShowWindow(hwnd, SW_MINIMIZE);
-                }
-            }
-        }
-    }
-
     pub fn play_instance(&mut self, id: &str, cx: &mut Context<Self>) {
         let Some(instance) = self.instances.iter().find(|i| i.id == id) else {
             return;
@@ -1364,9 +1376,6 @@ impl LauncherApp {
             return;
         }
         let rx = self.backend.launch(json!({"id": id}));
-        if self.settings.get("hideOnLaunch").and_then(serde_json::Value::as_bool).unwrap_or(false) {
-            Self::minimize_launcher();
-        }
         self.launch_errors.remove(id);
         self.toast("info", "Đang khởi chạy", "Chuẩn bị Java và kiểm tra tệp game…", cx);
         let launch_id = id.to_string();

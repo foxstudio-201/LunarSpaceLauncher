@@ -316,6 +316,34 @@ fn render_detail(app: &mut LauncherApp, cx: &mut Context<LauncherApp>, server: &
                                 cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.clone()));
                             }
                         }))
+                        .child(widgets::ghost_button("srv-console-save", "Lưu", &theme, {
+                            let text = logs.join("
+");
+                            let view = view.clone();
+                            move |_, _, cx| {
+                                let view = view.clone();
+                                let text = text.clone();
+                                cx.spawn(async move |cx| {
+                                    let picked = rfd::AsyncFileDialog::new()
+                                        .set_file_name("server-log.txt")
+                                        .add_filter("Log", &["txt", "log"])
+                                        .save_file()
+                                        .await;
+                                    if let Some(file) = picked {
+                                        let target = file.path().to_path_buf();
+                                        let result = std::fs::write(&target, text);
+                                        let _ = view.update(cx, |this, cx| {
+                                            if result.is_ok() {
+                                                this.toast("ok", "Đã lưu log server", target.to_string_lossy(), cx);
+                                            } else {
+                                                this.toast("bad", "Không lưu được log", "", cx);
+                                            }
+                                        });
+                                    }
+                                })
+                                .detach();
+                            }
+                        }))
                         .child(widgets::button("srv-console-toggle", if running { "Dừng server" } else { "Chạy server" }, &theme, !running,
                             move |_, _, cx| {
                                 if running {

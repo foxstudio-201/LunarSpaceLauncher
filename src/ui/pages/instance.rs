@@ -1386,6 +1386,34 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                                 cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.clone()));
                             }
                         }))
+                        .child(widgets::ghost_button("console-save-log", "Lưu", &theme, {
+                            let text = logs_all.join("
+");
+                            let view = view.clone();
+                            move |_, _, cx| {
+                                let view = view.clone();
+                                let text = text.clone();
+                                cx.spawn(async move |cx| {
+                                    let picked = rfd::AsyncFileDialog::new()
+                                        .set_file_name("logs.txt")
+                                        .add_filter("Log", &["txt", "log"])
+                                        .save_file()
+                                        .await;
+                                    if let Some(file) = picked {
+                                        let target = file.path().to_path_buf();
+                                        let result = std::fs::write(&target, text);
+                                        let _ = view.update(cx, |this, cx| {
+                                            if result.is_ok() {
+                                                this.toast("ok", "Đã lưu log", target.to_string_lossy(), cx);
+                                            } else {
+                                                this.toast("bad", "Không lưu được log", "", cx);
+                                            }
+                                        });
+                                    }
+                                })
+                                .detach();
+                            }
+                        }))
                         .child(widgets::ghost_button("console-upload", "Gửi log", &theme, move |_, _, cx| {
                             let text = logs_all.join("\n");
                             let _ = view_upload.update(cx, |this, cx| {
@@ -2525,6 +2553,23 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                             .border_1()
                             .border_color(theme.border_soft)
                             .child(pages::section_title(&theme, "Thao tác khác", ""))
+                            .child(widgets::ghost_button("inst-clear-icon", "Xoá icon", &theme, {
+                                let view = view.clone();
+                                let id = instance.id.clone();
+                                move |_, _, cx| {
+                                    let view = view.clone();
+                                    let id = id.clone();
+                                    let _ = view.update(cx, |this, cx| {
+                                        let value = this.backend.clear_instance_icon(&id);
+                                        if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+                                            this.refresh_instances();
+                                            this.toast("ok", "Đã xoá icon", "", cx);
+                                        } else {
+                                            this.toast("bad", "Không xoá được icon", value.get("error").and_then(Value::as_str).unwrap_or(""), cx);
+                                        }
+                                    });
+                                }
+                            }))
                             .child(widgets::ghost_button("inst-change-icon", "Đổi icon", &theme, {
                                 let view = view.clone();
                                 let id = instance.id.clone();

@@ -3618,6 +3618,16 @@ impl Backend {
         })
     }
 
+    pub fn clear_instance_icon(&self, id: &str) -> Value {
+        match self.store.update_instance(id, json!({"icon": Value::Null})) {
+            Some(instance) => {
+                self.store.write_launcher_profiles();
+                ok(json!({"instance": instance}))
+            }
+            None => fail("Không tìm thấy instance."),
+        }
+    }
+
     pub fn set_instance_icon(&self, id: &str, path: &str) -> Value {
         let Some(entry) = self.store.find_instance(id) else {
             return fail("Không tìm thấy instance.");

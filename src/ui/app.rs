@@ -375,6 +375,7 @@ pub struct LauncherApp {
     pub server_scroll: gpui::ScrollHandle,
     pub last_window: (f32, f32),
     pub window_gen: u64,
+    pub hidden_for_game: bool,
     pub server_cmd: Entity<TextField>,
     pub server_motd: Entity<TextField>,
     pub server_port: Entity<TextField>,
@@ -574,6 +575,7 @@ impl LauncherApp {
             server_scroll: gpui::ScrollHandle::new(),
             last_window: (0.0, 0.0),
             window_gen: 0,
+            hidden_for_game: false,
             server_cmd,
             server_motd,
             server_port,
@@ -1469,9 +1471,29 @@ impl LauncherApp {
                         .map(|entry| entry.name.clone())
                         .collect(),
                 );
+                let hide_on_launch = self
+                    .settings
+                    .get("hideOnLaunch")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                let any_running = self
+                    .instances
+                    .iter()
+                    .any(|entry| entry.running || matches!(entry.status.as_str(), "running" | "starting"));
+                if hide_on_launch && any_running && !self.hidden_for_game {
+                    crate::ui::pages::hide_launcher_window();
+                    self.hidden_for_game = true;
+                } else if (!any_running || !hide_on_launch) && self.hidden_for_game {
+                    crate::ui::pages::show_launcher_window();
+                    self.hidden_for_game = false;
+                }
             }
             "exit" => {
                 self.refresh_instances();
+                if self.hidden_for_game {
+                    crate::ui::pages::show_launcher_window();
+                    self.hidden_for_game = false;
+                }
                 if let Some(id) = event.get("id").and_then(Value::as_str) {
                     if self.selected_instance.as_deref() == Some(id) {
                         self.load_worlds(cx);
