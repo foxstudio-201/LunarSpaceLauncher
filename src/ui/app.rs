@@ -286,6 +286,13 @@ pub enum Modal {
         settings: Value,
     },
     SkinPaint,
+    LoaderChange {
+        id: String,
+        loader: String,
+        game: String,
+        builds: Vec<Value>,
+        selected: Option<String>,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -2331,6 +2338,7 @@ impl LauncherApp {
             Modal::ModpackUpdate { .. } => Some(pages::modpack_update_modal(self, window, cx).into_any_element()),
             Modal::WorldEdit { .. } => Some(pages::world_edit_modal(self, window, cx).into_any_element()),
             Modal::SkinPaint => Some(pages::skin_paint_modal(self, window, cx).into_any_element()),
+            Modal::LoaderChange { .. } => Some(pages::loader_change_modal(self, window, cx).into_any_element()),
         }
     }
 }

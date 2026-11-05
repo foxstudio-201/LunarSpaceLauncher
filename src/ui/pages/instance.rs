@@ -2266,12 +2266,132 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                                     ),
                             )
                             .child(pages::field(&theme, "Tham số JVM", app.jvm_input.clone(), "Ví dụ: -XX:+UseG1GC -Dfoo=bar"))
-                            .child(pages::field(
-                                &theme,
-                                "Java riêng",
-                                app.file_name_input.clone(),
-                                "Để trống để dùng Java tự động. Dùng nút Chọn java.exe bên dưới.",
-                            ))
+                            .when(
+                                matches!(instance.loader.as_str(), "fabric" | "quilt" | "forge" | "neoforge"),
+                                |el| {
+                                    let view_change = view_save.clone();
+                                    let view_reinstall = view_save.clone();
+                                    let change_id = instance.id.clone();
+                                    let reinstall_id = instance.id.clone();
+                                    let loader = instance.loader.clone();
+                                    let game = instance.version.clone();
+                                    let current = instance.loader_version.clone().unwrap_or_default();
+                                    let reinstall_version = current.clone();
+                                    el.child(
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .justify_between()
+                                            .gap_3()
+                                            .child(
+                                                div()
+                                                    .flex()
+                                                    .flex_col()
+                                                    .min_w(px(0.0))
+                                                    .child(div().text_size(px(TEXT_SM)).text_color(theme.muted).child("Phiên bản loader"))
+                                                    .child(
+                                                        div()
+                                                            .text_size(px(10.0))
+                                                            .font_family(MONO)
+                                                            .text_color(theme.faint)
+                                                            .child(if current.is_empty() {
+                                                                format!("{loader} · chưa chọn")
+                                                            } else {
+                                                                format!("{loader} {current}")
+                                                            }),
+                                                    ),
+                                            )
+                                            .child(
+                                                div()
+                                                    .flex()
+                                                    .items_center()
+                                                    .gap_2()
+                                                    .child(widgets::ghost_button("inst-reinstall-loader", "Cài lại", &theme, move |_, _, cx| {
+                                                        let id = reinstall_id.clone();
+                                                        let version = reinstall_version.clone();
+                                                        let _ = view_reinstall.update(cx, |this, cx| {
+                                                            if version.is_empty() {
+                                                                this.toast("warn", "Chưa có loader để cài lại", "", cx);
+                                                                return;
+                                                            }
+                                                            this.toast("info", "Đang cài lại loader", "", cx);
+                                                            let rx = this.backend.change_loader(id.clone(), version.clone());
+                                                            this.on_result(cx, rx, |this, value, cx| {
+                                                                if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+                                                                    this.refresh_instances();
+                                                                    this.toast("ok", "Đã cài lại loader", "", cx);
+                                                                } else {
+                                                                    this.toast("bad", "Cài lại thất bại", value.get("error").and_then(Value::as_str).unwrap_or(""), cx);
+                                                                }
+                                                            });
+                                                        });
+                                                    }))
+                                                    .child(widgets::ghost_button("inst-change-loader", "Đổi phiên bản", &theme, move |_, _, cx| {
+                                                        let id = change_id.clone();
+                                                        let loader = loader.clone();
+                                                        let game = game.clone();
+                                                        let _ = view_change.update(cx, |this, cx| {
+                                                            let rx = this.backend.loader_versions(loader.clone(), game.clone());
+                                                            this.on_result(cx, rx, move |this, value, cx| {
+                                                                if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+                                                                    let builds = value.get("versions").and_then(Value::as_array).cloned().unwrap_or_default();
+                                                                    let selected = builds
+                                                                        .iter()
+                                                                        .find(|row| row.get("latest").and_then(Value::as_bool).unwrap_or(false))
+                                                                        .and_then(|row| row.get("id").and_then(Value::as_str))
+                                                                        .map(str::to_string);
+                                                                    this.modal = Modal::LoaderChange {
+                                                                        id: id.clone(),
+                                                                        loader: loader.clone(),
+                                                                        game: game.clone(),
+                                                                        builds,
+                                                                        selected,
+                                                                    };
+                                                                    cx.notify();
+                                                                } else {
+                                                                    this.toast("bad", "Không tải được danh sách loader", value.get("error").and_then(Value::as_str).unwrap_or(""), cx);
+                                                                }
+                                                            });
+                                                        });
+                                                    })),
+                                            ),
+                                    )
+                                },
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap_2()
+                                    .child(div().text_size(px(TEXT_SM)).font_weight(medium()).text_color(theme.muted).child("Java riêng"))
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .gap_2()
+                                            .h(px(38.0))
+                                            .px(px(12.0))
+                                            .rounded(px(RADIUS_SM))
+                                            .bg(theme.elevated)
+                                            .border_1()
+                                            .border_color(theme.border)
+                                            .child(widgets::icon("coffee", 14.0, theme.faint))
+                                            .child(
+                                                div()
+                                                    .flex_1()
+                                                    .min_w(px(0.0))
+                                                    .truncate()
+                                                    .font_family(MONO)
+                                                    .text_size(px(12.0))
+                                                    .text_color(if java_override.is_empty() { theme.faint } else { theme.text })
+                                                    .child(if java_override.is_empty() {
+                                                        "Java tự động (chọn theo phiên bản)".to_string()
+                                                    } else {
+                                                        java_override.clone()
+                                                    }),
+                                            ),
+                                    ),
+                            )
                             .child(
                                 div()
                                     .flex()

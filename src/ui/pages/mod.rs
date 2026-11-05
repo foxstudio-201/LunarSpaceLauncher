@@ -247,6 +247,163 @@ pub fn modal_overlay(
         )
 }
 
+pub fn loader_change_modal(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<LauncherApp>) -> impl IntoElement {
+    let theme = app.theme.clone();
+    let (id, loader, game, builds, selected) = match &app.modal {
+        Modal::LoaderChange { id, loader, game, builds, selected } => (
+            id.clone(),
+            loader.clone(),
+            game.clone(),
+            builds.clone(),
+            selected.clone(),
+        ),
+        _ => (String::new(), String::new(), String::new(), Vec::new(), None),
+    };
+    let view_close = cx.entity().downgrade();
+    let view_pick = cx.entity().downgrade();
+    let view_save = cx.entity().downgrade();
+    let mut rows = div().id("loader-builds").flex().flex_col().gap(px(3.0)).max_h(px(340.0)).overflow_y_scroll();
+    if builds.is_empty() {
+        rows = rows.child(
+            div().p(px(12.0)).text_size(px(TEXT_SM)).text_color(theme.faint).child("Không có bản loader nào cho phiên bản này."),
+        );
+    }
+    for build in builds.iter().take(80).cloned().collect::<Vec<_>>() {
+        let build_id = build.get("id").and_then(serde_json::Value::as_str).unwrap_or("").to_string();
+        let label = build
+            .get("version")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(&build_id)
+            .to_string();
+        let stable = build.get("stable").and_then(serde_json::Value::as_bool).unwrap_or(true);
+        let latest = build.get("latest").and_then(serde_json::Value::as_bool).unwrap_or(false);
+        let number = build.get("build").and_then(serde_json::Value::as_str).unwrap_or("");
+        let active = selected.as_deref() == Some(build_id.as_str());
+        let view = view_pick.clone();
+        rows = rows.child(
+            div()
+                .id(gpui::SharedString::from(format!("loader-build-{build_id}")))
+                .flex()
+                .items_center()
+                .gap_3()
+                .p(px(9.0))
+                .rounded(px(RADIUS_SM))
+                .bg(if active { theme.accent_dim } else { theme.surface })
+                .border_1()
+                .border_color(if active { theme.accent } else { theme.border_soft })
+                .cursor_pointer()
+                .hover(|s| s.bg(theme.surface_hover))
+                .on_click(move |_, _, cx| {
+                    let build_id = build_id.clone();
+                    let _ = view.update(cx, |this, cx| {
+                        if let Modal::LoaderChange { selected, .. } = &mut this.modal {
+                            *selected = Some(build_id.clone());
+                        }
+                        cx.notify();
+                    });
+                })
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .flex_1()
+                        .child(div().text_size(px(TEXT_SM)).font_family(MONO).text_color(theme.text).child(label))
+                        .when(stable, |el| el.child(widgets::tag("Ổn định", theme.ok, &theme)))
+                        .when(latest, |el| el.child(widgets::tag("Mới nhất", theme.accent_soft, &theme))),
+                )
+                .when(!number.is_empty(), |el| {
+                    el.child(div().text_size(px(10.0)).text_color(theme.faint).child(format!("build {number}")))
+                })
+                .child(widgets::icon(
+                    if active { "check-circle" } else { "circle" },
+                    15.0,
+                    if active { theme.accent_soft } else { theme.faint },
+                )),
+        );
+    }
+
+    let content = div()
+        .flex()
+        .flex_col()
+        .gap_4()
+        .child(
+            div()
+                .flex()
+                .items_start()
+                .justify_between()
+                .gap_3()
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .child(div().text_size(px(TEXT_2XL)).font_weight(bold()).text_color(theme.text).child("Đổi phiên bản loader"))
+                        .child(
+                            div()
+                                .text_size(px(TEXT_SM))
+                                .text_color(theme.muted)
+                                .child(format!("{loader} · Minecraft {game} · tệp game sẽ được kiểm tra lại sau khi đổi.")),
+                        ),
+                )
+                .child(widgets::icon_button("loader-close", "x", &theme, move |_, _, cx| {
+                    let _ = view_close.update(cx, |this, cx| {
+                        this.modal = Modal::None;
+                        cx.notify();
+                    });
+                })),
+        )
+        .child(rows)
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .justify_end()
+                .gap_2()
+                .child(widgets::ghost_button("loader-cancel", "Đóng", &theme, {
+                    let view = cx.entity().downgrade();
+                    move |_, _, cx| {
+                        let _ = view.update(cx, |this, cx| {
+                            this.modal = Modal::None;
+                            cx.notify();
+                        });
+                    }
+                }))
+                .child(widgets::button("loader-save", "Áp dụng", &theme, true, move |_, _, cx| {
+                    let id = id.clone();
+                    let _ = view_save.update(cx, |this, cx| {
+                        let selected = match &this.modal {
+                            Modal::LoaderChange { selected, .. } => selected.clone(),
+                            _ => None,
+                        };
+                        let Some(selected) = selected else {
+                            this.toast("warn", "Chọn phiên bản loader", "", cx);
+                            return;
+                        };
+                        this.modal = Modal::None;
+                        this.toast("info", "Đang cài loader", "Quá trình tải có thể mất vài phút.", cx);
+                        let rx = this.backend.change_loader(id.clone(), selected);
+                        this.on_result(cx, rx, |this, value, cx| {
+                            if value.get("ok").and_then(serde_json::Value::as_bool).unwrap_or(false) {
+                                this.refresh_instances();
+                                this.load_instance_tab(cx);
+                                this.toast("ok", "Đã đổi loader", "", cx);
+                            } else {
+                                this.toast("bad", "Đổi loader thất bại", value.get("error").and_then(serde_json::Value::as_str).unwrap_or(""), cx);
+                            }
+                        });
+                    });
+                })),
+        );
+
+    let backdrop = cx.entity().downgrade();
+    modal_overlay(theme, 560.0, content, move |_, _, cx| {
+        let _ = backdrop.update(cx, |this, cx| {
+            this.modal = Modal::None;
+            cx.notify();
+        });
+    })
+}
+
 pub fn skin_paint_modal(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<LauncherApp>) -> impl IntoElement {
     use std::cell::RefCell;
     use std::rc::Rc;

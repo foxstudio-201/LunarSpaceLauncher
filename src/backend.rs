@@ -887,6 +887,45 @@ impl Backend {
         }
     }
 
+    pub fn change_loader(self: &Arc<Self>, id: String, loader_version: String) -> Receiver<Value> {
+        let this = self.clone();
+        self.request(async move {
+            let Some(entry) = this.store.find_instance(&id) else {
+                return fail("Không tìm thấy instance.");
+            };
+            if !matches!(entry.loader.as_str(), "fabric" | "quilt" | "forge" | "neoforge") {
+                return fail("Phiên bản này không hỗ trợ đổi loader.");
+            }
+            let loader_version = loader_version.trim().to_string();
+            if loader_version.is_empty() {
+                return fail("Chọn phiên bản loader.");
+            }
+            let version_id = match this
+                .resolve_version_id(&entry.version, &entry.loader, &loader_version)
+                .await
+            {
+                Ok(value) => value,
+                Err(err) => return fail(err.to_string()),
+            };
+            let mut patch = json!({
+                "loaderVersion": loader_version,
+                "status": "installing",
+                "error": Value::Null,
+            });
+            if entry.loader == "forge" || entry.loader == "neoforge" {
+                patch["forgeVersion"] = json!(loader_version);
+                patch["versionId"] = Value::Null;
+            } else {
+                patch["versionId"] = json!(version_id);
+            }
+            this.store.update_instance(&id, patch);
+            this.store.write_launcher_profiles();
+            this.emit(json!({"type": "instances-changed"}));
+            this.run_install(&id).await;
+            ok(json!({"loaderVersion": loader_version}))
+        })
+    }
+
     pub fn remove_instance(self: &Arc<Self>, id: &str, delete_files: bool) -> Value {
         let Some(entry) = self.store.find_instance(id) else {
             return fail("Không tìm thấy instance.");

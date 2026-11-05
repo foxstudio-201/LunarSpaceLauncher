@@ -98,8 +98,30 @@ pub fn load_create_loaders(app: &mut LauncherApp, cx: &mut Context<LauncherApp>)
             .iter()
             .any(|g| g.get("version").and_then(serde_json::Value::as_str) == Some(this.create.game.as_str()));
         if !valid {
-            if let Some(first) = games.first().and_then(|g| g.get("version")).and_then(serde_json::Value::as_str) {
-                this.create.game = first.to_string();
+            let latest = this
+                .latest
+                .get("release")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            let pick = games
+                .iter()
+                .find(|g| g.get("version").and_then(serde_json::Value::as_str) == Some(latest.as_str()))
+                .or_else(|| {
+                    games.iter().find(|g| {
+                        let version = g
+                            .get("version")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("")
+                            .to_lowercase();
+                        !version.contains("snapshot")
+                            && !version.contains("pre")
+                            && !version.contains("-rc")
+                    })
+                })
+                .or_else(|| games.first());
+            if let Some(pick) = pick.and_then(|g| g.get("version")).and_then(serde_json::Value::as_str) {
+                this.create.game = pick.to_string();
             }
         }
         let loader = this.create.loader.clone();
@@ -559,6 +581,9 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
             .collect()
     };
     games.retain(|(version, _, _)| query.is_empty() || version.to_lowercase().contains(&query));
+    if !app.create.show_snapshots {
+        games.retain(|(_, kind, _)| kind == "release");
+    }
     let count = games.len();
     let latest_release = app.latest.get("release").and_then(serde_json::Value::as_str).unwrap_or("").to_string();
     let mut game_grid = div().flex().gap_2().flex_wrap();
