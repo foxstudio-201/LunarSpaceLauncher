@@ -2015,6 +2015,23 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                                         });
                                     }
                                 }))
+                                .child(widgets::ghost_button("world-delete", "Xoá", &theme, {
+                                    let view = view.clone();
+                                    let folder = folder_map.clone();
+                                    move |_, _, cx| {
+                                        let folder = folder.clone();
+                                        let _ = view.update(cx, |this, cx| {
+                                            if let Some(id) = this.selected_instance.clone() {
+                                                this.modal = Modal::Confirm {
+                                                    title: "Xoá thế giới?".into(),
+                                                    message: format!("Thư mục saves/{folder} sẽ được chuyển vào thùng rác của phiên bản."),
+                                                    action: ConfirmAction::TrashFile(id, format!("saves/{folder}")),
+                                                };
+                                                cx.notify();
+                                            }
+                                        });
+                                    }
+                                }))
                                 .child(widgets::ghost_button("world-map", "Bản đồ", &theme, {
                                     let folder = folder_map.clone();
                                     move |_, _, cx| {
@@ -2092,14 +2109,46 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                             .justify_between()
                             .gap_2()
                             .child(chips)
-                            .child(widgets::button("map-generate", "Tạo bản đồ", &theme, true, move |_, _, cx| {
-                                let folder = generate_folder.clone();
-                                let _ = view_gen.update(cx, |this, cx| {
-                                    if let Some(folder) = folder {
-                                        this.generate_map(folder, cx);
-                                    }
-                                });
-                            })),
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .when_some(map_image.clone(), |el, source| {
+                                        let view_save = view.clone();
+                                        el.child(widgets::ghost_button("map-save", "Lưu ảnh", &theme, move |_, _, cx| {
+                                            let view = view_save.clone();
+                                            let source = source.clone();
+                                            cx.spawn(async move |cx| {
+                                                let picked = rfd::AsyncFileDialog::new()
+                                                    .set_file_name("world-map.png")
+                                                    .add_filter("PNG", &["png"])
+                                                    .save_file()
+                                                    .await;
+                                                if let Some(file) = picked {
+                                                    let target = file.path().to_path_buf();
+                                                    let result = std::fs::copy(&source, &target);
+                                                    let _ = view.update(cx, |this, cx| {
+                                                        if result.is_ok() {
+                                                            this.toast("ok", "Đã lưu bản đồ", target.to_string_lossy(), cx);
+                                                        } else {
+                                                            this.toast("bad", "Không lưu được bản đồ", "", cx);
+                                                        }
+                                                    });
+                                                }
+                                            })
+                                            .detach();
+                                        }))
+                                    })
+                                    .child(widgets::button("map-generate", "Tạo bản đồ", &theme, true, move |_, _, cx| {
+                                        let folder = generate_folder.clone();
+                                        let _ = view_gen.update(cx, |this, cx| {
+                                            if let Some(folder) = folder {
+                                                this.generate_map(folder, cx);
+                                            }
+                                        });
+                                    })),
+                            ),
                     )
                     .child(
                         div()
