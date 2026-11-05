@@ -845,7 +845,7 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                         .on_click(move |_, _, cx| {
                             let _ = view.update(cx, |this, cx| {
                                 this.instance_tab = tab;
-                                let target = 88.0 + tab as usize as f32 * 38.0;
+                                let target = 78.0 + tab as usize as f32 * 38.0;
                                 this.update_pill(target, true, cx);
                                 this.load_instance_tab(cx);
                                 cx.notify();
@@ -918,7 +918,7 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                                 .child(widgets::ghost_button("overview-console", "Mở console", &theme, move |_, _, cx| {
                                     let _ = view_log.update(cx, |this, cx| {
                                         this.instance_tab = InstanceTab::Console;
-                                        this.update_pill(88.0 + InstanceTab::Console as usize as f32 * 38.0, true, cx);
+                                        this.update_pill(78.0 + InstanceTab::Console as usize as f32 * 38.0, true, cx);
                                         this.load_instance_tab(cx);
                                         cx.notify();
                                     });

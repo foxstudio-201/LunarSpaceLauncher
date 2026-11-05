@@ -572,7 +572,7 @@ impl LauncherApp {
             Page::Servers => (124.0, true),
             Page::Modpacks => (166.0, true),
             Page::Versions => (214.0, true),
-            Page::Instance => (88.0 + self.instance_tab as usize as f32 * 38.0, true),
+            Page::Instance => (78.0 + self.instance_tab as usize as f32 * 38.0, true),
             _ => (0.0, false),
         }
     }
@@ -582,7 +582,7 @@ impl LauncherApp {
         self.page = Page::Instance;
         self.instance_tab = InstanceTab::Overview;
         self.instance_ui = InstanceUi::default();
-        self.update_pill(88.0, true, cx);
+        self.update_pill(78.0, true, cx);
         self.instance_ui.logs = self.logs.get(&id).cloned().unwrap_or_default();
         self.load_instance_tab(cx);
         if let Some(entry) = self.instances.iter().find(|i| i.id == id) {
@@ -1428,6 +1428,8 @@ impl LauncherApp {
                     self.instance_tab == tab,
                     Box::new(move |this, cx| {
                         this.instance_tab = tab;
+                        let target = 78.0 + tab as usize as f32 * 38.0;
+                        this.update_pill(target, true, cx);
                         this.load_instance_tab(cx);
                         cx.notify();
                     }),
