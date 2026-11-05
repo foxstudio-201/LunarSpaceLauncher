@@ -232,7 +232,7 @@ fn render_detail(app: &mut LauncherApp, cx: &mut Context<LauncherApp>, server: &
     let id_toggle = id.clone();
     let id_delete = id.clone();
 
-    let tabs = [("overview", "Tổng quan"), ("console", "Console"), ("config", "Cấu hình"), ("schedules", "Lịch"), ("files", "Tệp tin"), ("backups", "Sao lưu")];
+    let tabs = [("overview", "Tổng quan"), ("console", "Console"), ("config", "Cấu hình"), ("users", "Người chơi"), ("schedules", "Lịch"), ("files", "Tệp tin"), ("backups", "Sao lưu")];
     let mut tab_row = div().flex().items_center().gap(px(4.0));
     for (key, label) in tabs {
         let active = app.server_ui.tab == key;
@@ -307,6 +307,217 @@ fn render_detail(app: &mut LauncherApp, cx: &mut Context<LauncherApp>, server: &
                                 let _ = view.update(cx, |this, cx| this.send_server_command(cx));
                             }
                         })),
+                );
+        }
+        "users" => {
+            let view_add = view.clone();
+            let view_wl = view.clone();
+            let view_op = view.clone();
+            let add_serv = id.clone();
+            let mut whitelist_rows = div().flex().flex_col().gap_2();
+            if app.server_ui.users_whitelist.is_empty() {
+                whitelist_rows = whitelist_rows.child(
+                    div().text_size(px(TEXT_SM)).text_color(theme.faint).p(px(6.0)).child("Danh sách trắng đang trống."),
+                );
+            }
+            for user in app.server_ui.users_whitelist.iter().cloned().collect::<Vec<_>>() {
+                let name = user.get("name").and_then(Value::as_str).unwrap_or("").to_string();
+                let uuid = user.get("uuid").and_then(Value::as_str).unwrap_or("").to_string();
+                let has_op = app
+                    .server_ui
+                    .users_ops
+                    .iter()
+                    .any(|row| row.get("name").and_then(Value::as_str).map(|v| v.eq_ignore_ascii_case(&name)).unwrap_or(false));
+                let view_remove = view_wl.clone();
+                let sid = id.clone();
+                let remove_name = name.clone();
+                whitelist_rows = whitelist_rows.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_3()
+                        .h(px(40.0))
+                        .px(px(10.0))
+                        .rounded(px(6.0))
+                        .bg(theme.surface)
+                        .border_1()
+                        .border_color(theme.border_soft)
+                        .child(div().size(px(24.0)).rounded(px(5.0)).bg(theme.surface_active).flex().items_center().justify_center()
+                            .child(widgets::icon("user", 13.0, theme.accent_soft)))
+                        .child(div().flex().flex_col().flex_1().min_w(px(0.0))
+                            .child(div().text_size(px(TEXT_SM)).text_color(theme.text).truncate().child(name))
+                            .child(div().text_size(px(9.0)).font_family(MONO).text_color(theme.faint).truncate().child(uuid)))
+                        .when(has_op, |el| el.child(widgets::tag("OP", theme.warn, &theme)))
+                        .child(widgets::ghost_button("wl-remove", "Xoá", &theme, move |_, _, cx| {
+                            let sid = sid.clone();
+                            let name = remove_name.clone();
+                            let _ = view_remove.update(cx, |this, cx| {
+                                this.backend.server_user_set(&sid, name.clone(), false, has_op);
+                                let value = this.backend.server_users(&sid);
+                                this.server_ui.users_whitelist = value.get("whitelist").and_then(Value::as_array).cloned().unwrap_or_default();
+                                this.server_ui.users_ops = value.get("ops").and_then(Value::as_array).cloned().unwrap_or_default();
+                                cx.notify();
+                            });
+                        })),
+                );
+            }
+            let mut op_rows = div().flex().flex_col().gap_2();
+            if app.server_ui.users_ops.is_empty() {
+                op_rows = op_rows.child(
+                    div().text_size(px(TEXT_SM)).text_color(theme.faint).p(px(6.0)).child("Chưa có ai là OP."),
+                );
+            }
+            for user in app.server_ui.users_ops.iter().cloned().collect::<Vec<_>>() {
+                let name = user.get("name").and_then(Value::as_str).unwrap_or("").to_string();
+                let uuid = user.get("uuid").and_then(Value::as_str).unwrap_or("").to_string();
+                let has_white = app
+                    .server_ui
+                    .users_whitelist
+                    .iter()
+                    .any(|row| row.get("name").and_then(Value::as_str).map(|v| v.eq_ignore_ascii_case(&name)).unwrap_or(false));
+                let view_remove = view_op.clone();
+                let sid = id.clone();
+                let remove_name = name.clone();
+                op_rows = op_rows.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_3()
+                        .h(px(40.0))
+                        .px(px(10.0))
+                        .rounded(px(6.0))
+                        .bg(theme.surface)
+                        .border_1()
+                        .border_color(theme.border_soft)
+                        .child(div().size(px(24.0)).rounded(px(5.0)).bg(theme.surface_active).flex().items_center().justify_center()
+                            .child(widgets::icon("shield-check", 13.0, theme.warn)))
+                        .child(div().flex().flex_col().flex_1().min_w(px(0.0))
+                            .child(div().text_size(px(TEXT_SM)).text_color(theme.text).truncate().child(name))
+                            .child(div().text_size(px(9.0)).font_family(MONO).text_color(theme.faint).truncate().child(uuid)))
+                        .when(has_white, |el| el.child(widgets::tag("Whitelist", theme.info, &theme)))
+                        .child(widgets::ghost_button("op-remove", "Xoá", &theme, move |_, _, cx| {
+                            let sid = sid.clone();
+                            let name = remove_name.clone();
+                            let _ = view_remove.update(cx, |this, cx| {
+                                this.backend.server_user_set(&sid, name.clone(), has_white, false);
+                                let value = this.backend.server_users(&sid);
+                                this.server_ui.users_whitelist = value.get("whitelist").and_then(Value::as_array).cloned().unwrap_or_default();
+                                this.server_ui.users_ops = value.get("ops").and_then(Value::as_array).cloned().unwrap_or_default();
+                                cx.notify();
+                            });
+                        })),
+                );
+            }
+
+            let view_flag_white = view.clone();
+            let view_flag_op = view.clone();
+            body = body
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_3()
+                        .p(px(14.0))
+                        .rounded(px(RADIUS))
+                        .bg(theme.elevated)
+                        .border_1()
+                        .border_color(theme.border_soft)
+                        .child(section_title(&theme, "Thêm người chơi", "Áp dụng ngay cho server đang chạy"))
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_3()
+                                .child(div().flex_1().child(widgets::text_input_box(&theme).child(app.user_name.clone())))
+                                .child(
+                                    div()
+                                        .id("user-flag-white")
+                                        .h(px(30.0))
+                                        .px(px(10.0))
+                                        .flex()
+                                        .items_center()
+                                        .rounded(px(6.0))
+                                        .bg(if app.server_ui.user_add_whitelist { theme.accent_dim } else { theme.surface })
+                                        .border_1()
+                                        .border_color(if app.server_ui.user_add_whitelist { theme.accent } else { theme.border_soft })
+                                        .text_size(px(10.0))
+                                        .text_color(if app.server_ui.user_add_whitelist { theme.accent_soft } else { theme.muted })
+                                        .cursor_pointer()
+                                        .on_click(move |_, _, cx| {
+                                            let _ = view_flag_white.update(cx, |this, cx| {
+                                                this.server_ui.user_add_whitelist = !this.server_ui.user_add_whitelist;
+                                                cx.notify();
+                                            });
+                                        })
+                                        .child("Whitelist"),
+                                )
+                                .child(
+                                    div()
+                                        .id("user-flag-op")
+                                        .h(px(30.0))
+                                        .px(px(10.0))
+                                        .flex()
+                                        .items_center()
+                                        .rounded(px(6.0))
+                                        .bg(if app.server_ui.user_add_op { theme.accent_dim } else { theme.surface })
+                                        .border_1()
+                                        .border_color(if app.server_ui.user_add_op { theme.accent } else { theme.border_soft })
+                                        .text_size(px(10.0))
+                                        .text_color(if app.server_ui.user_add_op { theme.accent_soft } else { theme.muted })
+                                        .cursor_pointer()
+                                        .on_click(move |_, _, cx| {
+                                            let _ = view_flag_op.update(cx, |this, cx| {
+                                                this.server_ui.user_add_op = !this.server_ui.user_add_op;
+                                                cx.notify();
+                                            });
+                                        })
+                                        .child("OP"),
+                                )
+                                .child(widgets::button("user-add", "Thêm", &theme, true, move |_, _, cx| {
+                                    let sid = add_serv.clone();
+                                    let _ = view_add.update(cx, |this, cx| {
+                                        let name = this.user_name.read(cx).text().trim().to_string();
+                                        if name.is_empty() {
+                                            this.toast("warn", "Nhập tên người chơi", "", cx);
+                                            return;
+                                        }
+                                        if !this.server_ui.user_add_whitelist && !this.server_ui.user_add_op {
+                                            this.toast("warn", "Chọn Whitelist hoặc OP", "", cx);
+                                            return;
+                                        }
+                                        let value = this.backend.server_user_set(
+                                            &sid,
+                                            name,
+                                            this.server_ui.user_add_whitelist,
+                                            this.server_ui.user_add_op,
+                                        );
+                                        if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+                                            let value = this.backend.server_users(&sid);
+                                            this.server_ui.users_whitelist = value.get("whitelist").and_then(Value::as_array).cloned().unwrap_or_default();
+                                            this.server_ui.users_ops = value.get("ops").and_then(Value::as_array).cloned().unwrap_or_default();
+                                            this.toast("ok", "Đã thêm người chơi", "Server đọc danh sách ngay khi lưu.", cx);
+                                        } else {
+                                            this.toast("bad", "Thêm thất bại", value.get("error").and_then(Value::as_str).unwrap_or(""), cx);
+                                        }
+                                    });
+                                })),
+                        ),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .child(section_title(&theme, "Whitelist", format!("{} người chơi", app.server_ui.users_whitelist.len())))
+                        .child(whitelist_rows),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .child(section_title(&theme, "Quản trị viên (OP)", format!("{} người chơi", app.server_ui.users_ops.len())))
+                        .child(op_rows),
                 );
         }
         "schedules" => {
@@ -1108,6 +1319,17 @@ impl LauncherApp {
         {
             self.server_ui.schedules = server
                 .get("schedules")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            let users = self.backend.server_users(&id);
+            self.server_ui.users_whitelist = users
+                .get("whitelist")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            self.server_ui.users_ops = users
+                .get("ops")
                 .and_then(Value::as_array)
                 .cloned()
                 .unwrap_or_default();

@@ -479,6 +479,80 @@ pub fn backups_dir(backend: &Backend, id: &str) -> PathBuf {
     root(backend).join("backups").join(id)
 }
 
+fn read_array(path: &Path) -> Vec<Value> {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<Vec<Value>>(&raw).ok())
+        .unwrap_or_default()
+}
+
+fn resolve_uuid(dir: &Path, name: &str) -> String {
+    let cache = read_array(&dir.join("usercache.json"));
+    if let Some(uuid) = cache
+        .iter()
+        .find(|row| {
+            row.get("name")
+                .and_then(Value::as_str)
+                .map(|value| value.eq_ignore_ascii_case(name))
+                .unwrap_or(false)
+        })
+        .and_then(|row| row.get("uuid").and_then(Value::as_str))
+    {
+        return uuid.to_string();
+    }
+    crate::store::offline_uuid(name)
+}
+
+pub fn users(entry: &ServerEntry) -> Result<Value> {
+    let dir = Path::new(&entry.dir);
+    let whitelist = read_array(&dir.join("whitelist.json"));
+    let ops = read_array(&dir.join("ops.json"));
+    Ok(json!({
+        "whitelist": whitelist.iter().map(|row| json!({
+            "name": row.get("name").and_then(Value::as_str).unwrap_or(""),
+            "uuid": row.get("uuid").and_then(Value::as_str).unwrap_or(""),
+        })).collect::<Vec<_>>(),
+        "ops": ops.iter().map(|row| json!({
+            "name": row.get("name").and_then(Value::as_str).unwrap_or(""),
+            "uuid": row.get("uuid").and_then(Value::as_str).unwrap_or(""),
+            "level": row.get("level").and_then(Value::as_u64).unwrap_or(4),
+        })).collect::<Vec<_>>(),
+        "onlineMode": entry.vars.get("online-mode").and_then(Value::as_bool).unwrap_or(false),
+    }))
+}
+
+pub fn set_user(entry: &ServerEntry, name: &str, whitelist: bool, op: bool) -> Result<()> {
+    let name = name.trim();
+    if !crate::store::validate_mc_name(name) {
+        return Err(anyhow!("Tên người chơi không hợp lệ."));
+    }
+    let dir = Path::new(&entry.dir);
+    let uuid = resolve_uuid(dir, name);
+    let mut white = read_array(&dir.join("whitelist.json"));
+    let mut ops = read_array(&dir.join("ops.json"));
+    white.retain(|row| {
+        !row.get("name")
+            .and_then(Value::as_str)
+            .map(|value| value.eq_ignore_ascii_case(name))
+            .unwrap_or(false)
+    });
+    ops.retain(|row| {
+        !row.get("name")
+            .and_then(Value::as_str)
+            .map(|value| value.eq_ignore_ascii_case(name))
+            .unwrap_or(false)
+    });
+    if whitelist {
+        white.push(json!({"uuid": uuid, "name": name}));
+    }
+    if op {
+        ops.push(json!({"uuid": uuid, "name": name, "level": 4, "bypassesPlayerLimit": false}));
+    }
+    crate::store::write_json_atomic(&dir.join("whitelist.json"), &Value::Array(white));
+    crate::store::write_json_atomic(&dir.join("ops.json"), &Value::Array(ops));
+    Ok(())
+}
+
 pub fn list_backups(backend: &Backend, id: &str) -> Vec<Value> {
     std::fs::read_to_string(backups_dir(backend, id).join("index.json"))
         .ok()

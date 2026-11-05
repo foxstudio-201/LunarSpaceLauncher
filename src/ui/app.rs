@@ -247,6 +247,10 @@ pub struct ServerUi {
     pub online: bool,
     pub pvp: bool,
     pub schedules: Vec<Value>,
+    pub users_whitelist: Vec<Value>,
+    pub users_ops: Vec<Value>,
+    pub user_add_whitelist: bool,
+    pub user_add_op: bool,
     pub schedule_form: bool,
     pub schedule_edit: Option<String>,
     pub schedule_action: String,
@@ -365,6 +369,7 @@ pub struct LauncherApp {
     pub sched_name: Entity<TextField>,
     pub sched_cron: Entity<TextField>,
     pub sched_command: Entity<TextField>,
+    pub user_name: Entity<TextField>,
     pub host_token: Entity<TextField>,
     pub host_listen: Entity<TextField>,
     pub host_status: Value,
@@ -428,6 +433,7 @@ impl LauncherApp {
         let sched_name = cx.new(|cx| TextField::new(cx, "Tên lịch…"));
         let sched_cron = cx.new(|cx| TextField::new(cx, "0 4 * * *"));
         let sched_command = cx.new(|cx| TextField::new(cx, "say Server sẽ khởi động lại sau 5 phút"));
+        let user_name = cx.new(|cx| TextField::new(cx, "Tên người chơi…"));
         let server_cmd = cx.new(|cx| TextField::new(cx, "Nhập lệnh server…").on_submit({
             let view = view.clone();
             move |text, _w, app| {
@@ -555,6 +561,7 @@ impl LauncherApp {
             sched_name,
             sched_cron,
             sched_command,
+            user_name,
             host_token,
             host_listen,
             host_status: Value::Null,

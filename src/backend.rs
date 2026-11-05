@@ -3116,6 +3116,26 @@ impl Backend {
         }
     }
 
+    pub fn server_users(&self, id: &str) -> Value {
+        let Some(entry) = crate::server::find(self, id) else {
+            return fail("Không tìm thấy server.");
+        };
+        match crate::server::users(&entry) {
+            Ok(value) => ok(value),
+            Err(err) => fail(err.to_string()),
+        }
+    }
+
+    pub fn server_user_set(&self, id: &str, name: String, whitelist: bool, op: bool) -> Value {
+        let Some(entry) = crate::server::find(self, id) else {
+            return fail("Không tìm thấy server.");
+        };
+        match crate::server::set_user(&entry, &name, whitelist, op) {
+            Ok(_) => ok(json!({})),
+            Err(err) => fail(err.to_string()),
+        }
+    }
+
     pub fn server_remove(self: &Arc<Self>, id: &str, delete_files: bool) -> Value {
         if let Some(proc) = self.servers.lock().get(id).cloned() {
             launch::kill_tree(proc.pid);
