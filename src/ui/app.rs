@@ -230,6 +230,9 @@ pub struct LauncherApp {
     pub instance_tab: InstanceTab,
     pub selected_instance: Option<String>,
     pub rail_collapsed: bool,
+    pub pill_y: f32,
+    pub pill_gen: u64,
+    pub pill_visible: bool,
     pub boot: bool,
     pub boot_splash: bool,
     pub splash_frames: Vec<std::path::PathBuf>,
@@ -264,6 +267,7 @@ pub struct LauncherApp {
     pub ely_user: Entity<TextField>,
     pub ely_pass: Entity<TextField>,
     pub file_search: Entity<TextField>,
+    pub console_filter: Entity<TextField>,
     pub editor_input: Entity<TextField>,
     pub file_name_input: Entity<TextField>,
     pub console_scroll: gpui::ScrollHandle,
@@ -273,6 +277,8 @@ pub struct LauncherApp {
     pub host_listen: Entity<TextField>,
     pub host_status: Value,
     pub host_instance: Option<String>,
+    pub tip: Option<String>,
+    pub mouse_pos: gpui::Point<gpui::Pixels>,
     pub home_tab: String,
     pub home_loaders: Value,
     pub home_loaders_for: String,
@@ -312,6 +318,7 @@ impl LauncherApp {
         let ely_user = cx.new(|cx| TextField::new(cx, "Tên đăng nhập hoặc email ely.by"));
         let ely_pass = cx.new(|cx| TextField::new(cx, "Mật khẩu ely.by"));
         let file_search = cx.new(|cx| TextField::new(cx, "Tìm tệp…"));
+        let console_filter = cx.new(|cx| TextField::new(cx, "Lọc log…"));
         let editor_input = cx.new(|cx| TextField::new(cx, "Nội dung tệp…").multiline(true));
         let file_name_input = cx.new(|cx| TextField::new(cx, "Tên tệp hoặc thư mục…"));
         let server_cmd = cx.new(|cx| TextField::new(cx, "Nhập lệnh server…").on_submit({
@@ -365,6 +372,9 @@ impl LauncherApp {
             instance_tab: InstanceTab::Overview,
             selected_instance: None,
             rail_collapsed: false,
+            pill_y: 40.0,
+            pill_gen: 0,
+            pill_visible: true,
             boot: true,
             boot_splash: true,
             splash_frames,
@@ -420,6 +430,7 @@ impl LauncherApp {
             ely_user,
             ely_pass,
             file_search,
+            console_filter,
             editor_input,
             file_name_input,
             console_scroll: gpui::ScrollHandle::new(),
@@ -429,6 +440,8 @@ impl LauncherApp {
             host_listen,
             host_status: Value::Null,
             host_instance: None,
+            tip: None,
+            mouse_pos: gpui::point(px(0.0), px(0.0)),
             home_tab: "overview".into(),
             home_loaders: Value::Null,
             home_loaders_for: String::new(),
@@ -499,11 +512,65 @@ impl LauncherApp {
         self.instances.iter().find(|entry| &entry.id == id)
     }
 
+    pub fn update_pill(&mut self, target: f32, visible: bool, cx: &mut Context<Self>) {
+        self.pill_visible = visible;
+        if !visible {
+            cx.notify();
+            return;
+        }
+        self.pill_gen += 1;
+        let generation = self.pill_gen;
+        let start = self.pill_y;
+        if (start - target).abs() < 0.5 {
+            self.pill_y = target;
+            cx.notify();
+            return;
+        }
+        cx.spawn(async move |this, cx| {
+            let steps = 18u32;
+            for step in 1..=steps {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(16))
+                    .await;
+                let t = step as f32 / steps as f32;
+                let eased = 1.0 - (1.0 - t).powi(3);
+                let y = start + (target - start) * eased;
+                let keep = this
+                    .update(cx, |this, cx| {
+                        if this.pill_gen != generation {
+                            return false;
+                        }
+                        this.pill_y = y;
+                        cx.notify();
+                        true
+                    })
+                    .unwrap_or(false);
+                if !keep {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn pill_target_for_page(&self, page: Page) -> (f32, bool) {
+        match page {
+            Page::Home => (40.0, true),
+            Page::Host => (82.0, true),
+            Page::Servers => (124.0, true),
+            Page::Modpacks => (166.0, true),
+            Page::Versions => (214.0, true),
+            Page::Instance => (88.0 + self.instance_tab as usize as f32 * 38.0, true),
+            _ => (0.0, false),
+        }
+    }
+
     pub fn open_instance(&mut self, id: String, cx: &mut Context<Self>) {
         self.selected_instance = Some(id.clone());
         self.page = Page::Instance;
         self.instance_tab = InstanceTab::Overview;
         self.instance_ui = InstanceUi::default();
+        self.update_pill(88.0, true, cx);
         self.instance_ui.logs = self.logs.get(&id).cloned().unwrap_or_default();
         self.load_instance_tab(cx);
         if let Some(entry) = self.instances.iter().find(|i| i.id == id) {
@@ -829,6 +896,9 @@ impl LauncherApp {
                         let overflow = self.instance_ui.logs.len() - 2000;
                         self.instance_ui.logs.drain(0..overflow);
                     }
+                    if self.console_auto {
+                        self.console_scroll.scroll_to_bottom();
+                    }
                 }
             }
             "state" => {
@@ -1055,6 +1125,8 @@ impl LauncherApp {
         self.page = page;
         self.select_open = None;
         self.page_scroll.set_offset(gpui::point(px(0.0), px(0.0)));
+        let (target, visible) = self.pill_target_for_page(page);
+        self.update_pill(target, visible, cx);
         cx.notify();
     }
 
@@ -1201,7 +1273,6 @@ impl LauncherApp {
                 .text_size(px(12.0))
                 .font_weight(if active { FontWeight::SEMIBOLD } else { FontWeight::MEDIUM })
                 .text_color(if active { theme.accent_soft } else { theme.muted })
-                .when(active, |el| el.bg(theme.surface_active))
                 .when(!active, |el| el.hover(|st| st.text_color(theme.text).bg(theme.surface_hover)))
                 .on_click(move |_, _, cx| {
                     let _ = entity.update(cx, |this, cx| on_click(this, cx));
@@ -1232,8 +1303,7 @@ impl LauncherApp {
                 .items_center()
                 .justify_end()
                 .h(px(24.0))
-                .child(
-                    div()
+                .child(widgets::tip("tip-rail", if collapsed { "Mở rộng" } else { "Thu gọn" }, cx.entity().downgrade(), div()
                         .id("rail-toggle")
                         .flex()
                         .items_center()
@@ -1251,9 +1321,32 @@ impl LauncherApp {
                                 cx.notify();
                             });
                         })
-                        .child(widgets::icon("sidebar-simple", 13.0, theme.faint)),
-                ),
+                        .child(widgets::icon("sidebar-simple", 13.0, theme.faint)))),
         );
+
+        if self.pill_visible {
+            rail = rail.child(
+                div()
+                    .id("nav-pill")
+                    .absolute()
+                    .left(px(8.0))
+                    .right(px(8.0))
+                    .top(px(self.pill_y))
+                    .h(px(36.0))
+                    .rounded(px(8.0))
+                    .bg(theme.surface_active)
+                    .child(
+                        div()
+                            .absolute()
+                            .left(px(0.0))
+                            .top(px(7.0))
+                            .bottom(px(7.0))
+                            .w(px(2.0))
+                            .rounded_full()
+                            .bg(theme.accent),
+                    ),
+            );
+        }
 
         // Top group: instance mode shows Home/back; otherwise the main pages.
         if in_instance {
@@ -1472,7 +1565,7 @@ impl LauncherApp {
                             .min_w(px(0.0))
                             .text_size(px(11.5))
                             .text_color(theme.muted)
-                            .overflow_hidden()
+                            .truncate()
                             .child(
                                 account
                                     .as_ref()
@@ -1500,6 +1593,7 @@ impl LauncherApp {
 
     fn titlebar(&self, cx: &Context<Self>) -> impl IntoElement {
         let theme = self.theme.clone();
+        let view = cx.entity().downgrade();
         div()
             .flex()
             .items_center()
@@ -1551,49 +1645,69 @@ impl LauncherApp {
                     .items_center()
                     .gap(px(2.0))
                     .pr(px(8.0))
-                    .child(
-                        div()
-                            .id("win-min")
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .w(px(38.0))
-                            .h(px(28.0))
-                            .rounded(px(6.0))
-                            .cursor_pointer()
-                            .hover(|st| st.bg(theme.surface_hover))
-                            .on_click(|_, window, _| window.minimize_window())
-                            .child(widgets::icon("minus", 13.0, theme.muted)),
-                    )
-                    .child(
-                        div()
-                            .id("win-max")
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .w(px(38.0))
-                            .h(px(28.0))
-                            .rounded(px(6.0))
-                            .cursor_pointer()
-                            .hover(|st| st.bg(theme.surface_hover))
-                            .on_click(|_, window, _| window.zoom_window())
-                            .child(widgets::icon("square", 12.0, theme.muted)),
-                    )
-                    .child(
-                        div()
-                            .id("win-close")
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .w(px(38.0))
-                            .h(px(28.0))
-                            .rounded(px(6.0))
-                            .cursor_pointer()
-                            .hover(|st| st.bg(theme.bad).text_color(gpui::white()))
-                            .on_click(|_, window, _| window.remove_window())
-                            .child(widgets::icon("x", 13.0, theme.muted)),
-                    ),
+                    .child(widgets::tip("tip-win-min", "Thu nhỏ", view.clone(), div()
+                        .id("win-min")
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .w(px(38.0))
+                        .h(px(28.0))
+                        .rounded(px(6.0))
+                        .cursor_pointer()
+                        .hover(|st| st.bg(theme.surface_hover))
+                        .on_click(|_, window, _| window.minimize_window())
+                        .child(widgets::icon("minus", 13.0, theme.muted))))
+                    .child(widgets::tip("tip-win-max", "Phóng to", view.clone(), div()
+                        .id("win-max")
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .w(px(38.0))
+                        .h(px(28.0))
+                        .rounded(px(6.0))
+                        .cursor_pointer()
+                        .hover(|st| st.bg(theme.surface_hover))
+                        .on_click(|_, window, _| window.zoom_window())
+                        .child(widgets::icon("square", 12.0, theme.muted))))
+                    .child(widgets::tip("tip-win-close", "Đóng", view.clone(), div()
+                        .id("win-close")
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .w(px(38.0))
+                        .h(px(28.0))
+                        .rounded(px(6.0))
+                        .cursor_pointer()
+                        .hover(|st| st.bg(theme.bad).text_color(gpui::white()))
+                        .on_click(|_, window, _| window.remove_window())
+                        .child(widgets::icon("x", 13.0, theme.muted)))),
             )
+    }
+
+    fn tooltip_layer(&self, window: &Window) -> impl IntoElement {
+        let theme = self.theme.clone();
+        let viewport = window.viewport_size();
+        let text = self.tip.clone().unwrap_or_default();
+        let x = self.mouse_pos.x + px(14.0);
+        let y = self.mouse_pos.y + px(20.0);
+        let max_x = (viewport.width - px(220.0)).max(px(8.0));
+        let x = x.min(max_x);
+        div()
+            .absolute()
+            .left(x)
+            .top(y)
+            .px(px(8.0))
+            .py(px(5.0))
+            .rounded(px(6.0))
+            .bg(theme.elevated)
+            .border_1()
+            .border_color(theme.border)
+            .shadow_lg()
+            .text_size(px(10.5))
+            .font_weight(FontWeight::MEDIUM)
+            .text_color(theme.text)
+            .when(text.is_empty(), |el| el.hidden())
+            .child(text)
     }
 
     fn toast_layer(&self) -> impl IntoElement {
@@ -1746,7 +1860,8 @@ impl Render for LauncherApp {
                             }),
                     ),
             )
-            .child(self.toast_layer());
+            .child(self.toast_layer())
+            .child(self.tooltip_layer(window));
         if self.boot_splash {
             root = root.child(pages::splash(self, window, cx));
         }

@@ -160,7 +160,7 @@ pub fn splash(app: &LauncherApp, _window: &mut Window, _cx: &mut Context<Launche
     div()
         .absolute()
         .inset_0()
-        .overflow_hidden()
+        .truncate()
         .child(
             div()
                 .absolute()
@@ -441,7 +441,7 @@ impl LauncherApp {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .overflow_hidden()
+                    .truncate()
                     .when_some(icon_path, |el, path| {
                         el.child(
                             gpui::img(path)
@@ -459,13 +459,13 @@ impl LauncherApp {
                     .flex_col()
                     .gap(px(3.0))
                     .flex_1()
-                    .overflow_hidden()
+                    .truncate()
                     .child(
                         div()
                             .text_size(px(TEXT_MD))
                             .font_weight(semibold())
                             .text_color(theme.text)
-                            .overflow_hidden()
+                            .truncate()
                             .child(instance.name.clone()),
                     )
                     .child(

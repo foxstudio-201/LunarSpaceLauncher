@@ -78,7 +78,7 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                         .size(px(44.0))
                         .rounded(px(10.0))
                         .bg(theme.surface_active)
-                        .overflow_hidden()
+                        .truncate()
                         .flex()
                         .items_center()
                         .justify_center()
@@ -107,7 +107,7 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                                 .text_size(px(TEXT_MD))
                                 .font_weight(semibold())
                                 .text_color(theme.text)
-                                .overflow_hidden()
+                                .truncate()
                                 .child(name.clone()),
                         )
                         .child(
@@ -139,7 +139,7 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
             div()
                 .text_size(px(10.5))
                 .text_color(theme.faint)
-                .overflow_hidden()
+                .truncate()
                 .child(uuid.clone()),
         );
         card = card.child(
@@ -420,7 +420,7 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                                         .flex()
                                         .items_center()
                                         .justify_center()
-                                        .overflow_hidden()
+                                        .truncate()
                                         .when_some(skin_image.clone(), |el, path| {
                                             el.child(
                                                 gpui::img(path)
@@ -443,7 +443,7 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                                         .flex()
                                         .items_center()
                                         .justify_center()
-                                        .overflow_hidden()
+                                        .truncate()
                                         .when_some(cape_image.clone(), |el, path| {
                                             el.child(
                                                 gpui::img(path)

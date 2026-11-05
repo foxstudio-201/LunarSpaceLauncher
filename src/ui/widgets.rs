@@ -886,7 +886,7 @@ pub fn progress_bar(percent: f32, theme: &Theme, indeterminate: bool) -> impl In
         .w_full()
         .rounded_full()
         .bg(theme.surface_active)
-        .overflow_hidden()
+        .truncate()
         .child(
             div()
                 .h_full()
@@ -931,4 +931,29 @@ pub fn text_input_box(theme: &Theme) -> Div {
         .border_color(theme.border)
         .text_color(theme.text)
         .text_size(px(TEXT_BASE))
+}
+
+
+pub fn tip(
+    id: impl Into<ElementId>,
+    text: impl Into<SharedString>,
+    view: gpui::WeakEntity<crate::ui::app::LauncherApp>,
+    element: impl IntoElement,
+) -> gpui::AnyElement {
+    let text: SharedString = text.into();
+    div()
+        .id(id)
+        .on_hover(move |hovered, _window, cx| {
+            let text = text.clone();
+            let _ = view.update(cx, |this, cx| {
+                if *hovered {
+                    this.tip = Some(text.to_string());
+                } else if this.tip.as_deref() == Some(text.as_str()) {
+                    this.tip = None;
+                }
+                cx.notify();
+            });
+        })
+        .child(element)
+        .into_any_element()
 }

@@ -398,7 +398,7 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                                 .size(px(48.0))
                                 .rounded(px(11.0))
                                 .bg(theme.surface_active)
-                                .overflow_hidden()
+                                .truncate()
                                 .flex()
                                 .items_center()
                                 .justify_center()
@@ -425,14 +425,14 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                                         .text_size(px(TEXT_MD))
                                         .font_weight(semibold())
                                         .text_color(theme.text)
-                                        .overflow_hidden()
+                                        .truncate()
                                         .child(name),
                                 )
                                 .child(
                                     div()
                                         .text_size(px(TEXT_XS))
                                         .text_color(theme.faint)
-                                        .overflow_hidden()
+                                        .truncate()
                                         .child(format!("{author} · {} lượt tải", compact_number(downloads))),
                                 ),
                         ),
@@ -440,7 +440,7 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                 .child(
                     div()
                         .h(px(38.0))
-                        .overflow_hidden()
+                        .truncate()
                         .text_size(px(TEXT_SM))
                         .text_color(theme.muted)
                         .child(summary),
@@ -793,7 +793,7 @@ pub fn detail_modal(app: &mut LauncherApp, _window: &mut Window, cx: &mut Contex
                         .size(px(72.0))
                         .rounded(px(15.0))
                         .bg(theme.surface_active)
-                        .overflow_hidden()
+                        .truncate()
                         .flex()
                         .items_center()
                         .justify_center()
@@ -1163,7 +1163,7 @@ pub fn browser_modal(app: &mut LauncherApp, _window: &mut Window, cx: &mut Conte
                         .size(px(38.0))
                         .rounded(px(9.0))
                         .bg(theme.surface_active)
-                        .overflow_hidden()
+                        .truncate()
                         .flex()
                         .items_center()
                         .justify_center()
@@ -1200,7 +1200,7 @@ pub fn browser_modal(app: &mut LauncherApp, _window: &mut Window, cx: &mut Conte
                             div()
                                 .text_size(px(10.5))
                                 .text_color(theme.faint)
-                                .overflow_hidden()
+                                .truncate()
                                 .child(format!(
                                     "{summary} · {} lượt tải",
                                     compact_number(downloads)

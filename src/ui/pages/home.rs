@@ -175,7 +175,7 @@ fn meter(theme: &Theme, label: &str, value: String, hint: String, percent: f32, 
                 .w_full()
                 .rounded_full()
                 .bg(theme.surface_active)
-                .overflow_hidden()
+                .truncate()
                 .child(
                     div()
                         .h_full()
@@ -241,7 +241,7 @@ fn recent_row(theme: &Theme, icon_name: &str, title: String, instance: String, p
                 .flex_col()
                 .flex_1()
                 .min_w(px(0.0))
-                .child(div().text_size(px(11.5)).font_weight(FontWeight::MEDIUM).text_color(theme.text).overflow_hidden().child(title))
+                .child(div().text_size(px(11.5)).font_weight(FontWeight::MEDIUM).text_color(theme.text).truncate().child(title))
                 .child(div().text_size(px(9.5)).text_color(theme.faint).child(instance)),
         )
         .when(!played.is_empty(), |el| {
@@ -573,7 +573,7 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                 .gap(px(16.0))
                 .p(px(20.0))
                 .rounded(px(12.0))
-                .overflow_hidden()
+                .truncate()
                 .border_1()
                 .border_color(theme.border)
                 .bg(theme.surface)
@@ -648,7 +648,7 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                                                     }))
                                                     .child(div().text_size(px(9.5)).font_weight(FontWeight::SEMIBOLD).text_color(gpui::rgba(0xffffff99)).child(status_label)),
                                             )
-                                            .child(div().text_size(px(24.0)).font_weight(FontWeight::BOLD).text_color(gpui::white()).overflow_hidden().child(active_name.clone()))
+                                            .child(div().text_size(px(24.0)).font_weight(FontWeight::BOLD).text_color(gpui::white()).truncate().child(active_name.clone()))
                                             .child(
                                                 div()
                                                     .flex()

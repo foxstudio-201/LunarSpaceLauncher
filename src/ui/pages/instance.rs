@@ -196,7 +196,7 @@ fn render_file_list(app: &mut LauncherApp, cx: &mut Context<LauncherApp>, theme:
                 div()
                     .flex_1()
                     .min_w(px(0.0))
-                    .overflow_hidden()
+                    .truncate()
                     .text_size(px(TEXT_SM))
                     .font_weight(if dir { semibold() } else { regular() })
                     .text_color(if disabled { theme.faint } else { theme.text })
@@ -479,7 +479,7 @@ fn render_file_list(app: &mut LauncherApp, cx: &mut Context<LauncherApp>, theme:
                 .bg(theme.surface)
                 .border_1()
                 .border_color(theme.border_soft)
-                .overflow_hidden()
+                .truncate()
                 .child(rows),
         )
         .into_any_element()
@@ -553,7 +553,7 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                         .size(px(56.0))
                         .rounded(px(14.0))
                         .bg(theme.surface_active)
-                        .overflow_hidden()
+                        .truncate()
                         .flex()
                         .items_center()
                         .justify_center()
@@ -885,27 +885,28 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
             }
         }
         InstanceTab::Console => {
-            let logs = app.instance_ui.logs.clone();
-            let start = logs.len().saturating_sub(600);
+            let filter = app.console_filter.read(cx).text().to_lowercase();
+            let all_logs = app.instance_ui.logs.clone();
+            let logs: Vec<String> = all_logs
+                .iter()
+                .filter(|line| filter.is_empty() || line.to_lowercase().contains(&filter))
+                .cloned()
+                .collect();
+            let start = logs.len().saturating_sub(900);
             let mut lines = div().flex().flex_col().p(px(12.0));
-            for line in logs[start..].iter() {
-                let color = if line.contains("ERROR") || line.contains("Exception") {
-                    theme.bad
-                } else if line.contains("WARN") {
-                    theme.warn
-                } else if line.starts_with("[XyoLauncher]") {
-                    theme.accent_soft
-                } else {
-                    theme.muted
-                };
+            for line in &logs[start..] {
                 lines = lines.child(
                     div()
                         .text_size(px(11.5))
                         .font_family(MONO)
-                        .text_color(color)
-                        .child(line.clone()),
+                        .text_color(console_color(line, &theme))
+                        .child(crate::util::strip_minecraft_codes(line)),
                 );
             }
+            let view_copy = view.clone();
+            let view_upload = view.clone();
+            let view_clear = view.clone();
+            let view_auto = view.clone();
             let console = div()
                 .flex()
                 .flex_col()
@@ -923,6 +924,7 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                         .flex()
                         .items_center()
                         .justify_between()
+                        .gap_2()
                         .p(px(10.0))
                         .border_b_1()
                         .border_color(theme.border_soft)
@@ -938,6 +940,12 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                                         .font_weight(medium())
                                         .text_color(theme.text)
                                         .child(format!("{} dòng log", logs.len())),
+                                )
+                                .child(
+                                    div()
+                                        .w(px(200.0))
+                                        .ml(px(8.0))
+                                        .child(widgets::text_input_box(&theme).child(app.console_filter.clone())),
                                 ),
                         )
                         .child(
@@ -945,53 +953,84 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                                 .flex()
                                 .items_center()
                                 .gap_2()
+                                .child(
+                                    div()
+                                        .id("console-auto")
+                                        .h(px(28.0))
+                                        .px(px(8.0))
+                                        .flex()
+                                        .items_center()
+                                        .rounded(px(5.0))
+                                        .bg(if app.console_auto { theme.accent_dim } else { theme.elevated })
+                                        .border_1()
+                                        .border_color(if app.console_auto { theme.accent } else { theme.border })
+                                        .text_size(px(9.5))
+                                        .text_color(if app.console_auto { theme.accent_soft } else { theme.muted })
+                                        .cursor_pointer()
+                                        .on_click(move |_, _, cx| {
+                                            let _ = view_auto.update(cx, |this, cx| {
+                                                this.console_auto = !this.console_auto;
+                                                if this.console_auto {
+                                                    this.console_scroll.scroll_to_bottom();
+                                                }
+                                                cx.notify();
+                                            });
+                                        })
+                                        .child(if app.console_auto { "Tự cuộn" } else { "Tự cuộn: tắt" }),
+                                )
+                                .child(widgets::ghost_button("console-bottom", "Cuối log", &theme, {
+                                    let view = view.clone();
+                                    move |_, _, cx| {
+                                        let _ = view.update(cx, |this, cx| {
+                                            this.console_scroll.scroll_to_bottom();
+                                            cx.notify();
+                                        });
+                                    }
+                                }))
                                 .child(widgets::ghost_button("console-copy", "Sao chép", &theme, {
-                                    let text = logs.join("\n");
+                                    let text = all_logs.join("\n");
                                     move |_, _, cx| {
                                         cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.clone()));
                                     }
                                 }))
-                                .child(widgets::ghost_button("console-upload", "Gửi log", &theme, {
-                                    let text = logs.join("\n");
-                                    let view = view.clone();
-                                    move |_, _, cx| {
-                                        let text = text.clone();
-                                        let view = view.clone();
-                                        let _ = view.update(cx, |this, cx| {
-                                            let rx = this.backend.upload_log_req(text.clone());
-                                            this.on_result(cx, rx, |this, value, cx| {
-                                                if let Some(url) = value.get("url").and_then(Value::as_str) {
-                                                    let _ = open::that(url);
-                                                    this.toast("ok", "Đã gửi log", url.to_string(), cx);
-                                                } else {
-                                                    this.toast("bad", "Gửi log thất bại", value.get("error").and_then(Value::as_str).unwrap_or(""), cx);
-                                                }
-                                            });
-                                        });
-                                    }
-                                }))
-                                .child(widgets::ghost_button("console-clear", "Xoá xem", &theme, {
-                                    let view = view.clone();
-                                    move |_, _, cx| {
-                                        let _ = view.update(cx, |this, cx| {
-                                            this.instance_ui.logs.clear();
-                                            if let Some(id) = this.selected_instance.clone() {
-                                                this.logs.remove(&id);
+                                .child(widgets::ghost_button("console-upload", "Gửi log", &theme, move |_, _, cx| {
+                                    let text = all_logs.join("\n");
+                                    let _ = view_upload.update(cx, |this, cx| {
+                                        if text.is_empty() {
+                                            this.toast("warn", "Chưa có log", "Chạy game để có log.", cx);
+                                            return;
+                                        }
+                                        let rx = this.backend.upload_log_req(text.clone());
+                                        this.on_result(cx, rx, |this, value, cx| {
+                                            if let Some(url) = value.get("url").and_then(Value::as_str) {
+                                                let _ = open::that(url);
+                                                this.toast("ok", "Đã gửi log", url.to_string(), cx);
+                                            } else {
+                                                this.toast("bad", "Gửi log thất bại", value.get("error").and_then(Value::as_str).unwrap_or(""), cx);
                                             }
-                                            cx.notify();
                                         });
-                                    }
+                                    });
+                                }))
+                                .child(widgets::ghost_button("console-clear", "Xoá xem", &theme, move |_, _, cx| {
+                                    let _ = view_clear.update(cx, |this, cx| {
+                                        this.instance_ui.logs.clear();
+                                        if let Some(id) = this.selected_instance.clone() {
+                                            this.logs.remove(&id);
+                                        }
+                                        cx.notify();
+                                    });
                                 })),
                         ),
                 )
                 .child(
                     div()
                         .id("console-scroll")
-                        .h(px(560.0))
+                        .h(px(540.0))
                         .overflow_y_scroll()
                         .track_scroll(&app.console_scroll)
                         .child(lines),
                 );
+            let _ = view_copy;
             body = body.child(console);
         }
         InstanceTab::Mods => {
@@ -1065,7 +1104,7 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                                 .size(px(30.0))
                                 .rounded(px(7.0))
                                 .bg(theme.surface_active)
-                                .overflow_hidden()
+                                .truncate()
                                 .flex()
                                 .items_center()
                                 .justify_center()
@@ -1087,14 +1126,14 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                                         .text_size(px(TEXT_SM))
                                         .font_weight(medium())
                                         .text_color(if disabled { theme.faint } else { theme.text })
-                                        .overflow_hidden()
+                                        .truncate()
                                         .child(title),
                                 )
                                 .child(
                                     div()
                                         .text_size(px(10.0))
                                         .text_color(theme.faint)
-                                        .overflow_hidden()
+                                        .truncate()
                                         .child(format!(
                                             "{} · {}",
                                             crate::util::format_bytes(size),
@@ -1226,7 +1265,7 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                     .bg(theme.surface)
                     .border_1()
                     .border_color(theme.border_soft)
-                    .overflow_hidden()
+                    .truncate()
                     .child(rows),
             );
         }
@@ -1285,7 +1324,7 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                                     div()
                                         .text_size(px(TEXT_SM))
                                         .text_color(theme.text)
-                                        .overflow_hidden()
+                                        .truncate()
                                         .child(name),
                                 )
                                 .child(
@@ -1370,7 +1409,7 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                     .bg(theme.surface)
                     .border_1()
                     .border_color(theme.border_soft)
-                    .overflow_hidden()
+                    .truncate()
                     .child(rows),
             );
         }
@@ -1441,7 +1480,7 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                                         .size(px(42.0))
                                         .rounded(px(10.0))
                                         .bg(theme.surface_active)
-                                        .overflow_hidden()
+                                        .truncate()
                                         .flex()
                                         .items_center()
                                         .justify_center()
@@ -1462,7 +1501,7 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                                                 .text_size(px(TEXT_MD))
                                                 .font_weight(semibold())
                                                 .text_color(theme.text)
-                                                .overflow_hidden()
+                                                .truncate()
                                                 .child(name),
                                         )
                                         .child(
@@ -1964,4 +2003,24 @@ fn render_editor(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<L
                 .child("Lưu tệp sẽ tạo bản .bak bên cạnh tệp gốc."),
         );
     page_body().child(content).into_any_element()
+}
+
+
+fn console_color(line: &str, theme: &Theme) -> gpui::Rgba {
+    let text = line.to_lowercase();
+    if text.contains("error") || text.contains("exception") || text.contains("fatal") {
+        theme.bad
+    } else if text.contains("warn") {
+        theme.warn
+    } else if text.contains("[xyolauncher]") {
+        theme.accent_soft
+    } else if text.contains("done (") || text.contains("server started") {
+        theme.ok
+    } else if text.contains("starting") || text.contains("loading") || text.contains("connecting") {
+        theme.info
+    } else if text.contains("<") && text.contains(">") && text.contains("chat") {
+        theme.ok
+    } else {
+        theme.muted
+    }
 }

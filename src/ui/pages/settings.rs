@@ -541,7 +541,7 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                                             div()
                                                 .size(px(42.0))
                                                 .rounded(px(11.0))
-                                                .overflow_hidden()
+                                                .truncate()
                                                 .child(
                                                     gpui::img(crate::ui::assets::image_path("xyolauncher.png"))
                                                         .size(px(42.0))
@@ -655,7 +655,7 @@ fn setting_row(theme: &Theme, title: &str, hint: impl Into<SharedString>, contro
                     div()
                         .text_size(px(TEXT_XS))
                         .text_color(theme.faint)
-                        .overflow_hidden()
+                        .truncate()
                         .child(hint),
                 ),
         )

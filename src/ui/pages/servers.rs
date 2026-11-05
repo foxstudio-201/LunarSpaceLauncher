@@ -145,7 +145,7 @@ fn render_list(app: &mut LauncherApp, cx: &mut Context<LauncherApp>) -> impl Int
                         .child(
                             div().flex().flex_col().flex_1().min_w(px(0.0))
                                 .child(div().text_size(px(TEXT_MD)).font_weight(semibold())
-                                    .text_color(theme.text).overflow_hidden().child(name))
+                                    .text_color(theme.text).truncate().child(name))
                                 .child(div().text_size(px(TEXT_XS)).text_color(theme.faint)
                                     .child(format!("{} · Minecraft {} · :{}", egg_label(&egg), mc, port))),
                         )
@@ -332,7 +332,7 @@ fn render_detail(app: &mut LauncherApp, cx: &mut Context<LauncherApp>, server: &
                             let _ = view.update(cx, |this, cx| this.open_server_file(rel, is_dir, cx));
                         })
                         .child(widgets::icon(if is_dir { "folder" } else { "file" }, 15.0, if is_dir { theme.accent_soft } else { theme.faint }))
-                        .child(div().flex_1().text_size(px(TEXT_SM)).text_color(theme.text).overflow_hidden().child(entry_name))
+                        .child(div().flex_1().text_size(px(TEXT_SM)).text_color(theme.text).truncate().child(entry_name))
                         .child(div().text_size(px(TEXT_XS)).text_color(theme.faint)
                             .child(if is_dir { String::new() } else { crate::util::format_bytes(size) })),
                 );
