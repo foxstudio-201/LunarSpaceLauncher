@@ -141,6 +141,7 @@ pub struct ContentState {
     pub detail_loading: bool,
     pub error: String,
     pub environment: String,
+    pub detail_tab: String,
     pub instance_id: Option<String>,
 }
 
@@ -231,6 +232,10 @@ pub struct ServerUi {
     pub creating: bool,
     pub editor_open: bool,
     pub editor_rel: String,
+    pub game_mode: String,
+    pub difficulty: String,
+    pub online: bool,
+    pub pvp: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -337,6 +342,8 @@ pub struct LauncherApp {
     pub console_scroll: gpui::ScrollHandle,
     pub page_scroll: gpui::ScrollHandle,
     pub server_cmd: Entity<TextField>,
+    pub server_motd: Entity<TextField>,
+    pub server_port: Entity<TextField>,
     pub host_token: Entity<TextField>,
     pub host_listen: Entity<TextField>,
     pub host_status: Value,
@@ -395,6 +402,8 @@ impl LauncherApp {
         let console_search_input = cx.new(|cx| TextField::new(cx, "Tìm trong console…").on_change(notify_change.clone()));
         let editor_input = cx.new(|cx| TextField::new(cx, "Nội dung tệp…").multiline(true));
         let file_name_input = cx.new(|cx| TextField::new(cx, "Tên tệp hoặc thư mục…"));
+        let server_motd = cx.new(|cx| TextField::new(cx, "XyoLauncher Server"));
+        let server_port = cx.new(|cx| TextField::new(cx, "25565"));
         let server_cmd = cx.new(|cx| TextField::new(cx, "Nhập lệnh server…").on_submit({
             let view = view.clone();
             move |text, _w, app| {
@@ -482,6 +491,7 @@ impl LauncherApp {
             skin_preview: None,
             skin_drag_x: 0.0,
             content: ContentState {
+                detail_tab: "about".into(),
                 kind: "modpacks".into(),
                 source: "modrinth".into(),
                 sort: "relevance".into(),
@@ -515,6 +525,8 @@ impl LauncherApp {
             console_scroll: gpui::ScrollHandle::new(),
             page_scroll: gpui::ScrollHandle::new(),
             server_cmd,
+            server_motd,
+            server_port,
             host_token,
             host_listen,
             host_status: Value::Null,

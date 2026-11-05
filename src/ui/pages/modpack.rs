@@ -74,6 +74,7 @@ pub fn open_detail(app: &mut LauncherApp, hit: Value, cx: &mut Context<LauncherA
     app.content.selected_version = None;
     app.content.detail = None;
     app.content.detail_loading = true;
+    app.content.detail_tab = "about".into();
     app.content.error.clear();
     app.modal = Modal::ContentDetail;
     let kind = app.content.kind.clone();
@@ -100,9 +101,26 @@ pub fn open_detail(app: &mut LauncherApp, hit: Value, cx: &mut Context<LauncherA
         }
     });
     let rx = app.backend.content_project(kind, source, id);
-    app.on_result(cx, rx, |this, value, _cx| {
+    app.on_result(cx, rx, |this, value, cx| {
         this.content.detail_loading = false;
         if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+            let urls: Vec<String> = value
+                .get("gallery")
+                .and_then(Value::as_array)
+                .map(|rows| {
+                    rows.iter()
+                        .filter_map(|row| {
+                            row.get("url")
+                                .or_else(|| row.get("raw_url"))
+                                .and_then(Value::as_str)
+                                .map(str::to_string)
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            if !urls.is_empty() {
+                this.cache_icons(urls, cx);
+            }
             this.content.detail = Some(value);
         }
     });
@@ -432,7 +450,7 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                                         .font_weight(semibold())
                                         .text_color(theme.text)
                                         .truncate()
-                                        .child(name),
+                                        .child(clip_text(&name, 24)),
                                 )
                                 .child(
                                     div()
@@ -445,11 +463,11 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                 )
                 .child(
                     div()
-                        .h(px(38.0))
-                        .truncate()
+                        .h(px(34.0))
+                        .line_clamp(2)
                         .text_size(px(TEXT_SM))
                         .text_color(theme.muted)
-                        .child(summary),
+                        .child(clip_text(&summary, 82)),
                 )
                 .child(
                     div()
@@ -647,6 +665,14 @@ fn source_button(
         .child(label.to_string())
 }
 
+fn clip_text(value: &str, max: usize) -> String {
+    let mut out: String = value.chars().take(max).collect();
+    if value.chars().count() > max {
+        out.push('…');
+    }
+    out
+}
+
 fn compact_number(value: u64) -> String {
     if value >= 1_000_000 {
         format!("{:.1}M", value as f64 / 1_000_000.0)
@@ -684,11 +710,12 @@ pub fn detail_modal(app: &mut LauncherApp, _window: &mut Window, cx: &mut Contex
         .to_string();
     let icon = app.icon_cache.get(&icon_url).cloned();
     let detail = app.content.detail.clone().unwrap_or(Value::Null);
-    let description = detail
-        .get("description")
-        .and_then(Value::as_str)
-        .unwrap_or(&summary)
-        .to_string();
+    let description = crate::util::markdown_to_text(
+        detail
+            .get("description")
+            .and_then(Value::as_str)
+            .unwrap_or(&summary),
+    );
 
     let mut version_list = div()
         .id("pack-versions")
@@ -785,6 +812,120 @@ pub fn detail_modal(app: &mut LauncherApp, _window: &mut Window, cx: &mut Contex
         );
     }
 
+    let mut detail_tabs = div().flex().items_center().gap(px(4.0));
+    for (key, label) in [("about", "Mô tả"), ("gallery", "Ảnh"), ("changelog", "Thay đổi")] {
+        let active = app.content.detail_tab == key;
+        let view = close_view.clone();
+        let key = key.to_string();
+        detail_tabs = detail_tabs.child(
+            div()
+                .id(gpui::SharedString::from(format!("detail-tab-{key}")))
+                .h(px(28.0))
+                .px(px(10.0))
+                .flex()
+                .items_center()
+                .rounded(px(6.0))
+                .bg(if active { theme.accent_dim } else { theme.surface })
+                .text_size(px(TEXT_SM))
+                .font_weight(if active { semibold() } else { medium() })
+                .text_color(if active { theme.accent_soft } else { theme.muted })
+                .cursor_pointer()
+                .on_click(move |_, _, cx| {
+                    let key = key.clone();
+                    let _ = view.update(cx, |this, cx| {
+                        this.content.detail_tab = key;
+                        cx.notify();
+                    });
+                })
+                .child(label.to_string()),
+        );
+    }
+    let gallery_rows: Vec<(String, Option<String>)> = detail
+        .get("gallery")
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|row| {
+                    let url = row
+                        .get("url")
+                        .or_else(|| row.get("raw_url"))
+                        .and_then(Value::as_str)?
+                        .to_string();
+                    let cached = app.icon_cache.get(&url).cloned();
+                    Some((url, cached))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let changelog = app
+        .content
+        .selected_version
+        .as_ref()
+        .and_then(|selected| {
+            app.content
+                .selected_versions
+                .iter()
+                .find(|row| row.get("id").and_then(Value::as_str) == Some(selected.as_str()))
+        })
+        .and_then(|row| row.get("changelog").and_then(Value::as_str))
+        .map(crate::util::markdown_to_text)
+        .unwrap_or_default();
+    let detail_body = match app.content.detail_tab.as_str() {
+        "gallery" => {
+            if gallery_rows.is_empty() {
+                div()
+                    .text_size(px(TEXT_SM))
+                    .text_color(theme.faint)
+                    .child("Chưa có ảnh cho dự án này.")
+                    .into_any_element()
+            } else {
+                let mut grid = div().flex().gap_2().flex_wrap();
+                for (url, cached) in gallery_rows.into_iter().take(12) {
+                    let view = close_view.clone();
+                    let mut cell = div()
+                        .id(gpui::SharedString::from(format!("gallery-{url}")))
+                        .w(px(170.0))
+                        .h(px(105.0))
+                        .rounded(px(8.0))
+                        .bg(theme.surface_active)
+                        .border_1()
+                        .border_color(theme.border_soft)
+                        .overflow_hidden()
+                        .cursor_pointer();
+                    if let Some(path) = cached {
+                        cell = cell.child(gpui::img(path).size_full().object_fit(gpui::ObjectFit::Cover));
+                    }
+                    cell = cell.on_click(move |_, _, cx| {
+                        let url = url.clone();
+                        let _ = view.update(cx, |_, _| {
+                            let _ = open::that(&url);
+                        });
+                    });
+                    grid = grid.child(cell);
+                }
+                grid.into_any_element()
+            }
+        }
+        "changelog" => div()
+            .text_size(px(TEXT_SM))
+            .text_color(theme.muted)
+            .child(if changelog.trim().is_empty() {
+                "Phiên bản này chưa có ghi chú thay đổi.".to_string()
+            } else {
+                changelog
+            })
+            .into_any_element(),
+        _ => div()
+            .text_size(px(TEXT_SM))
+            .text_color(theme.muted)
+            .child(if description.trim().is_empty() {
+                summary.clone()
+            } else {
+                description.clone()
+            })
+            .into_any_element(),
+    };
+
     let content = div()
         .flex()
         .flex_col()
@@ -840,18 +981,13 @@ pub fn detail_modal(app: &mut LauncherApp, _window: &mut Window, cx: &mut Contex
                     });
                 })),
         )
+        .child(detail_tabs)
         .child(
             div()
                 .id("pack-desc")
-                .max_h(px(150.0))
+                .max_h(px(170.0))
                 .overflow_y_scroll()
-                .text_size(px(TEXT_SM))
-                .text_color(theme.muted)
-                .child(if description.trim().is_empty() {
-                    summary
-                } else {
-                    description
-                }),
+                .child(detail_body),
         )
         .child(
             div()

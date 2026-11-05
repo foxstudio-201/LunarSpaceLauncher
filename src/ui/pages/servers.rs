@@ -232,7 +232,7 @@ fn render_detail(app: &mut LauncherApp, cx: &mut Context<LauncherApp>, server: &
     let id_toggle = id.clone();
     let id_delete = id.clone();
 
-    let tabs = [("overview", "Tổng quan"), ("console", "Console"), ("files", "Tệp tin"), ("backups", "Sao lưu")];
+    let tabs = [("overview", "Tổng quan"), ("console", "Console"), ("config", "Cấu hình"), ("files", "Tệp tin"), ("backups", "Sao lưu")];
     let mut tab_row = div().flex().items_center().gap(px(4.0));
     for (key, label) in tabs {
         let active = app.server_ui.tab == key;
@@ -449,6 +449,143 @@ fn render_detail(app: &mut LauncherApp, cx: &mut Context<LauncherApp>, server: &
                 )
                 .child(rows);
         }
+        "config" => {
+            let save_id = id.clone();
+            let view_save = view.clone();
+            let view_mode = view.clone();
+            let view_difficulty = view.clone();
+            let view_online = view.clone();
+            let view_pvp = view.clone();
+            let ram_value = server.get("ramMb").and_then(Value::as_u64).unwrap_or(4096);
+            let mut mode_row = div().flex().items_center().gap_2();
+            for (key, label) in [("survival", "Sinh tồn"), ("creative", "Sáng tạo"), ("adventure", "Phiêu lưu"), ("spectator", "Khán giả")] {
+                let active = app.server_ui.game_mode == key;
+                let view = view_mode.clone();
+                let key = key.to_string();
+                mode_row = mode_row.child(
+                    div()
+                        .id(gpui::SharedString::from(format!("srv-mode-{key}")))
+                        .h(px(28.0)).px(px(10.0)).flex().items_center().rounded(px(6.0))
+                        .bg(if active { theme.accent_dim } else { theme.surface })
+                        .border_1().border_color(if active { theme.accent } else { theme.border_soft })
+                        .text_size(px(TEXT_XS)).text_color(if active { theme.accent_soft } else { theme.muted })
+                        .cursor_pointer()
+                        .on_click(move |_, _, cx| {
+                            let key = key.clone();
+                            let _ = view.update(cx, |this, cx| {
+                                this.server_ui.game_mode = key;
+                                cx.notify();
+                            });
+                        })
+                        .child(label.to_string()),
+                );
+            }
+            let mut difficulty_row = div().flex().items_center().gap_2();
+            for (key, label) in [("peaceful", "Bình yên"), ("easy", "Dễ"), ("normal", "Thường"), ("hard", "Khó")] {
+                let active = app.server_ui.difficulty == key;
+                let view = view_difficulty.clone();
+                let key = key.to_string();
+                difficulty_row = difficulty_row.child(
+                    div()
+                        .id(gpui::SharedString::from(format!("srv-diff-{key}")))
+                        .h(px(28.0)).px(px(10.0)).flex().items_center().rounded(px(6.0))
+                        .bg(if active { theme.accent_dim } else { theme.surface })
+                        .border_1().border_color(if active { theme.accent } else { theme.border_soft })
+                        .text_size(px(TEXT_XS)).text_color(if active { theme.accent_soft } else { theme.muted })
+                        .cursor_pointer()
+                        .on_click(move |_, _, cx| {
+                            let key = key.clone();
+                            let _ = view.update(cx, |this, cx| {
+                                this.server_ui.difficulty = key;
+                                cx.notify();
+                            });
+                        })
+                        .child(label.to_string()),
+                );
+            }
+            let switch = |id: &'static str,
+                          label: &'static str,
+                          active: bool,
+                          view: gpui::WeakEntity<LauncherApp>,
+                          online: bool| {
+                let theme = theme.clone();
+                div()
+                    .flex().items_center().justify_between().gap_4()
+                    .child(div().text_size(px(TEXT_SM)).text_color(theme.muted).child(label))
+                    .child(
+                        div()
+                            .id(id)
+                            .w(px(40.0)).h(px(22.0)).rounded_full()
+                            .bg(if active { theme.accent } else { theme.surface_active })
+                            .p(px(3.0)).flex().items_center()
+                            .when(active, |el| el.justify_end())
+                            .cursor_pointer()
+                            .on_click(move |_, _, cx| {
+                                let _ = view.update(cx, |this, cx| {
+                                    if online {
+                                        this.server_ui.online = !this.server_ui.online;
+                                    } else {
+                                        this.server_ui.pvp = !this.server_ui.pvp;
+                                    }
+                                    cx.notify();
+                                });
+                            })
+                            .child(div().size(px(16.0)).rounded_full().bg(gpui::white())),
+                    )
+            };
+            body = body
+                .child(
+                    div()
+                        .flex().flex_col().gap_4().p(px(16.0)).rounded(px(RADIUS))
+                        .bg(theme.surface).border_1().border_color(theme.border_soft)
+                        .child(section_title(&theme, "Cấu hình server", "Áp dụng sau khi khởi động lại server"))
+                        .child(
+                            div().flex().gap_3()
+                                .child(div().flex_1().child(pages::field(&theme, "Tên server", app.name_input.clone(), "")))
+                                .child(div().w(px(150.0)).child(pages::field(&theme, "RAM (MB)", app.memory_input.clone(), "")))
+                                .child(div().w(px(150.0)).child(pages::field(&theme, "Cổng", app.server_port.clone(), ""))),
+                        )
+                        .child(div().flex_1().child(pages::field(&theme, "MOTD", app.server_motd.clone(), "")))
+                        .child(div().flex().items_center().gap_6()
+                            .child(div().text_size(px(TEXT_SM)).text_color(theme.faint).child(format!("RAM hiện tại: {ram_value} MB")))
+                            .child(switch("srv-online", "Chế độ online (xác thực Mojang)", app.server_ui.online, view_online, true))
+                            .child(switch("srv-pvp", "PvP", app.server_ui.pvp, view_pvp, false)))
+                        .child(div().flex().flex_col().gap_2()
+                            .child(div().text_size(px(TEXT_SM)).text_color(theme.muted).child("Chế độ chơi"))
+                            .child(mode_row)
+                            .child(div().text_size(px(TEXT_SM)).text_color(theme.muted).child("Độ khó"))
+                            .child(difficulty_row))
+                        .child(div().flex().justify_end().child(widgets::button("srv-config-save", "Lưu cấu hình", &theme, true, move |_, _, cx| {
+                            let id = save_id.clone();
+                            let _ = view_save.update(cx, |this, cx| {
+                                let name = this.name_input.read(cx).text().trim().to_string();
+                                let mut ram = this.memory_input.read(cx).text().trim().parse::<u32>().unwrap_or(ram_value as u32);
+                                ram = ram.clamp(512, 65536);
+                                let port = this.server_port.read(cx).text().trim().parse::<u16>().unwrap_or(port as u16);
+                                let motd = this.server_motd.read(cx).text().trim().to_string();
+                                let patch = json!({
+                                    "name": name,
+                                    "ramMb": ram,
+                                    "port": port,
+                                    "vars": {
+                                        "motd": if motd.is_empty() { "XyoLauncher Server".to_string() } else { motd },
+                                        "gamemode": this.server_ui.game_mode,
+                                        "difficulty": this.server_ui.difficulty,
+                                        "online-mode": this.server_ui.online,
+                                        "pvp": this.server_ui.pvp,
+                                    },
+                                });
+                                let value = this.backend.server_update(&id, patch);
+                                if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+                                    this.toast("ok", "Đã lưu cấu hình", "Khởi động lại server để áp dụng.", cx);
+                                    this.load_servers(cx);
+                                } else {
+                                    this.toast("bad", "Lưu cấu hình thất bại", value.get("error").and_then(Value::as_str).unwrap_or(""), cx);
+                                }
+                            });
+                        }))),
+                );
+        }
         _ => {
             body = body
                 .child(
@@ -614,6 +751,39 @@ impl LauncherApp {
         self.server_ui.backups = value.get("backups").and_then(Value::as_array).cloned().unwrap_or_default();
         let value = self.backend.server_file_list(&id, "");
         self.server_ui.files = value.get("entries").and_then(Value::as_array).cloned().unwrap_or_default();
+        if let Some(server) = self
+            .server_ui
+            .servers
+            .iter()
+            .find(|row| row.get("id").and_then(Value::as_str) == Some(id.as_str()))
+            .cloned()
+        {
+            let vars = server.get("vars").cloned().unwrap_or(Value::Null);
+            self.server_ui.game_mode = vars.get("gamemode").and_then(Value::as_str).unwrap_or("survival").to_string();
+            self.server_ui.difficulty = vars.get("difficulty").and_then(Value::as_str).unwrap_or("normal").to_string();
+            self.server_ui.online = vars
+                .get("online-mode")
+                .and_then(Value::as_bool)
+                .or_else(|| vars.get("online-mode").and_then(Value::as_str).map(|v| v != "false"))
+                .unwrap_or(false);
+            self.server_ui.pvp = vars
+                .get("pvp")
+                .and_then(Value::as_bool)
+                .or_else(|| vars.get("pvp").and_then(Value::as_str).map(|v| v != "false"))
+                .unwrap_or(true);
+            let name = server.get("name").and_then(Value::as_str).unwrap_or("").to_string();
+            let ram = server.get("ramMb").and_then(Value::as_u64).unwrap_or(4096).to_string();
+            let port = server.get("port").and_then(Value::as_u64).unwrap_or(25565).to_string();
+            let motd = vars.get("motd").and_then(Value::as_str).unwrap_or("XyoLauncher Server").to_string();
+            let input = self.name_input.clone();
+            input.update(cx, |input, cx| input.set_text(name, cx));
+            let input = self.memory_input.clone();
+            input.update(cx, |input, cx| input.set_text(ram, cx));
+            let input = self.server_port.clone();
+            input.update(cx, |input, cx| input.set_text(port, cx));
+            let input = self.server_motd.clone();
+            input.update(cx, |input, cx| input.set_text(motd, cx));
+        }
         cx.notify();
     }
 
