@@ -808,6 +808,125 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                 }
             }
             body = body.child(stat_row).child(card);
+            let count_dir = |name: &str| {
+                std::fs::read_dir(Path::new(&instance.dir).join(name))
+                    .map(|entries| entries.flatten().count())
+                    .unwrap_or(0)
+            };
+            let mods_count = count_dir("mods");
+            let saves_count = count_dir("saves");
+            let packs_count = count_dir("resourcepacks");
+            let shaders_count = count_dir("shaderpacks");
+            let view_quick = view.clone();
+            let quick_cards = [
+                ("puzzle-piece", "Mods", mods_count, InstanceTab::Mods),
+                ("archive", "Bản lưu", saves_count, InstanceTab::Saves),
+                ("image", "Gói tài nguyên", packs_count, InstanceTab::Resourcepacks),
+                ("paint-brush", "Shader", shaders_count, InstanceTab::Shaderpacks),
+            ];
+            let mut quick = div().flex().gap_3().flex_wrap();
+            for (icon_name, label, count, tab) in quick_cards {
+                let view = view_quick.clone();
+                quick = quick.child(
+                    div()
+                        .id(gpui::SharedString::from(format!("quick-{}", label)))
+                        .flex()
+                        .items_center()
+                        .gap_3()
+                        .w(px(220.0))
+                        .flex_grow()
+                        .p(px(12.0))
+                        .rounded(px(RADIUS))
+                        .bg(theme.surface)
+                        .border_1()
+                        .border_color(theme.border_soft)
+                        .cursor_pointer()
+                        .hover(|st| st.bg(theme.surface_hover).border_color(theme.border))
+                        .on_click(move |_, _, cx| {
+                            let _ = view.update(cx, |this, cx| {
+                                this.instance_tab = tab;
+                                let target = 88.0 + tab as usize as f32 * 38.0;
+                                this.update_pill(target, true, cx);
+                                this.load_instance_tab(cx);
+                                cx.notify();
+                            });
+                        })
+                        .child(
+                            div()
+                                .size(px(34.0))
+                                .rounded(px(9.0))
+                                .bg(theme.surface_active)
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child(widgets::icon(icon_name, 16.0, theme.accent_soft)),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .child(div().text_size(px(TEXT_XS)).text_color(theme.faint).child(label))
+                                .child(div().text_size(px(TEXT_MD)).font_weight(semibold()).text_color(theme.text).child(format!("{count} mục"))),
+                        ),
+                );
+            }
+            body = body.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_3()
+                    .child(pages::section_title(&theme, "Truy cập nhanh", ""))
+                    .child(quick),
+            );
+            let recent_logs = app.logs.get(&instance.id).cloned().unwrap_or_default();
+            if !recent_logs.is_empty() {
+                let view_log = view.clone();
+                let mut lines = div().flex().flex_col();
+                for line in recent_logs.iter().rev().take(6).rev() {
+                    lines = lines.child(
+                        div()
+                            .text_size(px(11.0))
+                            .font_family(MONO)
+                            .text_color(console_color(line, &theme))
+                            .truncate()
+                            .child(crate::util::strip_minecraft_codes(line)),
+                    );
+                }
+                body = body.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .p(px(14.0))
+                        .rounded(px(RADIUS))
+                        .bg(if theme.dark { gpui::rgb(0x07090c) } else { gpui::rgb(0xf7f8fa) })
+                        .border_1()
+                        .border_color(theme.border_soft)
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_2()
+                                        .child(widgets::icon("terminal", 14.0, theme.accent_soft))
+                                        .child(div().text_size(px(TEXT_SM)).font_weight(semibold()).text_color(theme.text).child("Console gần đây")),
+                                )
+                                .child(widgets::ghost_button("overview-console", "Mở console", &theme, move |_, _, cx| {
+                                    let _ = view_log.update(cx, |this, cx| {
+                                        this.instance_tab = InstanceTab::Console;
+                                        this.update_pill(88.0 + InstanceTab::Console as usize as f32 * 38.0, true, cx);
+                                        this.load_instance_tab(cx);
+                                        cx.notify();
+                                    });
+                                })),
+                        )
+                        .child(lines),
+                );
+            }
             if !app.instance_ui.worlds.is_empty() {
                 let mut list = div().flex().flex_col().gap_2();
                 for world in app.instance_ui.worlds.iter().take(6).cloned().collect::<Vec<_>>() {
@@ -1548,18 +1667,11 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
         }
         InstanceTab::Map => {
             let worlds = app.instance_ui.worlds.clone();
+            let view_map = view.clone();
             let mut chips = div().flex().items_center().gap_2().flex_wrap();
             for world in &worlds {
-                let folder = world
-                    .get("folder")
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .to_string();
-                let name = world
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .to_string();
+                let folder = world.get("folder").and_then(Value::as_str).unwrap_or("").to_string();
+                let name = world.get("name").and_then(Value::as_str).unwrap_or("").to_string();
                 let active = app.instance_ui.world_open.as_deref() == Some(folder.as_str());
                 let view = view.clone();
                 let folder_click = folder.clone();
@@ -1581,8 +1693,8 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                         .on_click(move |_, _, cx| {
                             let folder = folder_click.clone();
                             let _ = view.update(cx, |this, cx| {
-                                this.instance_ui.world_open = Some(folder);
-                                cx.notify();
+                                this.instance_ui.world_open = Some(folder.clone());
+                                this.generate_map(folder, cx);
                             });
                         })
                         .child(widgets::icon("map-trifold", 13.0, if active { theme.accent_soft } else { theme.faint }))
@@ -1594,16 +1706,38 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                 .world_open
                 .clone()
                 .or_else(|| worlds.first().and_then(|w| w.get("folder").and_then(Value::as_str).map(str::to_string)));
+            let map_image = app.instance_ui.map_image.clone();
+            let map_busy = app.instance_ui.map_busy;
+            let map_meta = app.instance_ui.map_meta.clone();
+            let view_gen = view.clone();
+            let generate_folder = selected_world.clone();
             body = body.child(
                 div()
                     .flex()
                     .flex_col()
                     .gap_3()
-                    .child(if worlds.is_empty() {
-                        pages::empty_state(&theme, "map-trifold", "Chưa có thế giới", "Tạo thế giới trong game rồi quay lại đây.").into_any_element()
-                    } else {
-                        chips.into_any_element()
-                    })
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .gap_2()
+                            .child(if worlds.is_empty() {
+                                pages::empty_state(&theme, "map-trifold", "Chưa có thế giới", "Tạo thế giới trong game rồi quay lại đây.").into_any_element()
+                            } else {
+                                chips.into_any_element()
+                            })
+                            .when(selected_world.is_some(), |el| {
+                                el.child(widgets::button("map-generate", "Tạo bản đồ", &theme, true, move |_, _, cx| {
+                                    let folder = generate_folder.clone();
+                                    let _ = view_gen.update(cx, |this, cx| {
+                                        if let Some(folder) = folder {
+                                            this.generate_map(folder, cx);
+                                        }
+                                    });
+                                }))
+                            }),
+                    )
                     .child(
                         div()
                             .flex()
@@ -1611,38 +1745,58 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                             .items_center()
                             .justify_center()
                             .gap_3()
-                            .h(px(420.0))
+                            .min_h(px(420.0))
                             .w_full()
                             .rounded(px(RADIUS_LG))
                             .bg(theme.surface)
                             .border_1()
                             .border_color(theme.border_soft)
-                            .child(widgets::icon("map-trifold", 40.0, theme.faint))
-                            .child(
-                                div()
-                                    .text_size(px(TEXT_LG))
-                                    .font_weight(semibold())
-                                    .text_color(theme.text)
-                                    .child("Bản đồ thế giới"),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(TEXT_SM))
-                                    .text_color(theme.muted)
-                                    .child(if selected_world.is_some() {
-                                        "Trình render bản đồ đang được hoàn thiện trong bản Rust. Dùng nút bên dưới để mở thư mục world."
-                                    } else {
-                                        "Chọn thế giới để xem bản đồ."
-                                    }),
-                            )
-                            .when_some(selected_world, |el, folder| {
-                                let dir = Path::new(&instance.dir).join("saves").join(folder);
-                                el.child(widgets::ghost_button("map-folder", "Mở thư mục world", &theme, move |_, _, _cx| {
-                                    let _ = open::that(&dir);
-                                }))
+                            .p(px(10.0))
+                            .when(map_busy, |el| {
+                                el.child(widgets::spinner(26.0, theme.accent_soft))
+                                    .child(div().text_size(px(TEXT_SM)).text_color(theme.muted).child("Đang đọc region và render bản đồ…"))
+                            })
+                            .when(!map_busy && map_image.is_some(), |el| {
+                                el.child(
+                                    gpui::img(map_image.clone().unwrap())
+                                        .w_full()
+                                        .h(px(520.0))
+                                        .object_fit(gpui::ObjectFit::Contain)
+                                        .rounded(px(8.0)),
+                                )
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_3()
+                                        .text_size(px(TEXT_XS))
+                                        .font_family(MONO)
+                                        .text_color(theme.faint)
+                                        .child(format!(
+                                            "{}×{} · {} chunk",
+                                            map_meta.get("width").and_then(Value::as_u64).unwrap_or(0),
+                                            map_meta.get("height").and_then(Value::as_u64).unwrap_or(0),
+                                            map_meta.get("chunks").and_then(Value::as_u64).unwrap_or(0)
+                                        )),
+                                )
+                            })
+                            .when(!map_busy && map_image.is_none(), |el| {
+                                el.child(widgets::icon("map-trifold", 40.0, theme.faint))
+                                    .child(div().text_size(px(TEXT_LG)).font_weight(semibold()).text_color(theme.text).child("Bản đồ thế giới"))
+                                    .child(
+                                        div()
+                                            .text_size(px(TEXT_SM))
+                                            .text_color(theme.muted)
+                                            .child(if selected_world.is_some() {
+                                                "Bấm Tạo bản đồ để render địa hình từ tệp region của world."
+                                            } else {
+                                                "Chọn thế giới để xem bản đồ."
+                                            }),
+                                    )
                             }),
                     ),
             );
+            let _ = view_map;
         }
         InstanceTab::Settings => {
             let view_save = view.clone();
@@ -2022,5 +2176,38 @@ fn console_color(line: &str, theme: &Theme) -> gpui::Rgba {
         theme.ok
     } else {
         theme.muted
+    }
+}
+
+
+impl LauncherApp {
+    pub fn generate_map(&mut self, world: String, cx: &mut Context<Self>) {
+        let Some(id) = self.selected_instance.clone() else {
+            return;
+        };
+        if self.instance_ui.map_busy {
+            return;
+        }
+        self.instance_ui.map_busy = true;
+        self.instance_ui.map_image = None;
+        self.instance_ui.world_open = Some(world.clone());
+        let rx = self.backend.world_map(id, world);
+        self.on_result(cx, rx, |this, value, cx| {
+            this.instance_ui.map_busy = false;
+            if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+                this.instance_ui.map_image = value
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                this.instance_ui.map_meta = value;
+            } else {
+                this.toast(
+                    "bad",
+                    "Không render được bản đồ",
+                    value.get("error").and_then(Value::as_str).unwrap_or(""),
+                    cx,
+                );
+            }
+        });
     }
 }

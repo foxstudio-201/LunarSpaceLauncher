@@ -283,7 +283,14 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
     let skin_image = skin
         .get("skinPath")
         .and_then(Value::as_str)
-        .map(str::to_string);
+        .and_then(|path| {
+            crate::mc::skins::front_png(
+                &app.backend.store,
+                Path::new(path),
+                &app.skin_ui.uuid,
+            )
+        })
+        .map(|path| path.to_string_lossy().into_owned());
     let cape_image = skin
         .get("capePath")
         .and_then(Value::as_str)

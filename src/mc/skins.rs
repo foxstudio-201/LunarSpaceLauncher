@@ -289,6 +289,11 @@ pub async fn resolve_remote(
     Some(file)
 }
 
+fn front_cache_path(store: &Store, uuid: &str) -> Option<PathBuf> {
+    let id = crate::util::safe_id(uuid);
+    (!id.is_empty()).then(|| store.skin_cache_dir().join(format!("front-{id}.png")))
+}
+
 fn head_cache_path(store: &Store, uuid: &str) -> Option<PathBuf> {
     let id = crate::util::safe_id(uuid);
     (!id.is_empty()).then(|| store.skin_cache_dir().join(format!("head-{id}.png")))
@@ -296,6 +301,9 @@ fn head_cache_path(store: &Store, uuid: &str) -> Option<PathBuf> {
 
 fn invalidate_head(store: &Store, uuid: &str) -> std::io::Result<()> {
     if let Some(file) = head_cache_path(store, uuid) {
+        let _ = std::fs::remove_file(file);
+    }
+    if let Some(file) = front_cache_path(store, uuid) {
         let _ = std::fs::remove_file(file);
     }
     Ok(())
@@ -325,6 +333,45 @@ pub fn head_png(store: &Store, skin_path: &Path, uuid: &str) -> Option<PathBuf> 
         }
     }
     let scaled = image::imageops::resize(&head, 32, 32, image::imageops::FilterType::Nearest);
+    let _ = std::fs::create_dir_all(target.parent()?);
+    scaled.save(&target).ok()?;
+    Some(target)
+}
+
+pub fn front_png(store: &Store, skin_path: &Path, uuid: &str) -> Option<PathBuf> {
+    let target = front_cache_path(store, uuid)?;
+    if target.is_file() {
+        return Some(target);
+    }
+    let source = image::open(skin_path).ok()?.to_rgba8();
+    if source.width() < 64 || source.height() < 64 {
+        return None;
+    }
+    let mut canvas = image::RgbaImage::new(16, 32);
+    let mut blit = |dest_x: u32, dest_y: u32, src_x: u32, src_y: u32, w: u32, h: u32| {
+        for y in 0..h {
+            for x in 0..w {
+                let pixel = *source.get_pixel(src_x + x, src_y + y);
+                if pixel[3] > 0 {
+                    canvas.put_pixel(dest_x + x, dest_y + y, pixel);
+                }
+            }
+        }
+    };
+    // Base layer, then overlay layer for the front-facing character.
+    blit(4, 0, 8, 8, 8, 8);
+    blit(4, 8, 20, 20, 8, 12);
+    blit(0, 8, 44, 20, 4, 12);
+    blit(12, 8, 36, 52, 4, 12);
+    blit(4, 20, 4, 20, 4, 12);
+    blit(8, 20, 20, 52, 4, 12);
+    blit(4, 0, 40, 8, 8, 8);
+    blit(4, 8, 20, 36, 8, 12);
+    blit(0, 8, 44, 36, 4, 12);
+    blit(12, 8, 52, 52, 4, 12);
+    blit(4, 20, 4, 36, 4, 12);
+    blit(8, 20, 4, 52, 4, 12);
+    let scaled = image::imageops::resize(&canvas, 128, 256, image::imageops::FilterType::Nearest);
     let _ = std::fs::create_dir_all(target.parent()?);
     scaled.save(&target).ok()?;
     Some(target)

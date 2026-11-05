@@ -163,6 +163,9 @@ pub struct InstanceUi {
     pub editor_text: String,
     pub editor_dirty: bool,
     pub world_open: Option<String>,
+    pub map_image: Option<String>,
+    pub map_busy: bool,
+    pub map_meta: Value,
     pub new_name: String,
     pub new_dir: bool,
 }

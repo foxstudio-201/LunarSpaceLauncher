@@ -2471,6 +2471,26 @@ impl Backend {
         }
     }
 
+    pub fn world_map(self: &Arc<Self>, id: String, folder: String) -> Receiver<Value> {
+        let this = self.clone();
+        self.request(async move {
+            let Some(entry) = this.store.find_instance(&id) else {
+                return fail("Không tìm thấy instance.");
+            };
+            let store = this.store.clone();
+            let dir = PathBuf::from(&entry.dir);
+            let result = tokio::task::spawn_blocking(move || {
+                crate::mc::world::render_map(&store, &dir, &folder)
+            })
+            .await;
+            match result {
+                Ok(Ok(meta)) => ok(meta),
+                Ok(Err(err)) => fail(err.to_string()),
+                Err(err) => fail(err.to_string()),
+            }
+        })
+    }
+
     pub fn world_restore(&self, id: &str, folder: &str, file: &str) -> Value {
         let Some(entry) = self.store.find_instance(id) else {
             return fail("Không tìm thấy instance.");
