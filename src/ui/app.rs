@@ -150,7 +150,7 @@ pub struct SettingsUi {
     pub message: String,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct InstanceUi {
     pub rel: String,
     pub entries: Vec<Value>,
@@ -168,6 +168,37 @@ pub struct InstanceUi {
     pub map_meta: Value,
     pub new_name: String,
     pub new_dir: bool,
+    pub console_level: String,
+    pub console_font: f32,
+    pub console_hidden: usize,
+    pub console_search_open: bool,
+}
+
+impl Default for InstanceUi {
+    fn default() -> Self {
+        Self {
+            rel: String::new(),
+            entries: Vec::new(),
+            trash: Vec::new(),
+            mods: Vec::new(),
+            worlds: Vec::new(),
+            logs: Vec::new(),
+            editor_open: false,
+            editor_rel: String::new(),
+            editor_text: String::new(),
+            editor_dirty: false,
+            world_open: None,
+            map_image: None,
+            map_busy: false,
+            map_meta: Value::Null,
+            new_name: String::new(),
+            new_dir: false,
+            console_level: String::new(),
+            console_font: 11.5,
+            console_hidden: 0,
+            console_search_open: false,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -251,6 +282,7 @@ pub struct LauncherApp {
     pub toast_seq: u64,
     pub progress: HashMap<String, Value>,
     pub logs: HashMap<String, Vec<String>>,
+    pub launch_errors: HashMap<String, String>,
     pub crash: Option<Value>,
     pub modal: Modal,
     pub create: CreateState,
@@ -272,6 +304,7 @@ pub struct LauncherApp {
     pub ely_pass: Entity<TextField>,
     pub file_search: Entity<TextField>,
     pub console_filter: Entity<TextField>,
+    pub console_search_input: Entity<TextField>,
     pub editor_input: Entity<TextField>,
     pub file_name_input: Entity<TextField>,
     pub console_scroll: gpui::ScrollHandle,
@@ -304,17 +337,25 @@ impl LauncherApp {
                 .unwrap_or("dark"),
         );
         let view = cx.entity().downgrade();
-        let search = cx.new(|cx| TextField::new(cx, "Tìm phiên bản…"));
-        let version_search = cx.new(|cx| TextField::new(cx, "Tìm phiên bản Minecraft…"));
+        let notify_change = {
+            let view = view.clone();
+            move |_: &str, _: &mut Window, app: &mut App| {
+                let _ = view.update(app, |_, cx| cx.notify());
+            }
+        };
+        let search = cx.new(|cx| TextField::new(cx, "Tìm phiên bản…").on_change(notify_change.clone()));
+        let version_search = cx.new(|cx| TextField::new(cx, "Tìm phiên bản Minecraft…").on_change(notify_change.clone()));
         let content_search = {
             let view = view.clone();
             cx.new(|cx| {
-                TextField::new(cx, "Tìm mod, modpack, shader…").on_submit(move |text, _w, app| {
-                    let text = text.to_string();
-                    let _ = view.update(app, |this, cx| {
-                        this.search_content(text, cx);
-                    });
-                })
+                TextField::new(cx, "Tìm mod, modpack, shader…")
+                    .on_change(notify_change.clone())
+                    .on_submit(move |text, _w, app| {
+                        let text = text.to_string();
+                        let _ = view.update(app, |this, cx| {
+                            this.search_content(text, cx);
+                        });
+                    })
             })
         };
         let name_input = cx.new(|cx| TextField::new(cx, "Tên phiên bản…"));
@@ -322,8 +363,9 @@ impl LauncherApp {
         let jvm_input = cx.new(|cx| TextField::new(cx, "Ví dụ: -XX:+UseG1GC"));
         let ely_user = cx.new(|cx| TextField::new(cx, "Tên đăng nhập hoặc email ely.by"));
         let ely_pass = cx.new(|cx| TextField::new(cx, "Mật khẩu ely.by"));
-        let file_search = cx.new(|cx| TextField::new(cx, "Tìm tệp…"));
-        let console_filter = cx.new(|cx| TextField::new(cx, "Lọc log…"));
+        let file_search = cx.new(|cx| TextField::new(cx, "Tìm tệp…").on_change(notify_change.clone()));
+        let console_filter = cx.new(|cx| TextField::new(cx, "Lọc log…").on_change(notify_change.clone()));
+        let console_search_input = cx.new(|cx| TextField::new(cx, "Tìm trong console…").on_change(notify_change.clone()));
         let editor_input = cx.new(|cx| TextField::new(cx, "Nội dung tệp…").multiline(true));
         let file_name_input = cx.new(|cx| TextField::new(cx, "Tên tệp hoặc thư mục…"));
         let server_cmd = cx.new(|cx| TextField::new(cx, "Nhập lệnh server…").on_submit({
@@ -341,7 +383,7 @@ impl LauncherApp {
         }));
         let host_token = cx.new(|cx| TextField::new(cx, "ngrok authtoken…"));
         let host_listen = cx.new(|cx| TextField::new(cx, "25565"));
-        let instance_search = cx.new(|cx| TextField::new(cx, "Tìm phiên bản…"));
+        let instance_search = cx.new(|cx| TextField::new(cx, "Tìm phiên bản…").on_change(notify_change));
 
         let splash_dir = crate::ui::assets::assets_root().join("splash");
         let mut splash_frames: Vec<std::path::PathBuf> = std::fs::read_dir(&splash_dir)
@@ -395,6 +437,7 @@ impl LauncherApp {
             toast_seq: 0,
             progress: HashMap::new(),
             logs: HashMap::new(),
+            launch_errors: HashMap::new(),
             crash: None,
             modal: Modal::None,
             create: CreateState {
@@ -437,6 +480,7 @@ impl LauncherApp {
             ely_pass,
             file_search,
             console_filter,
+            console_search_input,
             editor_input,
             file_name_input,
             console_scroll: gpui::ScrollHandle::new(),

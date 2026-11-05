@@ -358,13 +358,16 @@ impl LauncherApp {
             return;
         }
         let rx = self.backend.launch(json!({"id": id}));
+        self.launch_errors.remove(id);
         self.toast("info", "Đang khởi chạy", "Chuẩn bị Java và kiểm tra tệp game…", cx);
-        self.on_result(cx, rx, |this, value, cx| {
+        let launch_id = id.to_string();
+        self.on_result(cx, rx, move |this, value, cx| {
             if !value.get("ok").and_then(serde_json::Value::as_bool).unwrap_or(false) {
                 let error = value
                     .get("error")
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or("Không khởi chạy được");
+                this.launch_errors.insert(launch_id.clone(), error.to_string());
                 this.toast("bad", "Khởi chạy thất bại", error.to_string(), cx);
             }
         });

@@ -3,7 +3,7 @@ use crate::ui::app::{ConfirmAction, InstanceTab, LauncherApp, Modal};
 use crate::ui::pages::{self, page_body};
 use crate::ui::theme::*;
 use crate::ui::widgets;
-use gpui::{AnyElement, Context, IntoElement, Window, div, prelude::*, px};
+use gpui::{AnyElement, Context, FontWeight, IntoElement, Window, div, prelude::*, px};
 use serde_json::Value;
 use std::path::Path;
 
@@ -1004,38 +1004,255 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
             }
         }
         InstanceTab::Console => {
+            let instance = selected_instance(app);
+            let logs_all = app.instance_ui.logs.clone();
             let filter = app.console_filter.read(cx).text().to_lowercase();
-            let all_logs = app.instance_ui.logs.clone();
-            let logs: Vec<String> = all_logs
-                .iter()
-                .filter(|line| filter.is_empty() || line.to_lowercase().contains(&filter))
-                .cloned()
-                .collect();
-            let start = logs.len().saturating_sub(900);
-            let mut lines = div().flex().flex_col().p(px(12.0));
-            for line in &logs[start..] {
-                lines = lines.child(
+            let search = app.console_search_input.read(cx).text().trim().to_lowercase();
+            let level = app.instance_ui.console_level.clone();
+            let font = app.instance_ui.console_font;
+            let hidden = app.instance_ui.console_hidden.min(logs_all.len());
+            let console_height = (f32::from(window.viewport_size().height) - 390.0).clamp(220.0, 900.0);
+
+            let mut text = String::new();
+            let mut runs: Vec<(std::ops::Range<usize>, gpui::HighlightStyle)> = Vec::new();
+            let mut shown = 0usize;
+            for line in &logs_all[hidden..] {
+                let clean = crate::util::strip_minecraft_codes(&crate::util::strip_ansi(line));
+                let line_level = console_level_of(&clean);
+                if !level.is_empty() && line_level != level {
+                    continue;
+                }
+                if !filter.is_empty() && !clean.to_lowercase().contains(&filter) {
+                    continue;
+                }
+                if shown > 0 {
+                    text.push('\n');
+                }
+                let base = text.len();
+                let pieces = console_pieces(&clean, &theme);
+                let mut line_text = String::new();
+                let mut spans = Vec::new();
+                for piece in &pieces {
+                    let start = line_text.len();
+                    line_text.push_str(&piece.text);
+                    spans.push((start, line_text.len(), piece));
+                }
+                let lowered = line_text.to_lowercase();
+                let matches: Vec<(usize, usize)> = if !search.is_empty() && lowered.len() == line_text.len() {
+                    lowered
+                        .match_indices(&search)
+                        .map(|(start, hit)| (start, start + hit.len()))
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                for (start, end, piece) in spans {
+                    let mut bounds = vec![start, end];
+                    for (match_start, match_end) in &matches {
+                        if *match_end <= start || *match_start >= end {
+                            continue;
+                        }
+                        bounds.push((*match_start).clamp(start, end));
+                        bounds.push((*match_end).clamp(start, end));
+                    }
+                    bounds.sort_unstable();
+                    bounds.dedup();
+                    for pair in bounds.windows(2) {
+                        let (from, to) = (pair[0], pair[1]);
+                        if from >= to {
+                            continue;
+                        }
+                        let hit = matches
+                            .iter()
+                            .any(|(match_start, match_end)| from >= *match_start && to <= *match_end);
+                        runs.push((
+                            base + from..base + to,
+                            gpui::HighlightStyle {
+                                color: Some(piece.color.into()),
+                                font_weight: if piece.bold { Some(FontWeight::BOLD) } else { None },
+                                background_color: if hit { Some(gpui::rgba(0xE9B87240).into()) } else { None },
+                                ..Default::default()
+                            },
+                        ));
+                    }
+                }
+                text.push_str(&line_text);
+                shown += 1;
+            }
+
+            let mut style = gpui::TextStyle::default();
+            style.color = theme.text.into();
+            style.font_family = MONO.into();
+            style.font_size = px(font).into();
+            style.line_height = px(font * 1.45).into();
+
+            let mut terminal = div()
+                .w_full()
+                .rounded(px(RADIUS_SM))
+                .bg(if theme.dark { gpui::rgb(0x07090c) } else { gpui::rgb(0xf7f8fa) })
+                .border_1()
+                .border_color(theme.border_soft);
+            if text.is_empty() {
+                terminal = terminal.child(
                     div()
-                        .text_size(px(11.5))
-                        .font_family(MONO)
-                        .text_color(console_color(line, &theme))
-                        .child(crate::util::strip_minecraft_codes(line)),
+                        .h(px(console_height - 22.0))
+                        .w_full()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(
+                            div()
+                                .text_size(px(11.5))
+                                .text_color(theme.faint)
+                                .child(if logs_all.is_empty() {
+                                    "Chưa có log. Bấm Chơi để bắt đầu."
+                                } else {
+                                    "Không có dòng log khớp bộ lọc."
+                                }),
+                        ),
+                );
+            } else {
+                terminal = terminal.child(
+                    div()
+                        .w_full()
+                        .p(px(10.0))
+                        .child(gpui::StyledText::new(text).with_default_highlights(&style, runs)),
                 );
             }
+
+            let view_search_btn = view.clone();
+            let view_minus = view.clone();
+            let view_plus = view.clone();
+            let view_bottom = view.clone();
             let view_copy = view.clone();
             let view_upload = view.clone();
             let view_clear = view.clone();
+            let view_filter_clear = view.clone();
             let view_auto = view.clone();
-            let console = div()
+
+            let searching = app.instance_ui.console_search_open;
+            let status = instance.as_ref().map(|i| i.status.clone()).unwrap_or_else(|| "ready".into());
+            let running = instance.as_ref().map(|i| i.running).unwrap_or(false)
+                || matches!(status.as_str(), "running" | "starting" | "stopping");
+            let (state_color, state_label) = if running {
+                if status == "stopping" { (theme.warn, "Đang dừng") } else { (theme.ok, "Đang chạy") }
+            } else if status == "error" {
+                (theme.bad, "Lỗi")
+            } else {
+                (theme.faint, "Sẵn sàng")
+            };
+
+            let mut level_row = div().flex().items_center().gap(px(4.0));
+            for (key, label) in [("", "Tất cả"), ("INFO", "Info"), ("WARN", "Warn"), ("ERROR", "Lỗi")] {
+                let active = app.instance_ui.console_level == key;
+                let view_level = view.clone();
+                let key = key.to_string();
+                level_row = level_row.child(
+                    div()
+                        .id(gpui::SharedString::from(format!("console-level-{label}")))
+                        .h(px(24.0))
+                        .px(px(9.0))
+                        .flex()
+                        .items_center()
+                        .rounded_full()
+                        .bg(if active { theme.accent_dim } else { theme.elevated })
+                        .border_1()
+                        .border_color(if active { theme.accent } else { theme.border_soft })
+                        .text_size(px(10.0))
+                        .font_weight(if active { semibold() } else { medium() })
+                        .text_color(if active { theme.accent_soft } else { theme.muted })
+                        .cursor_pointer()
+                        .on_click(move |_, _, cx| {
+                            let key = key.clone();
+                            let _ = view_level.update(cx, |this, cx| {
+                                this.instance_ui.console_level = key;
+                                this.instance_ui.console_hidden = 0;
+                                cx.notify();
+                            });
+                        })
+                        .child(label.to_string()),
+                );
+            }
+
+            let mut toolbar_actions = div().flex().items_center().gap_1();
+            toolbar_actions = toolbar_actions
+                .child(
+                    div()
+                        .id("console-search-toggle")
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .size(px(28.0))
+                        .rounded(px(6.0))
+                        .bg(if searching { theme.accent_dim } else { theme.elevated })
+                        .cursor_pointer()
+                        .hover(|s| s.bg(theme.surface_hover))
+                        .on_click(move |_, _, cx| {
+                            let _ = view_search_btn.update(cx, |this, cx| {
+                                this.instance_ui.console_search_open = !this.instance_ui.console_search_open;
+                                if !this.instance_ui.console_search_open {
+                                    let input = this.console_search_input.clone();
+                                    input.update(cx, |input, cx| input.clear(cx));
+                                }
+                                cx.notify();
+                            });
+                        })
+                        .child(widgets::icon("magnifying-glass", 14.0, if searching { theme.accent_soft } else { theme.muted })),
+                )
+                .child(
+                    div()
+                        .id("console-font-minus")
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .size(px(28.0))
+                        .rounded(px(6.0))
+                        .cursor_pointer()
+                        .hover(|s| s.bg(theme.surface_hover))
+                        .on_click(move |_, _, cx| {
+                            let _ = view_minus.update(cx, |this, cx| {
+                                this.instance_ui.console_font = (this.instance_ui.console_font - 1.0).max(9.0);
+                                cx.notify();
+                            });
+                        })
+                        .child(widgets::icon("minus", 13.0, theme.muted)),
+                )
+                .child(
+                    div()
+                        .min_w(px(34.0))
+                        .text_center()
+                        .text_size(px(10.0))
+                        .font_family(MONO)
+                        .text_color(theme.faint)
+                        .child(format!("{}px", font as i32)),
+                )
+                .child(
+                    div()
+                        .id("console-font-plus")
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .size(px(28.0))
+                        .rounded(px(6.0))
+                        .cursor_pointer()
+                        .hover(|s| s.bg(theme.surface_hover))
+                        .on_click(move |_, _, cx| {
+                            let _ = view_plus.update(cx, |this, cx| {
+                                this.instance_ui.console_font = (this.instance_ui.console_font + 1.0).min(24.0);
+                                cx.notify();
+                            });
+                        })
+                        .child(widgets::icon("plus", 13.0, theme.muted)),
+                );
+
+            let mut console = div()
                 .flex()
                 .flex_col()
                 .w_full()
+                .gap(px(8.0))
+                .p(px(10.0))
                 .rounded(px(RADIUS))
-                .bg(if theme.dark {
-                    gpui::rgb(0x07090c)
-                } else {
-                    gpui::rgb(0xf7f8fa)
-                })
+                .bg(theme.surface)
                 .border_1()
                 .border_color(theme.border_soft)
                 .child(
@@ -1043,114 +1260,180 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                         .flex()
                         .items_center()
                         .justify_between()
-                        .gap_2()
-                        .p(px(10.0))
-                        .border_b_1()
-                        .border_color(theme.border_soft)
                         .child(
                             div()
                                 .flex()
                                 .items_center()
                                 .gap_2()
-                                .child(widgets::icon("terminal", 15.0, theme.accent_soft))
-                                .child(
-                                    div()
-                                        .text_size(px(TEXT_SM))
-                                        .font_weight(medium())
-                                        .text_color(theme.text)
-                                        .child(format!("{} dòng log", logs.len())),
-                                )
-                                .child(
-                                    div()
-                                        .w(px(200.0))
-                                        .ml(px(8.0))
-                                        .child(widgets::text_input_box(&theme).child(app.console_filter.clone())),
-                                ),
+                                .child(div().size(px(7.0)).rounded_full().bg(state_color))
+                                .child(div().text_size(px(11.0)).font_weight(semibold()).text_color(state_color).child(state_label)),
                         )
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap_2()
-                                .child(
-                                    div()
-                                        .id("console-auto")
-                                        .h(px(28.0))
-                                        .px(px(8.0))
-                                        .flex()
-                                        .items_center()
-                                        .rounded(px(5.0))
-                                        .bg(if app.console_auto { theme.accent_dim } else { theme.elevated })
-                                        .border_1()
-                                        .border_color(if app.console_auto { theme.accent } else { theme.border })
-                                        .text_size(px(9.5))
-                                        .text_color(if app.console_auto { theme.accent_soft } else { theme.muted })
-                                        .cursor_pointer()
-                                        .on_click(move |_, _, cx| {
-                                            let _ = view_auto.update(cx, |this, cx| {
-                                                this.console_auto = !this.console_auto;
-                                                if this.console_auto {
-                                                    this.console_scroll.scroll_to_bottom();
-                                                }
-                                                cx.notify();
-                                            });
-                                        })
-                                        .child(if app.console_auto { "Tự cuộn" } else { "Tự cuộn: tắt" }),
-                                )
-                                .child(widgets::ghost_button("console-bottom", "Cuối log", &theme, {
-                                    let view = view.clone();
-                                    move |_, _, cx| {
-                                        let _ = view.update(cx, |this, cx| {
-                                            this.console_scroll.scroll_to_bottom();
-                                            cx.notify();
-                                        });
-                                    }
-                                }))
-                                .child(widgets::ghost_button("console-copy", "Sao chép", &theme, {
-                                    let text = all_logs.join("\n");
-                                    move |_, _, cx| {
-                                        cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.clone()));
-                                    }
-                                }))
-                                .child(widgets::ghost_button("console-upload", "Gửi log", &theme, move |_, _, cx| {
-                                    let text = all_logs.join("\n");
-                                    let _ = view_upload.update(cx, |this, cx| {
-                                        if text.is_empty() {
-                                            this.toast("warn", "Chưa có log", "Chạy game để có log.", cx);
-                                            return;
-                                        }
-                                        let rx = this.backend.upload_log_req(text.clone());
-                                        this.on_result(cx, rx, |this, value, cx| {
-                                            if let Some(url) = value.get("url").and_then(Value::as_str) {
-                                                let _ = open::that(url);
-                                                this.toast("ok", "Đã gửi log", url.to_string(), cx);
-                                            } else {
-                                                this.toast("bad", "Gửi log thất bại", value.get("error").and_then(Value::as_str).unwrap_or(""), cx);
-                                            }
-                                        });
-                                    });
-                                }))
-                                .child(widgets::ghost_button("console-clear", "Xoá xem", &theme, move |_, _, cx| {
-                                    let _ = view_clear.update(cx, |this, cx| {
-                                        this.instance_ui.logs.clear();
-                                        if let Some(id) = this.selected_instance.clone() {
-                                            this.logs.remove(&id);
-                                        }
-                                        cx.notify();
-                                    });
-                                })),
-                        ),
+                        .child(toolbar_actions),
                 )
+                .child(level_row)
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .text_size(px(10.0))
+                        .text_color(theme.faint)
+                        .child(format!("{shown} / {} dòng", logs_all.len().saturating_sub(hidden))),
+                );
+
+            if searching {
+                console = console.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(div().flex_1().child(widgets::text_input_box(&theme).child(app.console_search_input.clone()))),
+                );
+            }
+
+            console = console
                 .child(
                     div()
                         .id("console-scroll")
-                        .h(px(540.0))
+                        .h(px(console_height))
                         .overflow_y_scroll()
                         .track_scroll(&app.console_scroll)
-                        .child(lines),
+                        .child(terminal),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(
+                            div()
+                                .flex_1()
+                                .child(widgets::text_input_box(&theme).child(app.console_filter.clone())),
+                        )
+                        .when(!filter.is_empty(), |el| {
+                            el.child(widgets::ghost_button("console-filter-clear", "Bỏ lọc", &theme, move |_, _, cx| {
+                                let _ = view_filter_clear.update(cx, |this, cx| {
+                                    let input = this.console_filter.clone();
+                                    input.update(cx, |input, cx| input.clear(cx));
+                                    cx.notify();
+                                });
+                            }))
+                        })
+                        .child(
+                            div()
+                                .id("console-auto")
+                                .h(px(30.0))
+                                .px(px(9.0))
+                                .flex()
+                                .items_center()
+                                .rounded(px(5.0))
+                                .bg(if app.console_auto { theme.accent_dim } else { theme.elevated })
+                                .border_1()
+                                .border_color(if app.console_auto { theme.accent } else { theme.border })
+                                .text_size(px(10.0))
+                                .text_color(if app.console_auto { theme.accent_soft } else { theme.muted })
+                                .cursor_pointer()
+                                .on_click(move |_, _, cx| {
+                                    let _ = view_auto.update(cx, |this, cx| {
+                                        this.console_auto = !this.console_auto;
+                                        if this.console_auto {
+                                            this.console_scroll.scroll_to_bottom();
+                                        }
+                                        cx.notify();
+                                    });
+                                })
+                                .child(if app.console_auto { "Tự cuộn" } else { "Tự cuộn: tắt" }),
+                        )
+                        .child(widgets::ghost_button("console-bottom", "Cuối log", &theme, {
+                            let view = view_bottom;
+                            move |_, _, cx| {
+                                let _ = view.update(cx, |this, cx| {
+                                    this.console_scroll.scroll_to_bottom();
+                                    cx.notify();
+                                });
+                            }
+                        }))
+                        .child(widgets::ghost_button("console-copy", "Sao chép", &theme, {
+                            let text = logs_all.join("\n");
+                            move |_, _, cx| {
+                                cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.clone()));
+                            }
+                        }))
+                        .child(widgets::ghost_button("console-upload", "Gửi log", &theme, move |_, _, cx| {
+                            let text = logs_all.join("\n");
+                            let _ = view_upload.update(cx, |this, cx| {
+                                if text.is_empty() {
+                                    this.toast("warn", "Chưa có log", "Chạy game để có log.", cx);
+                                    return;
+                                }
+                                let rx = this.backend.upload_log_req(text.clone());
+                                this.on_result(cx, rx, |this, value, cx| {
+                                    if let Some(url) = value.get("url").and_then(Value::as_str) {
+                                        let _ = open::that(url);
+                                        this.toast("ok", "Đã gửi log", url.to_string(), cx);
+                                    } else {
+                                        this.toast("bad", "Gửi log thất bại", value.get("error").and_then(Value::as_str).unwrap_or(""), cx);
+                                    }
+                                });
+                            });
+                        }))
+                        .child(widgets::ghost_button("console-clear", "Xoá", &theme, move |_, _, cx| {
+                            let _ = view_clear.update(cx, |this, cx| {
+                                this.instance_ui.console_hidden = this.instance_ui.logs.len();
+                                this.console_scroll.scroll_to_bottom();
+                                cx.notify();
+                            });
+                        })),
                 );
-            let _ = view_copy;
-            body = body.child(console);
+
+            let launch_error = app
+                .selected_instance
+                .as_ref()
+                .and_then(|id| app.launch_errors.get(id))
+                .cloned();
+            if let Some(error) = launch_error {
+                body = body.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .p(px(10.0))
+                        .rounded(px(RADIUS_SM))
+                        .bg(gpui::rgba(0xEF444426))
+                        .border_1()
+                        .border_color(gpui::rgba(0xEF444459))
+                        .child(widgets::icon("warning-circle", 14.0, theme.bad))
+                        .child(div().flex_1().text_size(px(11.0)).text_color(theme.bad).child(error)),
+                );
+            }
+
+            let footer = {
+                let mut row = div()
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .text_size(px(10.0))
+                    .text_color(theme.faint)
+                    .child(div().size(px(5.0)).rounded_full().bg(state_color))
+                    .child(state_label)
+                    .child(div().flex_1());
+                if let Some(instance) = instance.as_ref() {
+                    let loader = if instance.loader.is_empty() { "vanilla".to_string() } else { instance.loader.clone() };
+                    let loader = match instance.loader_version.as_deref() {
+                        Some(version) if !version.is_empty() => format!("{loader}-{version}"),
+                        _ => loader,
+                    };
+                    row = row
+                        .child(div().font_family(MONO).child(loader))
+                        .child(div().font_family(MONO).child(instance.version.clone()));
+                    if instance.java_major.is_some() {
+                        row = row.child(div().font_family(MONO).child(format!("Java {}+", instance.java_major.unwrap_or(0))));
+                    }
+                }
+                row
+            };
+
+            body = body.child(console).child(footer);
         }
         InstanceTab::Mods => {
             let filter = app.file_search.read(cx).text().to_lowercase();
@@ -2159,6 +2442,77 @@ fn render_editor(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<L
     page_body().child(content).into_any_element()
 }
 
+
+
+struct ConsolePiece {
+    text: String,
+    color: gpui::Rgba,
+    bold: bool,
+}
+
+fn console_logger_color(theme: &Theme) -> gpui::Rgba {
+    if theme.dark { gpui::rgb(0x7d8796) } else { gpui::rgb(0x55606f) }
+}
+
+fn console_parse(clean: &str) -> Option<(String, String, String, String, String)> {
+    static RE: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
+        regex::Regex::new(r"^\[([^\]]+)\]\s+\[([^\]]+)\]\s+\[([^\]]+)\]:?\s?(.*)$").unwrap()
+    });
+    let caps = RE.captures(clean)?;
+    let stamp = caps.get(1)?.as_str().to_string();
+    let thread_level = caps.get(2)?.as_str();
+    let logger = caps.get(3)?.as_str().to_string();
+    let message = caps.get(4).map(|m| m.as_str()).unwrap_or("").to_string();
+    let (thread, level) = thread_level.rsplit_once('/').unwrap_or(("", thread_level));
+    Some((stamp, thread.to_string(), level.to_string(), logger, message))
+}
+
+fn console_level_of(clean: &str) -> &'static str {
+    if let Some((_, _, level, _, _)) = console_parse(clean) {
+        let level = level.to_uppercase();
+        if level.starts_with("ERROR") || level == "FATAL" {
+            "ERROR"
+        } else if level.starts_with("WARN") {
+            "WARN"
+        } else if level == "DEBUG" || level == "TRACE" {
+            "DEBUG"
+        } else {
+            "INFO"
+        }
+    } else {
+        let lower = clean.to_lowercase();
+        if lower.contains("error") || lower.contains("exception") || lower.contains("fatal") {
+            "ERROR"
+        } else if lower.contains("warn") {
+            "WARN"
+        } else {
+            "INFO"
+        }
+    }
+}
+
+fn console_pieces(clean: &str, theme: &Theme) -> Vec<ConsolePiece> {
+    if let Some((stamp, thread, level, logger, message)) = console_parse(clean) {
+        let upper = level.to_uppercase();
+        let (color, bold) = match upper.as_str() {
+            "ERROR" | "FATAL" => (theme.bad, true),
+            "WARN" | "WARNING" => (theme.warn, true),
+            "DEBUG" | "TRACE" => (theme.faint, false),
+            _ => (theme.ok, false),
+        };
+        let message_color = if bold { color } else { theme.text };
+        vec![
+            ConsolePiece { text: format!("[{stamp}] "), color: theme.faint, bold: false },
+            ConsolePiece { text: format!("{thread}/"), color: theme.faint, bold: false },
+            ConsolePiece { text: level, color, bold },
+            ConsolePiece { text: "] ".into(), color: theme.faint, bold: false },
+            ConsolePiece { text: format!("{logger} "), color: console_logger_color(theme), bold: false },
+            ConsolePiece { text: message, color: message_color, bold: false },
+        ]
+    } else {
+        vec![ConsolePiece { text: clean.to_string(), color: console_color(clean, theme), bold: false }]
+    }
+}
 
 fn console_color(line: &str, theme: &Theme) -> gpui::Rgba {
     let text = line.to_lowercase();
