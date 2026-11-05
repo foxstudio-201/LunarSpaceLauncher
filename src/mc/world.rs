@@ -796,6 +796,14 @@ fn data_number(data: &[Value], name: &str) -> i64 {
         .unwrap_or(0)
 }
 
+fn nested_node<'a>(data: &'a [Value], parent: &str, name: &str) -> Option<&'a Value> {
+    data_node(data, parent)?
+        .get("value")?
+        .as_array()?
+        .iter()
+        .find(|node| node.get("name").and_then(Value::as_str) == Some(name))
+}
+
 pub fn read_world_settings(instance_dir: &Path, world: &str) -> Result<Value> {
     let root = read_world_file(instance_dir, world, "level.dat")?;
     let data = world_data(&root).ok_or_else(|| anyhow!("level.dat không có dữ liệu Data"))?;
@@ -806,9 +814,25 @@ pub fn read_world_settings(instance_dir: &Path, world: &str) -> Result<Value> {
             .unwrap_or("")
             .to_string()
     };
+    let mut seed = text("RandomSeed");
+    if seed.is_empty() || seed == "0" {
+        if let Some(value) = nested_node(data, "WorldGenSettings", "seed") {
+            let nested = value
+                .get("value")
+                .and_then(|v| {
+                    v.as_str()
+                        .map(str::to_string)
+                        .or_else(|| v.as_i64().map(|n| n.to_string()))
+                })
+                .unwrap_or_default();
+            if !nested.is_empty() {
+                seed = nested;
+            }
+        }
+    }
     Ok(serde_json::json!({
         "name": text("LevelName"),
-        "seed": text("RandomSeed"),
+        "seed": seed,
         "gameType": data_number(data, "GameType"),
         "difficulty": data_number(data, "Difficulty"),
         "hardcore": data_number(data, "hardcore") != 0,
@@ -848,6 +872,42 @@ fn set_world_value(root: &mut Value, name: &str, value: Value) -> bool {
     }
 }
 
+fn set_world_nested(root: &mut Value, parent: &str, name: &str, value: Value) -> bool {
+    let Some(entries) = root.get_mut("value").and_then(Value::as_array_mut) else {
+        return false;
+    };
+    let Some(data) = entries
+        .iter_mut()
+        .find(|node| node.get("name").and_then(Value::as_str) == Some("Data"))
+    else {
+        return false;
+    };
+    let Some(nodes) = data.get_mut("value").and_then(Value::as_array_mut) else {
+        return false;
+    };
+    let Some(compound) = nodes
+        .iter_mut()
+        .find(|node| node.get("name").and_then(Value::as_str) == Some(parent))
+    else {
+        return false;
+    };
+    let Some(children) = compound.get_mut("value").and_then(Value::as_array_mut) else {
+        return false;
+    };
+    let Some(child) = children
+        .iter_mut()
+        .find(|node| node.get("name").and_then(Value::as_str) == Some(name))
+    else {
+        return false;
+    };
+    if let Some(object) = child.as_object_mut() {
+        object.insert("value".into(), value);
+        true
+    } else {
+        false
+    }
+}
+
 pub fn write_world_settings(instance_dir: &Path, world: &str, patch: &Value) -> Result<()> {
     let mut root = read_world_file(instance_dir, world, "level.dat")?;
     if let Some(name) = patch.get("name").and_then(Value::as_str).filter(|v| !v.trim().is_empty()) {
@@ -856,6 +916,7 @@ pub fn write_world_settings(instance_dir: &Path, world: &str, patch: &Value) -> 
     if let Some(seed) = patch.get("seed").and_then(Value::as_str).filter(|v| !v.trim().is_empty()) {
         if seed.trim().parse::<i64>().is_ok() {
             set_world_value(&mut root, "RandomSeed", serde_json::json!(seed.trim()));
+            set_world_nested(&mut root, "WorldGenSettings", "seed", serde_json::json!(seed.trim()));
         }
     }
     if let Some(game) = patch.get("gameType").and_then(Value::as_i64) {
@@ -964,5 +1025,46 @@ mod nbt_tests {
         let parsed = parse_bytes(&bytes).unwrap();
         assert_eq!(parsed["value"][0]["name"], "LevelName");
         assert_eq!(parsed["value"][0]["value"], "Test");
+    }
+}
+
+#[cfg(test)]
+mod settings_tests {
+    use super::*;
+
+    #[test]
+    fn reads_and_writes_nested_seed() {
+        let root_dir = std::env::temp_dir().join(format!("xyo-world-{}", uuid::Uuid::new_v4()));
+        let world = root_dir.join("saves").join("TestWorld");
+        std::fs::create_dir_all(&world).unwrap();
+        let root = serde_json::json!({
+            "name": "",
+            "value": [{
+                "type": "compound",
+                "name": "Data",
+                "value": [
+                    {"type": "string", "name": "LevelName", "value": "Test"},
+                    {"type": "byte", "name": "Difficulty", "value": 2},
+                    {"type": "int", "name": "GameType", "value": 0},
+                    {"type": "compound", "name": "WorldGenSettings", "value": [
+                        {"type": "long", "name": "seed", "value": "12345"}
+                    ]}
+                ]
+            }]
+        });
+        write_nbt(&world.join("level.dat"), &root, true, false).unwrap();
+        let settings = read_world_settings(&root_dir, "TestWorld").unwrap();
+        assert_eq!(settings.get("name").and_then(Value::as_str), Some("Test"));
+        assert_eq!(settings.get("seed").and_then(Value::as_str), Some("12345"));
+        write_world_settings(
+            &root_dir,
+            "TestWorld",
+            &serde_json::json!({"seed": "999", "gameType": 1}),
+        )
+        .unwrap();
+        let updated = read_world_settings(&root_dir, "TestWorld").unwrap();
+        assert_eq!(updated.get("seed").and_then(Value::as_str), Some("999"));
+        assert_eq!(updated.get("gameType").and_then(Value::as_i64), Some(1));
+        let _ = std::fs::remove_dir_all(root_dir);
     }
 }
