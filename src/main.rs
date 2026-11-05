@@ -33,7 +33,40 @@ actions!(
 );
 use std::sync::Arc;
 
+#[cfg(windows)]
+fn single_instance() -> bool {
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError};
+    use windows::Win32::System::Threading::CreateMutexW;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        FindWindowW, SW_RESTORE, SW_SHOW, SetForegroundWindow, ShowWindow,
+    };
+    unsafe {
+        let name = windows::core::w!("XyoLauncher_SingleInstance");
+        let Ok(_guard) = CreateMutexW(None, true, PCWSTR(name.as_ptr())) else {
+            return true;
+        };
+        if GetLastError() == ERROR_ALREADY_EXISTS {
+            if let Ok(hwnd) = FindWindowW(PCWSTR::null(), windows::core::w!("XyoLauncher")) {
+                let _ = ShowWindow(hwnd, SW_SHOW);
+                let _ = ShowWindow(hwnd, SW_RESTORE);
+                let _ = SetForegroundWindow(hwnd);
+            }
+            return false;
+        }
+        true
+    }
+}
+
+#[cfg(not(windows))]
+fn single_instance() -> bool {
+    true
+}
+
 fn main() {
+    if !single_instance() {
+        return;
+    }
     let (events_tx, events_rx) = async_channel::unbounded();
     let store = Arc::new(Store::load());
     let saved = store.settings();
@@ -67,8 +100,10 @@ fn main() {
                 KeyBinding::new("ctrl-6", GoHost, None),
                 KeyBinding::new("ctrl-7", GoServers, None),
             ]);
-            cx.on_window_closed(|cx| {
+            let exit_backend = backend.clone();
+            cx.on_window_closed(move |cx| {
                 if cx.windows().is_empty() {
+                    exit_backend.shutdown();
                     cx.quit();
                 }
             })

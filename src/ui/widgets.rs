@@ -42,7 +42,7 @@ pub fn set_tooltip_context(view: gpui::WeakEntity<crate::ui::app::LauncherApp>) 
     *TIP_CONTEXT.lock() = Some(view);
 }
 
-fn set_tooltip_position(position: gpui::Point<gpui::Pixels>, cx: &mut App) {
+pub fn set_tooltip_position(position: gpui::Point<gpui::Pixels>, cx: &mut App) {
     let view = TIP_CONTEXT.lock().clone();
     if let Some(view) = view {
         let _ = view.update(cx, |this, cx| {
@@ -54,7 +54,7 @@ fn set_tooltip_position(position: gpui::Point<gpui::Pixels>, cx: &mut App) {
     }
 }
 
-fn set_tooltip(text: Option<String>, cx: &mut App) {
+pub fn set_tooltip(text: Option<String>, cx: &mut App) {
     let view = TIP_CONTEXT.lock().clone();
     if let Some(view) = view {
         let _ = view.update(cx, |this, cx| {

@@ -1846,6 +1846,7 @@ impl LauncherApp {
          -> AnyElement {
             let entity = cx.entity().downgrade();
             let label = label.clone();
+            let tip_label = label.clone();
             div()
                 .id(id)
                 .flex()
@@ -1853,7 +1854,13 @@ impl LauncherApp {
                 .gap(px(12.0))
                 .h(px(36.0))
                 .px(px(if collapsed { 0.0 } else { 10.0 }))
-                .when(collapsed, |el| el.justify_center())
+                .when(collapsed, |el| {
+                    el.justify_center()
+                        .on_hover(move |hovered, _window, cx| {
+                            widgets::set_tooltip(if *hovered { Some(tip_label.clone()) } else { None }, cx);
+                        })
+                        .on_mouse_move(|event, _window, cx| widgets::set_tooltip_position(event.position, cx))
+                })
                 .rounded(px(8.0))
                 .cursor_pointer()
                 .text_size(px(12.0))
@@ -2019,7 +2026,13 @@ impl LauncherApp {
                     .gap(px(12.0))
                     .h(px(36.0))
                     .px(px(if collapsed { 0.0 } else { 10.0 }))
-                    .when(collapsed, |el| el.justify_center())
+                    .when(collapsed, |el| {
+                        el.justify_center()
+                            .on_hover(|hovered, _window, cx| {
+                                widgets::set_tooltip(if *hovered { Some("Tạo phiên bản mới".to_string()) } else { None }, cx);
+                            })
+                            .on_mouse_move(|event, _window, cx| widgets::set_tooltip_position(event.position, cx))
+                    })
                     .rounded(px(8.0))
                     .cursor_pointer()
                     .text_size(px(12.0))
@@ -2070,7 +2083,16 @@ impl LauncherApp {
                         .gap(px(9.0))
                         .h(px(38.0))
                         .px(px(if collapsed { 0.0 } else { 6.0 }))
-                        .when(collapsed, |el| el.justify_center())
+                        .when(collapsed, {
+                            let tip = name.clone();
+                            move |el| {
+                                el.justify_center()
+                                    .on_hover(move |hovered, _window, cx| {
+                                        widgets::set_tooltip(if *hovered { Some(tip.clone()) } else { None }, cx);
+                                    })
+                                    .on_mouse_move(|event, _window, cx| widgets::set_tooltip_position(event.position, cx))
+                            }
+                        })
                         .rounded(px(8.0))
                         .cursor_pointer()
                         .when(active, |el| el.bg(theme.surface_active))
@@ -2115,7 +2137,19 @@ impl LauncherApp {
                 .gap(px(9.0))
                 .h(px(38.0))
                 .px(px(if collapsed { 0.0 } else { 6.0 }))
-                .when(collapsed, |el| el.justify_center())
+                .when(collapsed, {
+                    let tip = account
+                        .as_ref()
+                        .map(|a| a.name.clone())
+                        .unwrap_or_else(|| "Tài khoản".to_string());
+                    move |el| {
+                        el.justify_center()
+                            .on_hover(move |hovered, _window, cx| {
+                                widgets::set_tooltip(if *hovered { Some(tip.clone()) } else { None }, cx);
+                            })
+                            .on_mouse_move(|event, _window, cx| widgets::set_tooltip_position(event.position, cx))
+                    }
+                })
                 .rounded(px(8.0))
                 .cursor_pointer()
                 .when(self.page == Page::Accounts, |el| el.bg(theme.surface_active))

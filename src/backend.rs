@@ -99,6 +99,15 @@ impl Backend {
         backend
     }
 
+    pub fn shutdown(&self) {
+        let _ = self.host_stop();
+        let pids: Vec<u32> = self.servers.lock().values().map(|proc| proc.pid).collect();
+        for pid in pids {
+            launch::kill_tree(pid);
+        }
+        self.servers.lock().clear();
+    }
+
     pub fn emit(&self, value: Value) {
         let _ = self.events.try_send(value);
     }
