@@ -246,6 +246,11 @@ pub struct ServerUi {
     pub difficulty: String,
     pub online: bool,
     pub pvp: bool,
+    pub schedules: Vec<Value>,
+    pub schedule_form: bool,
+    pub schedule_edit: Option<String>,
+    pub schedule_action: String,
+    pub schedule_power: String,
 }
 
 #[derive(Clone, Debug)]
@@ -286,6 +291,7 @@ pub enum ConfirmAction {
     PurgeTrash(String, Vec<String>),
     RemoveAccount(String),
     ServerDelete(String),
+    ScheduleDelete(String, String),
 }
 
 pub struct LauncherApp {
@@ -356,6 +362,9 @@ pub struct LauncherApp {
     pub server_cmd: Entity<TextField>,
     pub server_motd: Entity<TextField>,
     pub server_port: Entity<TextField>,
+    pub sched_name: Entity<TextField>,
+    pub sched_cron: Entity<TextField>,
+    pub sched_command: Entity<TextField>,
     pub host_token: Entity<TextField>,
     pub host_listen: Entity<TextField>,
     pub host_status: Value,
@@ -416,6 +425,9 @@ impl LauncherApp {
         let file_name_input = cx.new(|cx| TextField::new(cx, "Tên tệp hoặc thư mục…"));
         let server_motd = cx.new(|cx| TextField::new(cx, "XyoLauncher Server"));
         let server_port = cx.new(|cx| TextField::new(cx, "25565"));
+        let sched_name = cx.new(|cx| TextField::new(cx, "Tên lịch…"));
+        let sched_cron = cx.new(|cx| TextField::new(cx, "0 4 * * *"));
+        let sched_command = cx.new(|cx| TextField::new(cx, "say Server sẽ khởi động lại sau 5 phút"));
         let server_cmd = cx.new(|cx| TextField::new(cx, "Nhập lệnh server…").on_submit({
             let view = view.clone();
             move |text, _w, app| {
@@ -540,6 +552,9 @@ impl LauncherApp {
             server_cmd,
             server_motd,
             server_port,
+            sched_name,
+            sched_cron,
+            sched_command,
             host_token,
             host_listen,
             host_status: Value::Null,

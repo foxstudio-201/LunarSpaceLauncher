@@ -232,7 +232,7 @@ fn render_detail(app: &mut LauncherApp, cx: &mut Context<LauncherApp>, server: &
     let id_toggle = id.clone();
     let id_delete = id.clone();
 
-    let tabs = [("overview", "Tổng quan"), ("console", "Console"), ("config", "Cấu hình"), ("files", "Tệp tin"), ("backups", "Sao lưu")];
+    let tabs = [("overview", "Tổng quan"), ("console", "Console"), ("config", "Cấu hình"), ("schedules", "Lịch"), ("files", "Tệp tin"), ("backups", "Sao lưu")];
     let mut tab_row = div().flex().items_center().gap(px(4.0));
     for (key, label) in tabs {
         let active = app.server_ui.tab == key;
@@ -308,6 +308,350 @@ fn render_detail(app: &mut LauncherApp, cx: &mut Context<LauncherApp>, server: &
                             }
                         })),
                 );
+        }
+        "schedules" => {
+            let view_add = view.clone();
+            let view_save = view.clone();
+            let view_test = view.clone();
+            let view_cancel = view.clone();
+            let server_id = id.clone();
+            let mut rows = div().flex().flex_col().gap_2();
+            if app.server_ui.schedules.is_empty() {
+                rows = rows.child(pages::empty_state(
+                    &theme,
+                    "calendar-blank",
+                    "Chưa có lịch",
+                    "Lên lịch lệnh, sao lưu hoặc khởi động lại server theo giờ.",
+                ));
+            }
+            for schedule in app.server_ui.schedules.iter().cloned().collect::<Vec<_>>() {
+                let schedule_id = schedule.get("id").and_then(Value::as_str).unwrap_or("").to_string();
+                let name = schedule.get("name").and_then(Value::as_str).unwrap_or("Lịch").to_string();
+                let cron = schedule.get("cron").and_then(Value::as_str).unwrap_or("").to_string();
+                let action = schedule.get("action").and_then(Value::as_str).unwrap_or("command").to_string();
+                let power = schedule.get("power").and_then(Value::as_str).unwrap_or("restart").to_string();
+                let command = schedule.get("command").and_then(Value::as_str).unwrap_or("").to_string();
+                let enabled = schedule.get("enabled").and_then(Value::as_bool).unwrap_or(true);
+                let summary = match action.as_str() {
+                    "power" => format!("Nguồn: {power}"),
+                    "backup" => "Tạo bản sao lưu".to_string(),
+                    _ => format!("> {command}"),
+                };
+                let view_toggle = view.clone();
+                let view_run = view.clone();
+                let view_edit = view.clone();
+                let view_delete = view.clone();
+                let toggle_serv = server_id.clone();
+                let run_serv = server_id.clone();
+                let toggle_sched = schedule_id.clone();
+                let run_sched = schedule.clone();
+                let edit_sched = schedule.clone();
+                let delete_serv = server_id.clone();
+                let delete_sched = schedule_id.clone();
+                rows = rows.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_3()
+                        .p(px(12.0))
+                        .rounded(px(RADIUS_SM))
+                        .bg(theme.elevated)
+                        .border_1()
+                        .border_color(theme.border_soft)
+                        .child(widgets::icon("calendar-blank", 17.0, if enabled { theme.accent_soft } else { theme.faint }))
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .flex_1()
+                                .min_w(px(0.0))
+                                .child(div().text_size(px(TEXT_SM)).font_weight(semibold()).text_color(if enabled { theme.text } else { theme.faint }).truncate().child(name))
+                                .child(
+                                    div()
+                                        .text_size(px(10.0))
+                                        .font_family(MONO)
+                                        .text_color(theme.faint)
+                                        .truncate()
+                                        .child(format!("{cron} · {summary}")),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .id(gpui::SharedString::from(format!("sched-toggle-{schedule_id}")))
+                                .w(px(38.0))
+                                .h(px(21.0))
+                                .rounded_full()
+                                .bg(if enabled { theme.accent } else { theme.surface_active })
+                                .p(px(3.0))
+                                .flex()
+                                .items_center()
+                                .when(enabled, |el| el.justify_end())
+                                .cursor_pointer()
+                                .on_click(move |_, _, cx| {
+                                    let server_id = toggle_serv.clone();
+                                    let schedule_id = toggle_sched.clone();
+                                    let _ = view_toggle.update(cx, |this, cx| {
+                                        let mut schedules = this.server_ui.schedules.clone();
+                                        if let Some(row) = schedules.iter_mut().find(|row| row.get("id").and_then(Value::as_str) == Some(schedule_id.as_str())) {
+                                            let next = !row.get("enabled").and_then(Value::as_bool).unwrap_or(true);
+                                            row["enabled"] = json!(next);
+                                        }
+                                        this.backend.server_update(&server_id, json!({"schedules": schedules.clone()}));
+                                        this.server_ui.schedules = schedules;
+                                        cx.notify();
+                                    });
+                                })
+                                .child(div().size(px(15.0)).rounded_full().bg(gpui::white())),
+                        )
+                        .child(widgets::ghost_button("sched-run", "Chạy ngay", &theme, move |_, _, cx| {
+                            let server_id = run_serv.clone();
+                            let schedule = run_sched.clone();
+                            let _ = view_run.update(cx, |this, cx| {
+                                let rx = this.backend.server_schedule_run(server_id, schedule);
+                                this.on_result(cx, rx, |this, _value, cx| {
+                                    this.toast("ok", "Đã chạy lịch", "", cx);
+                                });
+                            });
+                        }))
+                        .child(widgets::ghost_button("sched-edit", "Sửa", &theme, move |_, _, cx| {
+                            let schedule = edit_sched.clone();
+                            let _ = view_edit.update(cx, |this, cx| {
+                                this.server_ui.schedule_form = true;
+                                this.server_ui.schedule_edit = schedule.get("id").and_then(Value::as_str).map(str::to_string);
+                                this.server_ui.schedule_action = schedule.get("action").and_then(Value::as_str).unwrap_or("command").into();
+                                this.server_ui.schedule_power = schedule.get("power").and_then(Value::as_str).unwrap_or("restart").into();
+                                let name = schedule.get("name").and_then(Value::as_str).unwrap_or("").to_string();
+                                let cron = schedule.get("cron").and_then(Value::as_str).unwrap_or("").to_string();
+                                let command = schedule.get("command").and_then(Value::as_str).unwrap_or("").to_string();
+                                let input = this.sched_name.clone();
+                                input.update(cx, |input, cx| input.set_text(name, cx));
+                                let input = this.sched_cron.clone();
+                                input.update(cx, |input, cx| input.set_text(cron, cx));
+                                let input = this.sched_command.clone();
+                                input.update(cx, |input, cx| input.set_text(command, cx));
+                                cx.notify();
+                            });
+                        }))
+                        .child(widgets::ghost_button("sched-delete", "Xoá", &theme, move |_, _, cx| {
+                            let server_id = delete_serv.clone();
+                            let schedule_id = delete_sched.clone();
+                            let _ = view_delete.update(cx, |this, cx| {
+                                this.modal = Modal::Confirm {
+                                    title: "Xoá lịch?".into(),
+                                    message: "Lịch này sẽ bị gỡ khỏi server.".into(),
+                                    action: ConfirmAction::ScheduleDelete(server_id.clone(), schedule_id.clone()),
+                                };
+                                cx.notify();
+                            });
+                        })),
+                );
+            }
+
+            let form = if app.server_ui.schedule_form {
+                let view_action = view.clone();
+                let view_power = view.clone();
+                let view_preset = view.clone();
+                let mut action_row = div().flex().items_center().gap_2();
+                for (key, label) in [("command", "Lệnh"), ("power", "Nguồn"), ("backup", "Sao lưu")] {
+                    let active = app.server_ui.schedule_action == key;
+                    let view = view_action.clone();
+                    let key = key.to_string();
+                    action_row = action_row.child(
+                        div()
+                            .id(gpui::SharedString::from(format!("sched-action-{key}")))
+                            .h(px(28.0))
+                            .px(px(10.0))
+                            .flex()
+                            .items_center()
+                            .rounded(px(6.0))
+                            .bg(if active { theme.accent_dim } else { theme.surface })
+                            .border_1()
+                            .border_color(if active { theme.accent } else { theme.border_soft })
+                            .text_size(px(TEXT_XS))
+                            .text_color(if active { theme.accent_soft } else { theme.muted })
+                            .cursor_pointer()
+                            .on_click(move |_, _, cx| {
+                                let key = key.clone();
+                                let _ = view.update(cx, |this, cx| {
+                                    this.server_ui.schedule_action = key;
+                                    cx.notify();
+                                });
+                            })
+                            .child(label),
+                    );
+                }
+                let mut power_row = div().flex().items_center().gap_2();
+                for (key, label) in [("start", "Khởi động"), ("stop", "Dừng"), ("restart", "Khởi động lại"), ("kill", "Tắt cưỡng bức")] {
+                    let active = app.server_ui.schedule_power == key;
+                    let view = view_power.clone();
+                    let key = key.to_string();
+                    power_row = power_row.child(
+                        div()
+                            .id(gpui::SharedString::from(format!("sched-power-{key}")))
+                            .h(px(26.0))
+                            .px(px(9.0))
+                            .flex()
+                            .items_center()
+                            .rounded(px(5.0))
+                            .bg(if active { theme.accent_dim } else { theme.surface })
+                            .border_1()
+                            .border_color(if active { theme.accent } else { theme.border_soft })
+                            .text_size(px(10.0))
+                            .text_color(if active { theme.accent_soft } else { theme.muted })
+                            .cursor_pointer()
+                            .on_click(move |_, _, cx| {
+                                let key = key.clone();
+                                let _ = view.update(cx, |this, cx| {
+                                    this.server_ui.schedule_power = key;
+                                    cx.notify();
+                                });
+                            })
+                            .child(label),
+                    );
+                }
+                let mut preset_row = div().flex().items_center().gap_2().flex_wrap();
+                for (expr, label) in [
+                    ("*/5 * * * *", "Mỗi 5 phút"),
+                    ("0 * * * *", "Mỗi giờ"),
+                    ("0 0 * * *", "Hàng ngày 00:00"),
+                    ("0 0 * * 0", "Hàng tuần CN"),
+                    ("0 0 1 * *", "Hàng tháng"),
+                    ("30 3 * * *", "Hàng ngày 03:30"),
+                ] {
+                    let view = view_preset.clone();
+                    let expr = expr.to_string();
+                    preset_row = preset_row.child(
+                        div()
+                            .id(gpui::SharedString::from(format!("sched-preset-{expr}")))
+                            .h(px(24.0))
+                            .px(px(8.0))
+                            .flex()
+                            .items_center()
+                            .rounded(px(5.0))
+                            .bg(theme.surface)
+                            .border_1()
+                            .border_color(theme.border_soft)
+                            .text_size(px(10.0))
+                            .text_color(theme.muted)
+                            .cursor_pointer()
+                            .on_click(move |_, _, cx| {
+                                let expr = expr.clone();
+                                let _ = view.update(cx, |this, cx| {
+                                    let input = this.sched_cron.clone();
+                                    input.update(cx, |input, cx| input.set_text(expr, cx));
+                                    cx.notify();
+                                });
+                            })
+                            .child(label),
+                    );
+                }
+                let action = app.server_ui.schedule_action.clone();
+                let mut form = div()
+                    .flex()
+                    .flex_col()
+                    .gap_3()
+                    .p(px(14.0))
+                    .rounded(px(RADIUS))
+                    .bg(theme.elevated)
+                    .border_1()
+                    .border_color(theme.accent)
+                    .child(section_title(&theme, if app.server_ui.schedule_edit.is_some() { "Sửa lịch" } else { "Lịch mới" }, "Cú pháp cron 5 trường: phút giờ ngày tháng thứ"))
+                    .child(
+                        div()
+                            .flex()
+                            .gap_3()
+                            .child(div().flex_1().child(pages::field(&theme, "Tên lịch", app.sched_name.clone(), "")))
+                            .child(div().w(px(170.0)).child(pages::field(&theme, "Cron", app.sched_cron.clone(), ""))),
+                    )
+                    .child(preset_row)
+                    .child(action_row);
+                if action == "command" {
+                    form = form.child(pages::field(&theme, "Lệnh gửi tới console", app.sched_command.clone(), ""));
+                } else if action == "power" {
+                    form = form.child(power_row);
+                }
+                form.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_end()
+                        .gap_2()
+                        .child(widgets::ghost_button("sched-form-cancel", "Huỷ", &theme, move |_, _, cx| {
+                            let _ = view_cancel.update(cx, |this, cx| {
+                                this.server_ui.schedule_form = false;
+                                this.server_ui.schedule_edit = None;
+                                cx.notify();
+                            });
+                        }))
+                        .child(widgets::button("sched-form-save", "Lưu lịch", &theme, true, move |_, _, cx| {
+                            let server_id = server_id.clone();
+                            let _ = view_save.update(cx, |this, cx| {
+                                let name = this.sched_name.read(cx).text().trim().to_string();
+                                let cron = this.sched_cron.read(cx).text().trim().to_string();
+                                let command = this.sched_command.read(cx).text().trim().to_string();
+                                if cron.split_whitespace().count() != 5 {
+                                    this.toast("warn", "Cron không hợp lệ", "Cần 5 trường: phút giờ ngày tháng thứ.", cx);
+                                    return;
+                                }
+                                let id = this
+                                    .server_ui
+                                    .schedule_edit
+                                    .clone()
+                                    .unwrap_or_else(|| format!("sch-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]));
+                                let schedule = json!({
+                                    "id": id,
+                                    "name": if name.is_empty() { "Lịch".to_string() } else { name },
+                                    "cron": cron,
+                                    "enabled": true,
+                                    "action": this.server_ui.schedule_action,
+                                    "command": command,
+                                    "power": this.server_ui.schedule_power,
+                                });
+                                let mut schedules = this.server_ui.schedules.clone();
+                                if let Some(row) = schedules.iter_mut().find(|row| row.get("id").and_then(Value::as_str) == Some(id.as_str())) {
+                                    let enabled = row.get("enabled").cloned().unwrap_or(json!(true));
+                                    let mut next = schedule.clone();
+                                    next["enabled"] = enabled;
+                                    *row = next;
+                                } else {
+                                    schedules.push(schedule);
+                                }
+                                let value = this.backend.server_update(&server_id, json!({"schedules": schedules.clone()}));
+                                if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+                                    this.server_ui.schedules = schedules;
+                                    this.server_ui.schedule_form = false;
+                                    this.server_ui.schedule_edit = None;
+                                    this.toast("ok", "Đã lưu lịch", "", cx);
+                                } else {
+                                    this.toast("bad", "Lưu lịch thất bại", value.get("error").and_then(Value::as_str).unwrap_or(""), cx);
+                                }
+                            });
+                        })),
+                )
+            } else {
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(div().text_size(px(TEXT_SM)).text_color(theme.muted).child(format!("{} lịch", app.server_ui.schedules.len())))
+                    .child(widgets::button("sched-add", "Thêm lịch", &theme, true, move |_, _, cx| {
+                        let _ = view_add.update(cx, |this, cx| {
+                            this.server_ui.schedule_form = true;
+                            this.server_ui.schedule_edit = None;
+                            this.server_ui.schedule_action = "command".into();
+                            this.server_ui.schedule_power = "restart".into();
+                            let input = this.sched_name.clone();
+                            input.update(cx, |input, cx| input.clear(cx));
+                            let input = this.sched_cron.clone();
+                            input.update(cx, |input, cx| input.set_text("0 4 * * *", cx));
+                            let input = this.sched_command.clone();
+                            input.update(cx, |input, cx| input.clear(cx));
+                            cx.notify();
+                        });
+                    }))
+            };
+
+            body = body.child(div().flex().flex_col().gap_3().child(form).child(rows));
         }
         "files" => {
             let view = view.clone();
@@ -751,6 +1095,10 @@ impl LauncherApp {
         self.server_ui.backups = value.get("backups").and_then(Value::as_array).cloned().unwrap_or_default();
         let value = self.backend.server_file_list(&id, "");
         self.server_ui.files = value.get("entries").and_then(Value::as_array).cloned().unwrap_or_default();
+        self.server_ui.schedule_form = false;
+        self.server_ui.schedule_edit = None;
+        self.server_ui.schedule_action = "command".into();
+        self.server_ui.schedule_power = "restart".into();
         if let Some(server) = self
             .server_ui
             .servers
@@ -758,6 +1106,11 @@ impl LauncherApp {
             .find(|row| row.get("id").and_then(Value::as_str) == Some(id.as_str()))
             .cloned()
         {
+            self.server_ui.schedules = server
+                .get("schedules")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
             let vars = server.get("vars").cloned().unwrap_or(Value::Null);
             self.server_ui.game_mode = vars.get("gamemode").and_then(Value::as_str).unwrap_or("survival").to_string();
             self.server_ui.difficulty = vars.get("difficulty").and_then(Value::as_str).unwrap_or("normal").to_string();

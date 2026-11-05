@@ -1132,6 +1132,31 @@ impl LauncherApp {
                 self.load_instance_tab(cx);
                 self.toast("ok", "Đã dọn thùng rác", "", cx);
             }
+            ConfirmAction::ScheduleDelete(server_id, schedule_id) => {
+                let value = self.backend.servers();
+                if let Some(entry) = value
+                    .get("servers")
+                    .and_then(serde_json::Value::as_array)
+                    .and_then(|rows| {
+                        rows.iter().find(|row| {
+                            row.get("id").and_then(serde_json::Value::as_str) == Some(server_id.as_str())
+                        })
+                    })
+                    .cloned()
+                {
+                    let mut schedules = entry
+                        .get("schedules")
+                        .and_then(serde_json::Value::as_array)
+                        .cloned()
+                        .unwrap_or_default();
+                    schedules.retain(|row| {
+                        row.get("id").and_then(serde_json::Value::as_str) != Some(schedule_id.as_str())
+                    });
+                    self.backend.server_update(&server_id, json!({"schedules": schedules.clone()}));
+                    self.server_ui.schedules = schedules;
+                    self.toast("ok", "Đã xoá lịch", "", cx);
+                }
+            }
             ConfirmAction::ServerDelete(id) => {
                 let value = self.backend.server_remove(&id, true);
                 if value.get("ok").and_then(serde_json::Value::as_bool).unwrap_or(false) {

@@ -49,6 +49,7 @@ pub struct Backend {
     server_logs: Mutex<HashMap<String, Vec<String>>>,
     host: Mutex<HostState>,
     presence: Mutex<Option<crate::discord::Discord>>,
+    schedule_marks: Mutex<HashMap<String, String>>,
 }
 
 fn ok(mut value: Value) -> Value {
@@ -80,7 +81,7 @@ impl Backend {
             .build()
             .expect("tokio runtime");
         let rpc = store.settings().discord_rpc;
-        Arc::new(Self {
+        let backend = Arc::new(Self {
             store,
             runtime,
             events,
@@ -92,7 +93,10 @@ impl Backend {
             server_logs: Mutex::new(HashMap::new()),
             host: Mutex::new(HostState::default()),
             presence: Mutex::new(if rpc { Some(crate::discord::Discord::start()) } else { None }),
-        })
+            schedule_marks: Mutex::new(HashMap::new()),
+        });
+        backend.start_scheduler();
+        backend
     }
 
     pub fn emit(&self, value: Value) {
@@ -2697,6 +2701,115 @@ impl Backend {
             }
         }
         ok(json!({"servers": list}))
+    }
+
+    fn start_scheduler(self: &Arc<Self>) {
+        let this = self.clone();
+        self.runtime.spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(8)).await;
+            loop {
+                this.tick_schedules().await;
+                tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+            }
+        });
+    }
+
+    async fn tick_schedules(self: &Arc<Self>) {
+        let now = chrono::Local::now();
+        let minute = now.format("%Y%m%d%H%M").to_string();
+        let list = crate::server::load_index(self);
+        let mut due = Vec::new();
+        for entry in &list {
+            let schedules = entry
+                .extra
+                .get("schedules")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            for schedule in schedules {
+                if !schedule.get("enabled").and_then(Value::as_bool).unwrap_or(true) {
+                    continue;
+                }
+                let cron = schedule.get("cron").and_then(Value::as_str).unwrap_or("");
+                if cron.trim().is_empty() || !crate::server::cron_matches(cron, &now) {
+                    continue;
+                }
+                let id = schedule.get("id").and_then(Value::as_str).unwrap_or("");
+                if id.is_empty() {
+                    continue;
+                }
+                let mark = format!("{id}@{minute}");
+                let mut marks = self.schedule_marks.lock();
+                if marks.contains_key(&mark) {
+                    continue;
+                }
+                if marks.len() > 800 {
+                    marks.clear();
+                }
+                marks.insert(mark, minute.clone());
+                drop(marks);
+                due.push((entry.id.clone(), schedule));
+            }
+        }
+        for (id, schedule) in due {
+            let name = schedule
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("Lịch")
+                .to_string();
+            self.emit(json!({"type": "schedule", "serverId": id, "name": name, "action": schedule.get("action").cloned().unwrap_or(Value::Null)}));
+            self.run_schedule(&id, &schedule);
+        }
+    }
+
+    pub fn run_schedule(self: &Arc<Self>, id: &str, schedule: &Value) {
+        let action = schedule.get("action").and_then(Value::as_str).unwrap_or("command");
+        match action {
+            "command" => {
+                let command = schedule.get("command").and_then(Value::as_str).unwrap_or("").to_string();
+                if !command.trim().is_empty() {
+                    self.server_command(id.to_string(), command);
+                }
+            }
+            "power" => {
+                let power = schedule.get("power").and_then(Value::as_str).unwrap_or("restart");
+                match power {
+                    "start" => {
+                        let _ = self.server_start(id.to_string());
+                    }
+                    "stop" => {
+                        self.server_stop(id.to_string(), false);
+                    }
+                    "kill" => {
+                        self.server_stop(id.to_string(), true);
+                    }
+                    _ => {
+                        self.server_stop(id.to_string(), false);
+                        let id = id.to_string();
+                        let this = self.clone();
+                        self.runtime.spawn(async move {
+                            tokio::time::sleep(std::time::Duration::from_secs(4)).await;
+                            let _ = this.server_start(id);
+                        });
+                    }
+                }
+            }
+            "backup" => {
+                let name = schedule
+                    .get("backupName")
+                    .and_then(Value::as_str)
+                    .filter(|name| !name.trim().is_empty())
+                    .map(str::to_string)
+                    .unwrap_or_else(|| format!("Lịch {}", chrono::Local::now().format("%d/%m %H:%M")));
+                let _ = self.server_backup_create(id.to_string(), name);
+            }
+            _ => {}
+        }
+    }
+
+    pub fn server_schedule_run(self: &Arc<Self>, id: String, schedule: Value) -> Receiver<Value> {
+        self.run_schedule(&id, &schedule);
+        self.request(async move { ok(json!({"ran": true})) })
     }
 
     pub fn server_create(self: &Arc<Self>, opts: Value) -> Receiver<Value> {

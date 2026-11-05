@@ -84,6 +84,52 @@ pub fn update(backend: &Backend, id: &str, patch: Value) -> Option<ServerEntry> 
     Some(next)
 }
 
+fn cron_field(field: &str, value: i64, min: i64, max: i64) -> bool {
+    for part in field.split(',') {
+        let part = part.trim();
+        if part == "*" {
+            return true;
+        }
+        if let Some(step) = part.strip_prefix("*/") {
+            if let Ok(step) = step.parse::<i64>() {
+                if step > 0 && (value - min) % step == 0 {
+                    return true;
+                }
+            }
+            continue;
+        }
+        if let Some((from, to)) = part.split_once('-') {
+            if let (Ok(from), Ok(to)) = (from.trim().parse::<i64>(), to.trim().parse::<i64>()) {
+                if value >= from && value <= to {
+                    return true;
+                }
+            }
+            continue;
+        }
+        if let Ok(number) = part.parse::<i64>() {
+            let number = if max == 7 && number == 7 { 0 } else { number };
+            if value == number {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+pub fn cron_matches(expression: &str, now: &chrono::DateTime<chrono::Local>) -> bool {
+    use chrono::{Datelike, Timelike};
+    let fields: Vec<&str> = expression.split_whitespace().collect();
+    if fields.len() != 5 {
+        return false;
+    }
+    let weekday = now.weekday().num_days_from_sunday() as i64;
+    cron_field(fields[0], now.minute() as i64, 0, 59)
+        && cron_field(fields[1], now.hour() as i64, 0, 23)
+        && cron_field(fields[2], now.day() as i64, 1, 31)
+        && cron_field(fields[3], now.month() as i64, 1, 12)
+        && cron_field(fields[4], weekday, 0, 7)
+}
+
 pub fn new_id() -> String {
     format!(
         "srv-{}",
@@ -539,4 +585,22 @@ pub fn restore_backup(backend: &Backend, entry: &ServerEntry, backup_id: &str) -
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod cron_tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    #[test]
+    fn cron_expressions_match_expected_minutes() {
+        let at = chrono::Local.with_ymd_and_hms(2026, 11, 6, 4, 30, 0).unwrap();
+        assert!(cron_matches("30 4 * * *", &at));
+        assert!(cron_matches("*/5 * * * *", &at));
+        assert!(!cron_matches("31 4 * * *", &at));
+        assert!(cron_matches("0,30 4 * * *", &at));
+        assert!(cron_matches("25-35 4 * * *", &at));
+        assert!(!cron_matches("0 0 1 * *", &at));
+        assert!(!cron_matches("bad", &at));
+    }
 }
