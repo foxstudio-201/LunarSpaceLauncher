@@ -2698,8 +2698,12 @@ impl Backend {
             };
             let store = this.store.clone();
             let dir = PathBuf::from(&entry.dir);
+            let hints = vec![
+                entry.version_id.clone().unwrap_or_default(),
+                entry.version.clone(),
+            ];
             let result = tokio::task::spawn_blocking(move || {
-                crate::mc::world::render_map(&store, &dir, &folder)
+                crate::mc::world::render_map(&store, &dir, &folder, &hints)
             })
             .await;
             match result {

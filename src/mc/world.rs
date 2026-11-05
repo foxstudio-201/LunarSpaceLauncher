@@ -371,7 +371,7 @@ fn node_kind<'a>(list: &'a Value, name: &str) -> Option<&'a str> {
         .and_then(Value::as_str)
 }
 
-fn heightmap_from_nbt(root: &Value) -> Option<Vec<u16>> {
+pub(crate) fn heightmap_from_nbt(root: &Value) -> Option<Vec<u16>> {
     let root_list = root.get("value")?;
     let data = node_value(root_list, "Level").unwrap_or(root_list);
     let heightmaps = node_value(data, "Heightmaps");
@@ -434,86 +434,7 @@ fn heightmap_from_nbt(root: &Value) -> Option<Vec<u16>> {
     None
 }
 
-fn parse_region(path: &Path) -> Vec<(i32, i32, Vec<u16>)> {
-    let Ok(bytes) = std::fs::read(path) else {
-        return Vec::new();
-    };
-    if bytes.len() < 8192 {
-        return Vec::new();
-    }
-    let name = path.file_stem().map(|v| v.to_string_lossy().into_owned()).unwrap_or_default();
-    let mut parts = name.split('.');
-    let _ = parts.next();
-    let rx: i32 = parts.next().and_then(|v| v.parse().ok()).unwrap_or(0);
-    let rz: i32 = parts.next().and_then(|v| v.parse().ok()).unwrap_or(0);
-    let mut out = Vec::new();
-    for chunk_index in 0..1024usize {
-        let at = chunk_index * 4;
-        let offset_sectors = ((bytes[at] as usize) << 16) | ((bytes[at + 1] as usize) << 8) | bytes[at + 2] as usize;
-        let sectors = bytes[at + 3] as usize;
-        if offset_sectors == 0 || sectors == 0 {
-            continue;
-        }
-        let start = offset_sectors.saturating_mul(4096);
-        if start + 5 > bytes.len() {
-            continue;
-        }
-        let length = u32::from_be_bytes([bytes[start], bytes[start + 1], bytes[start + 2], bytes[start + 3]]) as usize;
-        if length < 2 || start + 4 + length > bytes.len() {
-            continue;
-        }
-        let compression = bytes[start + 4];
-        let payload = &bytes[start + 5..start + 4 + length];
-        let raw = match compression {
-            1 => {
-                let mut decoder = flate2::read::GzDecoder::new(payload);
-                let mut out = Vec::new();
-                if std::io::Read::read_to_end(&mut decoder, &mut out).is_err() {
-                    continue;
-                }
-                out
-            }
-            2 => {
-                let mut decoder = flate2::read::ZlibDecoder::new(payload);
-                let mut out = Vec::new();
-                if std::io::Read::read_to_end(&mut decoder, &mut out).is_err() {
-                    continue;
-                }
-                out
-            }
-            3 => payload.to_vec(),
-            _ => continue,
-        };
-        let Ok(root) = parse_bytes(&raw) else {
-            continue;
-        };
-        let Some(heights) = heightmap_from_nbt(&root) else {
-            continue;
-        };
-        let cx = (chunk_index % 32) as i32;
-        let cz = (chunk_index / 32) as i32;
-        out.push((rx * 32 + cx, rz * 32 + cz, heights));
-    }
-    out
-}
-
-fn terrain_color(height: u16) -> [u8; 3] {
-    match height {
-        0..=61 => [30, 55, 92],
-        62..=63 => [40, 82, 132],
-        64 => [194, 178, 128],
-        65..=95 => {
-            let t = (height.saturating_sub(65) as f32 / 30.0).clamp(0.0, 1.0);
-            [(86.0 - 26.0 * t) as u8, (124.0 + 8.0 * t) as u8, (72.0 - 22.0 * t) as u8]
-        }
-        96..=120 => [78, 96, 62],
-        121..=160 => [120, 118, 108],
-        161..=200 => [154, 152, 146],
-        _ => [232, 236, 240],
-    }
-}
-
-pub fn render_map(store: &crate::store::Store, instance_dir: &Path, world: &str) -> Result<Value> {
+pub fn render_map(store: &crate::store::Store, instance_dir: &Path, world: &str, version_hints: &[String]) -> Result<Value> {
     let world_dir = world_dir(instance_dir, world)?;
     let regions = world_dir.join("region");
     let mut entries: Vec<PathBuf> = std::fs::read_dir(&regions)
@@ -543,7 +464,7 @@ pub fn render_map(store: &crate::store::Store, instance_dir: &Path, world: &str)
     let cache_dir = store.data_dir.join("map-cache");
     std::fs::create_dir_all(&cache_dir)?;
     let key = format!(
-        "v4-{}-{}-{}",
+        "v10-{}-{}-{}",
         crate::util::safe_name(world),
         crate::util::safe_name(&instance_dir.to_string_lossy()),
         stamp
@@ -563,68 +484,13 @@ pub fn render_map(store: &crate::store::Store, instance_dir: &Path, world: &str)
         }
     }
 
-    let mut chunks = Vec::new();
-    let mut budget = 4096usize;
-    for path in &entries {
-        let mut region = parse_region(path);
-        if chunks.len() + region.len() > budget {
-            region.truncate(budget.saturating_sub(chunks.len()));
-        }
-        chunks.extend(region);
-        if chunks.len() >= budget {
-            break;
-        }
-    }
-    if chunks.is_empty() {
-        return Err(anyhow!("Không đọc được dữ liệu địa hình. World có thể dùng định dạng mới hơn."));
-    }
-    let min_cx = chunks.iter().map(|(x, _, _)| *x).min().unwrap_or(0);
-    let max_cx = chunks.iter().map(|(x, _, _)| *x).max().unwrap_or(0);
-    let min_cz = chunks.iter().map(|(_, z, _)| *z).min().unwrap_or(0);
-    let max_cz = chunks.iter().map(|(_, z, _)| *z).max().unwrap_or(0);
-    let chunks_x = (max_cx - min_cx + 1) as u32;
-    let chunks_z = (max_cz - min_cz + 1) as u32;
-    let width = chunks_x * 16;
-    let height = chunks_z * 16;
-    if width == 0 || height == 0 || width > 4096 || height > 4096 {
-        return Err(anyhow!("Kích thước bản đồ quá lớn."));
-    }
-    let mut map = std::collections::HashMap::new();
-    for (cx, cz, heights) in chunks {
-        map.insert((cx, cz), heights);
-    }
-    let mut image = image::RgbaImage::from_pixel(width, height, image::Rgba([12, 14, 18, 255]));
-    for cz in 0..chunks_z {
-        for cx in 0..chunks_x {
-            let Some(heights) = map.get(&(min_cx + cx as i32, min_cz + cz as i32)) else {
-                continue;
-            };
-            for z in 0..16u32 {
-                for x in 0..16u32 {
-                    let index = (z * 16 + x) as usize;
-                    let h = heights.get(index).copied().unwrap_or(0);
-                    let mut rgb = terrain_color(h);
-                    let left = heights.get((z * 16 + x.saturating_sub(1)) as usize).copied().unwrap_or(h);
-                    let up = heights
-                        .get((z.saturating_sub(1) * 16 + x) as usize)
-                        .copied()
-                        .unwrap_or(h);
-                    let shade = ((h as i32 - left as i32) + (h as i32 - up as i32)).clamp(-8, 8);
-                    let factor = 1.0 + shade as f32 * 0.025;
-                    for channel in &mut rgb {
-                        *channel = ((*channel as f32) * factor).clamp(0.0, 255.0) as u8;
-                    }
-                    image.put_pixel(cx * 16 + x, cz * 16 + z, image::Rgba([rgb[0], rgb[1], rgb[2], 255]));
-                }
-            }
-        }
-    }
-    image.save(&target)?;
+    let (width, height, chunk_count, min_cx, min_cz, max_cx, max_cz) =
+        crate::mc::map_render::build(&world_dir, &store.shared_dir(), version_hints, &target)?;
     let meta = serde_json::json!({
         "path": target.to_string_lossy(),
         "width": width,
         "height": height,
-        "chunks": map.len(),
+        "chunks": chunk_count,
         "minChunkX": min_cx,
         "minChunkZ": min_cz,
         "maxChunkX": max_cx,
@@ -1004,7 +870,7 @@ mod nbt_tests {
         };
         let world = std::env::var("XYO_MAP_WORLD").unwrap_or_else(|_| "New World".into());
         let store = crate::store::Store::load();
-        let meta = render_map(&store, Path::new(&instance_dir), &world).expect("render map");
+        let meta = render_map(&store, Path::new(&instance_dir), &world, &[]).expect("render map");
         println!("{}", serde_json::to_string_pretty(&meta).unwrap());
     }
 

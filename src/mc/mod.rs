@@ -4,6 +4,7 @@ pub mod export;
 pub mod install;
 pub mod java;
 pub mod launch;
+pub mod map_render;
 pub mod meta;
 pub mod paths;
 pub mod modpack;

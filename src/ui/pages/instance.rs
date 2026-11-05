@@ -2194,7 +2194,7 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                             .when(map_busy, |el| {
                                 el.min_h(px(420.0))
                                     .child(widgets::spinner(26.0, theme.accent_soft))
-                                    .child(div().text_size(px(TEXT_SM)).text_color(theme.muted).child("Đang đọc region và render bản đồ…"))
+                                    .child(div().text_size(px(TEXT_SM)).text_color(theme.muted).child("Đang đọc block, biome và render bản đồ…"))
                             })
                             .when(!map_busy && map_image.is_some(), |el| {
                                 el.child(
@@ -2229,9 +2229,9 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                                             .text_size(px(TEXT_SM))
                                             .text_color(theme.muted)
                                             .child(if selected_world.is_some() {
-                                                "Bấm Tạo bản đồ để render địa hình từ tệp region của world."
+                                                "Bấm Tạo bản đồ để render địa hình, màu biome và độ sâu nước từ tệp region."
                                             } else {
-                                                "Chọn thế giới để xem bản đồ."
+                                                "Chọn thế giới để xem bản đồ biome và độ sâu nước."
                                             }),
                                     )
                             }),
