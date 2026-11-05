@@ -172,6 +172,7 @@ pub struct InstanceUi {
     pub console_font: f32,
     pub console_hidden: usize,
     pub console_search_open: bool,
+    pub modpack_busy: bool,
 }
 
 impl Default for InstanceUi {
@@ -197,6 +198,7 @@ impl Default for InstanceUi {
             console_font: 11.5,
             console_hidden: 0,
             console_search_open: false,
+            modpack_busy: false,
         }
     }
 }
@@ -235,6 +237,12 @@ pub enum Modal {
         text: String,
         url: String,
         busy: bool,
+    },
+    ModpackUpdate {
+        id: String,
+        versions: Vec<Value>,
+        selected: Option<String>,
+        current: Option<String>,
     },
 }
 
@@ -1857,6 +1865,7 @@ impl LauncherApp {
             Modal::ContentBrowser => Some(pages::modpack::browser_modal(self, window, cx).into_any_element()),
             Modal::Confirm { .. } => Some(pages::confirm_modal(self, window, cx).into_any_element()),
             Modal::LogUpload { .. } => None,
+            Modal::ModpackUpdate { .. } => Some(pages::modpack_update_modal(self, window, cx).into_any_element()),
         }
     }
 }

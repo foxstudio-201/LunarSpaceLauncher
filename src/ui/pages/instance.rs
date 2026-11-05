@@ -749,6 +749,11 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                         }),
                 );
             if let Some(modpack) = instance.modpack.as_ref() {
+                let view_update = view.clone();
+                let view_repair = view.clone();
+                let update_id = instance.id.clone();
+                let repair_id = instance.id.clone();
+                let busy = app.instance_ui.modpack_busy;
                 card = card.child(pages::section_title(&theme, "Modpack", ""));
                 card = card.child(
                     div()
@@ -765,11 +770,13 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                             div()
                                 .flex()
                                 .flex_col()
+                                .min_w(px(0.0))
                                 .child(
                                     div()
                                         .text_size(px(TEXT_SM))
                                         .font_weight(semibold())
                                         .text_color(theme.text)
+                                        .truncate()
                                         .child(
                                             modpack
                                                 .get("name")
@@ -791,7 +798,91 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                                             modpack.get("mods").and_then(Value::as_u64).unwrap_or(0)
                                         )),
                                 ),
-                        ),
+                        )
+                        .child(div().flex_1())
+                        .when(busy, |el| {
+                            el.child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .child(widgets::spinner(13.0, theme.accent_soft))
+                                    .child(div().text_size(px(TEXT_XS)).text_color(theme.muted).child("Đang xử lý…")),
+                            )
+                        })
+                        .child(widgets::ghost_button("modpack-repair", "Sửa tệp", &theme, move |_, _, cx| {
+                            let repair_id = repair_id.clone();
+                            let _ = view_repair.update(cx, |this, cx| {
+                                if this.instance_ui.modpack_busy {
+                                    return;
+                                }
+                                this.instance_ui.modpack_busy = true;
+                                let rx = this.backend.modpack_repair(repair_id.clone());
+                                this.on_result(cx, rx, |this, value, cx| {
+                                    this.instance_ui.modpack_busy = false;
+                                    if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+                                        let missing = value.get("missing").and_then(Value::as_u64).unwrap_or(0);
+                                        let repaired = value.get("repaired").and_then(Value::as_u64).unwrap_or(0);
+                                        this.toast(
+                                            if missing == 0 { "ok" } else { "info" },
+                                            if missing == 0 { "Modpack đầy đủ" } else { "Đã sửa modpack" },
+                                            format!("Thiếu {missing} tệp · đã tải bù {repaired}"),
+                                            cx,
+                                        );
+                                        this.load_instance_tab(cx);
+                                    } else {
+                                        this.toast("bad", "Sửa modpack thất bại", value.get("error").and_then(Value::as_str).unwrap_or(""), cx);
+                                    }
+                                });
+                            });
+                        }))
+                        .child(widgets::ghost_button("modpack-update", "Cập nhật", &theme, move |_, _, cx| {
+                            let update_id = update_id.clone();
+                            let _ = view_update.update(cx, |this, cx| {
+                                if this.instance_ui.modpack_busy {
+                                    return;
+                                }
+                                let rx = this.backend.modpack_versions(update_id.clone());
+                                let game = this
+                                    .instances
+                                    .iter()
+                                    .find(|row| row.id == update_id)
+                                    .map(|row| row.version.clone())
+                                    .unwrap_or_default();
+                                this.on_result(cx, rx, move |this, value, cx| {
+                                    if !value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+                                        this.toast("warn", "Không cập nhật được", value.get("error").and_then(Value::as_str).unwrap_or(""), cx);
+                                        return;
+                                    }
+                                    let versions = value.get("versions").and_then(Value::as_array).cloned().unwrap_or_default();
+                                    let current = value.get("current").and_then(Value::as_str).map(str::to_string);
+                                    let selected = versions
+                                        .iter()
+                                        .find(|row| {
+                                            row.get("id").and_then(Value::as_str) != current.as_deref()
+                                                && row
+                                                    .get("gameVersions")
+                                                    .and_then(Value::as_array)
+                                                    .map(|list| list.iter().any(|v| v.as_str() == Some(game.as_str())))
+                                                    .unwrap_or(false)
+                                        })
+                                        .or_else(|| {
+                                            versions
+                                                .iter()
+                                                .find(|row| row.get("id").and_then(Value::as_str) != current.as_deref())
+                                        })
+                                        .and_then(|row| row.get("id").and_then(Value::as_str))
+                                        .map(str::to_string);
+                                    this.modal = Modal::ModpackUpdate {
+                                        id: update_id.clone(),
+                                        versions,
+                                        selected,
+                                        current,
+                                    };
+                                    cx.notify();
+                                });
+                            });
+                        })),
                 );
             }
             if instance.status == "error" {
@@ -1607,6 +1698,35 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                             .flex()
                             .items_center()
                             .gap_2()
+                            .when(instance.modpack.is_some(), |el| {
+                                let view_repair = view.clone();
+                                el.child(widgets::ghost_button("mods-repair", if app.instance_ui.modpack_busy { "Đang sửa…" } else { "Sửa modpack" }, &theme, move |_, _, cx| {
+                                    let _ = view_repair.update(cx, |this, cx| {
+                                        if this.instance_ui.modpack_busy {
+                                            return;
+                                        }
+                                        let Some(id) = this.selected_instance.clone() else { return };
+                                        this.instance_ui.modpack_busy = true;
+                                        let rx = this.backend.modpack_repair(id);
+                                        this.on_result(cx, rx, |this, value, cx| {
+                                            this.instance_ui.modpack_busy = false;
+                                            if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+                                                let missing = value.get("missing").and_then(Value::as_u64).unwrap_or(0);
+                                                let repaired = value.get("repaired").and_then(Value::as_u64).unwrap_or(0);
+                                                this.toast(
+                                                    if missing == 0 { "ok" } else { "info" },
+                                                    if missing == 0 { "Modpack đầy đủ" } else { "Đã sửa modpack" },
+                                                    format!("Thiếu {missing} tệp · đã tải bù {repaired}"),
+                                                    cx,
+                                                );
+                                                this.load_instance_tab(cx);
+                                            } else {
+                                                this.toast("bad", "Sửa modpack thất bại", value.get("error").and_then(Value::as_str).unwrap_or(""), cx);
+                                            }
+                                        });
+                                    });
+                                }))
+                            })
                             .child(widgets::ghost_button("mods-import", "Nhập tệp", &theme, {
                                 let view = view.clone();
                                 move |_, _, cx| {
@@ -1950,7 +2070,6 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
         }
         InstanceTab::Map => {
             let worlds = app.instance_ui.worlds.clone();
-            let view_map = view.clone();
             let mut chips = div().flex().items_center().gap_2().flex_wrap();
             for world in &worlds {
                 let folder = world.get("folder").and_then(Value::as_str).unwrap_or("").to_string();
@@ -1994,32 +2113,30 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
             let map_meta = app.instance_ui.map_meta.clone();
             let view_gen = view.clone();
             let generate_folder = selected_world.clone();
-            body = body.child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_3()
+            if worlds.is_empty() {
+                body = body.child(pages::empty_state(
+                    &theme,
+                    "map-trifold",
+                    "Chưa có thế giới",
+                    "Tạo thế giới trong game rồi quay lại đây để xem bản đồ.",
+                ));
+            } else {
+                body = body
                     .child(
                         div()
                             .flex()
                             .items_center()
                             .justify_between()
                             .gap_2()
-                            .child(if worlds.is_empty() {
-                                pages::empty_state(&theme, "map-trifold", "Chưa có thế giới", "Tạo thế giới trong game rồi quay lại đây.").into_any_element()
-                            } else {
-                                chips.into_any_element()
-                            })
-                            .when(selected_world.is_some(), |el| {
-                                el.child(widgets::button("map-generate", "Tạo bản đồ", &theme, true, move |_, _, cx| {
-                                    let folder = generate_folder.clone();
-                                    let _ = view_gen.update(cx, |this, cx| {
-                                        if let Some(folder) = folder {
-                                            this.generate_map(folder, cx);
-                                        }
-                                    });
-                                }))
-                            }),
+                            .child(chips)
+                            .child(widgets::button("map-generate", "Tạo bản đồ", &theme, true, move |_, _, cx| {
+                                let folder = generate_folder.clone();
+                                let _ = view_gen.update(cx, |this, cx| {
+                                    if let Some(folder) = folder {
+                                        this.generate_map(folder, cx);
+                                    }
+                                });
+                            })),
                     )
                     .child(
                         div()
@@ -2028,7 +2145,6 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                             .items_center()
                             .justify_center()
                             .gap_3()
-                            .min_h(px(420.0))
                             .w_full()
                             .rounded(px(RADIUS_LG))
                             .bg(theme.surface)
@@ -2036,7 +2152,8 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                             .border_color(theme.border_soft)
                             .p(px(10.0))
                             .when(map_busy, |el| {
-                                el.child(widgets::spinner(26.0, theme.accent_soft))
+                                el.min_h(px(420.0))
+                                    .child(widgets::spinner(26.0, theme.accent_soft))
                                     .child(div().text_size(px(TEXT_SM)).text_color(theme.muted).child("Đang đọc region và render bản đồ…"))
                             })
                             .when(!map_busy && map_image.is_some(), |el| {
@@ -2064,7 +2181,8 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                                 )
                             })
                             .when(!map_busy && map_image.is_none(), |el| {
-                                el.child(widgets::icon("map-trifold", 40.0, theme.faint))
+                                el.min_h(px(360.0))
+                                    .child(widgets::icon("map-trifold", 40.0, theme.faint))
                                     .child(div().text_size(px(TEXT_LG)).font_weight(semibold()).text_color(theme.text).child("Bản đồ thế giới"))
                                     .child(
                                         div()
@@ -2077,9 +2195,8 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                                             }),
                                     )
                             }),
-                    ),
-            );
-            let _ = view_map;
+                    );
+            }
         }
         InstanceTab::Settings => {
             let view_save = view.clone();

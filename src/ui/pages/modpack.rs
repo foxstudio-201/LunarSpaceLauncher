@@ -127,6 +127,11 @@ fn install_pack(app: &mut LauncherApp, cx: &mut Context<LauncherApp>) {
         .and_then(Value::as_str)
         .unwrap_or("Modpack")
         .to_string();
+    let slug = hit
+        .get("slug")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
     let token = format!(
         "pack-{}",
         chrono::Utc::now().timestamp_millis()
@@ -145,6 +150,7 @@ fn install_pack(app: &mut LauncherApp, cx: &mut Context<LauncherApp>) {
         "packId": pack_id,
         "fileId": version,
         "name": name,
+        "slug": slug,
         "memoryMb": memory,
         "token": token,
     }));

@@ -247,6 +247,192 @@ pub fn modal_overlay(
         )
 }
 
+pub fn modpack_update_modal(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<LauncherApp>) -> impl IntoElement {
+    let theme = app.theme.clone();
+    let (id, versions, selected, current) = match &app.modal {
+        Modal::ModpackUpdate { id, versions, selected, current } => (
+            id.clone(),
+            versions.clone(),
+            selected.clone(),
+            current.clone(),
+        ),
+        _ => (String::new(), Vec::new(), None, None),
+    };
+    let view_close = cx.entity().downgrade();
+    let view_pick = cx.entity().downgrade();
+    let view_install = cx.entity().downgrade();
+
+    let mut rows = div().id("update-versions").flex().flex_col().gap(px(3.0)).max_h(px(360.0)).overflow_y_scroll();
+    if versions.is_empty() {
+        rows = rows.child(
+            div().p(px(12.0)).text_size(px(TEXT_SM)).text_color(theme.faint).child("Không có phiên bản nào."),
+        );
+    }
+    for version in versions.iter().take(80).cloned().collect::<Vec<_>>() {
+        let version_id = version.get("id").and_then(serde_json::Value::as_str).unwrap_or("").to_string();
+        let number = version
+            .get("versionNumber")
+            .and_then(serde_json::Value::as_str)
+            .or_else(|| version.get("name").and_then(serde_json::Value::as_str))
+            .unwrap_or("")
+            .to_string();
+        let name = version.get("name").and_then(serde_json::Value::as_str).unwrap_or("").to_string();
+        let game = version
+            .get("gameVersions")
+            .and_then(serde_json::Value::as_array)
+            .map(|rows| rows.iter().filter_map(serde_json::Value::as_str).take(3).collect::<Vec<_>>().join(", "))
+            .unwrap_or_default();
+        let loaders = version
+            .get("loaders")
+            .and_then(serde_json::Value::as_array)
+            .map(|rows| rows.iter().filter_map(serde_json::Value::as_str).collect::<Vec<_>>().join(", "))
+            .unwrap_or_default();
+        let date = version.get("datePublished").and_then(serde_json::Value::as_str).unwrap_or("");
+        let is_current = current.as_deref() == Some(version_id.as_str());
+        let active = selected.as_deref() == Some(version_id.as_str());
+        let view = view_pick.clone();
+        rows = rows.child(
+            div()
+                .id(gpui::SharedString::from(format!("update-ver-{version_id}")))
+                .flex()
+                .items_center()
+                .gap_3()
+                .p(px(10.0))
+                .rounded(px(RADIUS_SM))
+                .bg(if active { theme.accent_dim } else { theme.surface })
+                .border_1()
+                .border_color(if active { theme.accent } else { theme.border_soft })
+                .cursor_pointer()
+                .hover(|s| s.bg(theme.surface_hover))
+                .on_click(move |_, _, cx| {
+                    let version_id = version_id.clone();
+                    let _ = view.update(cx, |this, cx| {
+                        if let Modal::ModpackUpdate { selected, .. } = &mut this.modal {
+                            *selected = Some(version_id.clone());
+                        }
+                        cx.notify();
+                    });
+                })
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_2()
+                                .child(div().text_size(px(TEXT_SM)).font_weight(semibold()).text_color(theme.text).child(number.clone()))
+                                .when(is_current, |el| el.child(widgets::tag("Đang dùng", theme.info, &theme))),
+                        )
+                        .when(name != number && !name.is_empty(), |el| {
+                            el.child(div().text_size(px(10.0)).text_color(theme.faint).truncate().child(name))
+                        })
+                        .child(
+                            div()
+                                .text_size(px(10.0))
+                                .text_color(theme.faint)
+                                .child(format!("{game} · {loaders} · {}", short_time(date))),
+                        ),
+                )
+                .child(widgets::icon(
+                    if active { "check-circle" } else { "circle" },
+                    15.0,
+                    if active { theme.accent_soft } else { theme.faint },
+                )),
+        );
+    }
+
+    let pill = div()
+        .flex()
+        .items_center()
+        .gap_2()
+        .text_size(px(TEXT_XS))
+        .text_color(theme.faint)
+        .child(widgets::icon("info", 13.0, theme.faint))
+        .child("Chỉ cập nhật khi Minecraft và loader không đổi. Cấu hình được giữ nguyên.");
+
+    let content = div()
+        .flex()
+        .flex_col()
+        .gap_4()
+        .child(
+            div()
+                .flex()
+                .items_start()
+                .justify_between()
+                .gap_3()
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .child(div().text_size(px(TEXT_2XL)).font_weight(bold()).text_color(theme.text).child("Cập nhật modpack"))
+                        .child(div().text_size(px(TEXT_SM)).text_color(theme.muted).child("Chọn phiên bản mới để tải các tệp còn thiếu và thay tệp cũ.")),
+                )
+                .child(widgets::icon_button("update-close", "x", &theme, move |_, _, cx| {
+                    let _ = view_close.update(cx, |this, cx| {
+                        this.modal = Modal::None;
+                        cx.notify();
+                    });
+                })),
+        )
+        .child(rows)
+        .child(pill)
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .justify_end()
+                .gap_2()
+                .child(widgets::ghost_button("update-cancel", "Đóng", &theme, {
+                    let view = cx.entity().downgrade();
+                    move |_, _, cx| {
+                        let _ = view.update(cx, |this, cx| {
+                            this.modal = Modal::None;
+                            cx.notify();
+                        });
+                    }
+                }))
+                .child(widgets::button("update-run", "Cập nhật", &theme, true, move |_, _, cx| {
+                    let _ = view_install.update(cx, |this, cx| {
+                        let selected = match &this.modal {
+                            Modal::ModpackUpdate { selected, .. } => selected.clone(),
+                            _ => None,
+                        };
+                        let Some(selected) = selected else {
+                            this.toast("warn", "Chọn phiên bản", "Hãy chọn một phiên bản modpack.", cx);
+                            return;
+                        };
+                        this.modal = Modal::None;
+                        this.instance_ui.modpack_busy = true;
+                        let id = id.clone();
+                        let rx = this.backend.modpack_update(id.clone(), selected);
+                        this.on_result(cx, rx, move |this, value, cx| {
+                            this.instance_ui.modpack_busy = false;
+                            if value.get("ok").and_then(serde_json::Value::as_bool).unwrap_or(false) {
+                                this.refresh_instances();
+                                this.load_instance_tab(cx);
+                                let version = value.get("version").and_then(serde_json::Value::as_str).unwrap_or("");
+                                this.toast("ok", "Đã cập nhật modpack", version.to_string(), cx);
+                            } else {
+                                this.toast("bad", "Cập nhật thất bại", value.get("error").and_then(serde_json::Value::as_str).unwrap_or(""), cx);
+                            }
+                        });
+                    });
+                })),
+        );
+
+    let backdrop = cx.entity().downgrade();
+    modal_overlay(theme, 640.0, content, move |_, _, cx| {
+        let _ = backdrop.update(cx, |this, cx| {
+            this.modal = Modal::None;
+            cx.notify();
+        });
+    })
+}
+
 pub fn confirm_modal(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<LauncherApp>) -> impl IntoElement {
     let theme = app.theme.clone();
     let (title, message) = match &app.modal {

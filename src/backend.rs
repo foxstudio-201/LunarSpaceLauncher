@@ -2102,6 +2102,141 @@ impl Backend {
         })
     }
 
+    pub fn modpack_versions(self: &Arc<Self>, id: String) -> Receiver<Value> {
+        let this = self.clone();
+        self.request(async move {
+            let Some(entry) = this.store.find_instance(&id) else {
+                return fail("Không tìm thấy instance.");
+            };
+            let dir = PathBuf::from(&entry.dir);
+            let Some(marker) = modpack::read_marker(&dir) else {
+                return fail("Không tìm thấy thông tin modpack.");
+            };
+            let source = marker.get("source").and_then(Value::as_str).unwrap_or("").to_string();
+            let project_id = marker.get("projectId").and_then(Value::as_str).unwrap_or("").to_string();
+            if project_id.is_empty() || !matches!(source.as_str(), "modrinth" | "curseforge") {
+                return fail("Modpack này không hỗ trợ cập nhật tự động.");
+            }
+            match crate::mc::content::versions(crate::mc::content::Kind::Modpacks, &source, &project_id).await {
+                Ok(rows) => ok(json!({
+                    "versions": rows,
+                    "current": marker.get("versionId").cloned().unwrap_or(Value::Null),
+                    "source": source,
+                })),
+                Err(err) => fail(err.to_string()),
+            }
+        })
+    }
+
+    pub fn modpack_repair(self: &Arc<Self>, id: String) -> Receiver<Value> {
+        let this = self.clone();
+        self.request(async move {
+            let Some(entry) = this.store.find_instance(&id) else {
+                return fail("Không tìm thấy instance.");
+            };
+            let dir = PathBuf::from(&entry.dir);
+            match modpack::repair(&dir).await {
+                Ok((missing, repaired, failed)) => ok(json!({
+                    "missing": missing,
+                    "repaired": repaired,
+                    "failed": failed,
+                })),
+                Err(err) => fail(err.to_string()),
+            }
+        })
+    }
+
+    pub fn modpack_update(self: &Arc<Self>, id: String, version_id: String) -> Receiver<Value> {
+        let this = self.clone();
+        self.request(async move {
+            let Some(entry) = this.store.find_instance(&id) else {
+                return fail("Không tìm thấy instance.");
+            };
+            let dir = PathBuf::from(&entry.dir);
+            let Some(marker) = modpack::read_marker(&dir) else {
+                return fail("Không tìm thấy thông tin modpack.");
+            };
+            let source = marker.get("source").and_then(Value::as_str).unwrap_or("").to_string();
+            let project_id = marker.get("projectId").and_then(Value::as_str).unwrap_or("").to_string();
+            if project_id.is_empty() || !matches!(source.as_str(), "modrinth" | "curseforge") {
+                return fail("Modpack này không hỗ trợ cập nhật tự động.");
+            }
+            let version_id = if version_id.is_empty() {
+                marker.get("versionId").and_then(Value::as_str).unwrap_or("").to_string()
+            } else {
+                version_id
+            };
+            let versions = match crate::mc::content::versions(
+                crate::mc::content::Kind::Modpacks,
+                &source,
+                &project_id,
+            )
+            .await
+            {
+                Ok(rows) => rows,
+                Err(err) => return fail(err.to_string()),
+            };
+            let target = versions.iter().find(|row| row.id == version_id).cloned();
+            let Some(target) = target else {
+                return fail("Không tìm thấy phiên bản modpack.");
+            };
+            let mut plan = match modpack::resolve(
+                &this.store,
+                &source,
+                &project_id,
+                &target.id,
+                None,
+                |_| {},
+            )
+            .await
+            {
+                Ok(plan) => plan,
+                Err(err) => return fail(err.to_string()),
+            };
+            if plan.mc != entry.version || plan.loader != entry.loader {
+                return fail(format!(
+                    "Bản {} dùng Minecraft {}{} — hãy tạo phiên bản mới để nâng cấp.",
+                    target.version_number,
+                    plan.mc,
+                    if plan.loader.is_empty() { String::new() } else { format!(" / {}", plan.loader) }
+                ));
+            }
+            if plan.loader_version != entry.loader_version {
+                return fail("Bản cập nhật dùng phiên bản loader khác — hãy cài lại loader trước.");
+            }
+            plan.project_id = project_id.clone();
+            plan.version_id = target.id.clone();
+            plan.slug = marker.get("slug").and_then(Value::as_str).unwrap_or("").to_string();
+            plan.project_url = marker.get("projectUrl").and_then(Value::as_str).unwrap_or("").to_string();
+            let keep: Vec<String> = plan.files.iter().map(|file| file.rel.clone()).collect();
+            let removed = modpack::remove_unowned(&dir, &keep).await;
+            let applied = match modpack::apply(&plan, &dir, None, |_| {}).await {
+                Ok(applied) => applied,
+                Err(err) => return fail(err.to_string()),
+            };
+            modpack::write_marker(&dir, &plan, &applied);
+            let _ = this.store.update_instance(
+                &id,
+                json!({"modpack": {
+                    "source": plan.source,
+                    "name": plan.name,
+                    "version": plan.version,
+                    "projectId": plan.project_id,
+                    "versionId": plan.version_id,
+                }}),
+            );
+            let _ = this.store.write_launcher_profiles();
+            this.emit(json!({"type": "instances-changed"}));
+            ok(json!({
+                "version": plan.version,
+                "name": plan.name,
+                "downloaded": applied.downloaded,
+                "removed": removed.len(),
+                "failed": applied.failed,
+            }))
+        })
+    }
+
     pub fn mods_inventory(self: &Arc<Self>, id: String) -> Receiver<Value> {
         let this = self.clone();
         self.request(async move {
@@ -2228,6 +2363,7 @@ impl Backend {
             let pack_id = opts.get("packId").and_then(Value::as_str).unwrap_or("").to_string();
             let file_id = opts.get("fileId").and_then(Value::as_str).unwrap_or("").to_string();
             let name = opts.get("name").and_then(Value::as_str).unwrap_or("").to_string();
+            let slug = opts.get("slug").and_then(Value::as_str).unwrap_or("").to_string();
             let memory = opts.get("memoryMb").and_then(Value::as_u64).unwrap_or(4096) as u32;
             let token = opts.get("token").and_then(Value::as_str).unwrap_or("").to_string();
             if pack_id.is_empty() || file_id.is_empty() {
@@ -2253,6 +2389,14 @@ impl Backend {
                     this.emit(json!({"type": "modpack", "token": token, "phase": "error", "error": err.to_string()}));
                     return fail(err.to_string());
                 }
+            };
+            plan.project_id = pack_id.clone();
+            plan.version_id = file_id.clone();
+            plan.slug = slug.clone();
+            plan.project_url = if source == "modrinth" && !slug.is_empty() {
+                format!("https://modrinth.com/modpack/{slug}")
+            } else {
+                String::new()
             };
             if plan.mc.is_empty() || plan.loader == "vanilla" && plan.files.iter().any(|f| f.rel.starts_with("mods/")) {
                 // Some packs omit dependencies; fall back to the instance selection in the UI later.
