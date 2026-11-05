@@ -15,6 +15,19 @@ const LOADERS: [(&str, &str, &str); 6] = [
     ("lunar", "LunarLoader", "Loader riêng của LunarSpace"),
 ];
 
+fn is_release_version(version: &str) -> bool {
+    let lower = version.to_lowercase();
+    if lower.contains("snapshot")
+        || lower.contains("pre")
+        || lower.contains("-rc")
+        || lower.contains("-beta")
+        || lower.contains("-alpha")
+    {
+        return false;
+    }
+    !version.is_empty() && version.chars().all(|c| c.is_ascii_digit() || c == '.')
+}
+
 pub fn open_versions(
     app: &mut LauncherApp,
     cx: &mut Context<LauncherApp>,
@@ -112,11 +125,8 @@ pub fn load_create_loaders(app: &mut LauncherApp, cx: &mut Context<LauncherApp>)
                         let version = g
                             .get("version")
                             .and_then(serde_json::Value::as_str)
-                            .unwrap_or("")
-                            .to_lowercase();
-                        !version.contains("snapshot")
-                            && !version.contains("pre")
-                            && !version.contains("-rc")
+                            .unwrap_or("");
+                        is_release_version(version)
                     })
                 })
                 .or_else(|| games.first());
@@ -565,12 +575,7 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
             .iter()
             .filter_map(|row| {
                 let version = row.get("version")?.as_str()?.to_string();
-                let lower = version.to_lowercase();
-                let kind = if lower.contains("snapshot") || lower.contains("pre") || lower.contains("-rc") {
-                    "snapshot"
-                } else {
-                    "release"
-                };
+                let kind = if is_release_version(&version) { "release" } else { "snapshot" };
                 Some((version.clone(), kind.into(), false))
             })
             .collect()
