@@ -2,7 +2,7 @@ use crate::ui::app::{ConfirmAction, LauncherApp, Modal};
 use crate::ui::pages::{self, page_body, page_header, section_title};
 use crate::ui::theme::*;
 use crate::ui::widgets;
-use gpui::{AnyElement, Context, IntoElement, Window, div, prelude::*, px};
+use gpui::{AnyElement, Context, FontWeight, IntoElement, Window, div, prelude::*, px};
 use serde_json::Value;
 use std::path::Path;
 
@@ -52,8 +52,13 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
             None
         };
         let view_use = view.clone();
+        let view_copy = view.clone();
+        let view_refresh = view.clone();
         let view_remove = view.clone();
         let id = account.id.clone();
+        let id_use = id.clone();
+        let id_copy = id.clone();
+        let id_refresh = id.clone();
         let remove_id = account.id.clone();
         let name = account.name.clone();
         let uuid = account.uuid.clone();
@@ -154,13 +159,51 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                         &theme,
                         true,
                         move |_, _, cx| {
-                            let id = id.clone();
+                            let id = id_use.clone();
                             let _ = view_use.update(cx, |this, cx| {
                                 let value = this.backend.account_set_active(&id);
                                 if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
                                     this.refresh_accounts();
                                     this.toast("ok", "Đã chọn tài khoản", "", cx);
                                 }
+                            });
+                        },
+                    ))
+                })
+                .child(widgets::ghost_button(
+                    gpui::SharedString::from(format!("copy-{}", id)),
+                    "UUID",
+                    &theme,
+                    {
+                        let uuid = uuid.clone();
+                        let view = view_copy.clone();
+                        move |_, _, cx| {
+                            let uuid = uuid.clone();
+                            let _ = view.update(cx, |this, cx| {
+                                cx.write_to_clipboard(gpui::ClipboardItem::new_string(uuid.clone()));
+                                this.toast("ok", "Đã sao chép UUID", uuid.clone(), cx);
+                            });
+                        }
+                    },
+                ))
+                .when(account.kind != "offline", |el| {
+                    let view = view_refresh.clone();
+                    let id = id_refresh.clone();
+                    el.child(widgets::ghost_button(
+                        gpui::SharedString::from(format!("refresh-{}", account.id)),
+                        "Làm mới",
+                        &theme,
+                        move |_, _, cx| {
+                            let id = id.clone();
+                            let _ = view.update(cx, |this, cx| {
+                                let rx = this.backend.account_refresh(id.clone());
+                                this.on_result(cx, rx, |this, value, cx| {
+                                    if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+                                        this.toast("ok", "Đã làm mới phiên đăng nhập", "", cx);
+                                    } else {
+                                        this.toast("bad", "Làm mới thất bại", value.get("error").and_then(Value::as_str).unwrap_or(""), cx);
+                                    }
+                                });
                             });
                         },
                     ))
@@ -329,6 +372,37 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
         row
     };
 
+    let view_tab = cx.entity().downgrade();
+    let mut tab_row = div().flex().items_center().gap(px(6.0));
+    for (key, label) in [("list", "Danh sách tài khoản"), ("skin", "Skin")] {
+        let active = app.accounts_tab == key;
+        let view = view_tab.clone();
+        let key = key.to_string();
+        tab_row = tab_row.child(
+            div()
+                .id(gpui::SharedString::from(format!("acc-tab-{key}")))
+                .h(px(30.0))
+                .px(px(12.0))
+                .flex()
+                .items_center()
+                .rounded(px(8.0))
+                .bg(if active { theme.elevated } else { theme.bg })
+                .border_1()
+                .border_color(if active { theme.border } else { theme.bg })
+                .text_size(px(11.0))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(if active { theme.text } else { theme.faint })
+                .cursor_pointer()
+                .on_click(move |_, _, cx| {
+                    let key = key.clone();
+                    let _ = view.update(cx, |this, cx| {
+                        this.accounts_tab = key;
+                        cx.notify();
+                    });
+                })
+                .child(label.to_string()),
+        );
+    }
     page_body()
         .child(page_header(
             &theme,
@@ -355,6 +429,7 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                     });
                 })),
         ))
+        .child(tab_row)
         .child(
             div()
                 .flex()
@@ -366,7 +441,8 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                 .text_size(px(TEXT_SM))
                 .text_color(theme.accent_soft)
                 .child(widgets::icon("info", 15.0, theme.accent_soft))
-                .child("Hỗ trợ Ngoại tuyến, Microsoft (vào được server online) và ely.by. Phiên đăng nhập được lưu trên máy và tự làm mới."),
+                .child("Hỗ trợ Ngoại tuyến, Microsoft (vào được server online) và ely.by. Phiên đăng nhập được lưu trên máy và tự làm mới.")
+                .when(app.accounts_tab != "list", |el| el.hidden()),
         )
         .child(
             div()
@@ -378,7 +454,8 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                     "Danh sách tài khoản",
                     format!("{} tài khoản", app.accounts.len()),
                 ))
-                .child(list),
+                .child(list)
+                .when(app.accounts_tab != "list", |el| el.hidden()),
         )
         .child(
             div()
@@ -551,7 +628,8 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                                     el.child(gpui::img(path).size(px(28.0)).rounded(px(6.0)))
                                 }),
                         )
-                }),
+                })
+                .when(app.accounts_tab != "skin", |el| el.hidden()),
         )
         .into_any_element()
 }

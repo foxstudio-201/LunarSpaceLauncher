@@ -460,6 +460,9 @@ pub fn validate_mc_name(name: &str) -> bool {
 pub fn safe_join(root: &Path, rel: &str) -> Result<PathBuf> {
     let base = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
     let cleaned = rel.trim_start_matches('/').replace(char::from(92), "/");
+    if cleaned.trim().is_empty() || cleaned.trim() == "." {
+        return Ok(base);
+    }
     let relative = Path::new(&cleaned);
     if relative.is_absolute()
         || relative.components().any(|part| {
