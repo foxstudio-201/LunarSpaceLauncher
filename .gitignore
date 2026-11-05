@@ -1,0 +1,7 @@
+/target/
+/dist/
+*.png
+!assets/**/*.png
+!xyolauncher-icon.png
+*.log
+*.tmp
