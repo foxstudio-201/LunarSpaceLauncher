@@ -313,6 +313,7 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
         .and_then(Value::as_str)
         .and_then(|path| crate::mc::skins::head_png(&app.backend.store, Path::new(path), &app.skin_ui.uuid));
 
+    let view_paint = view.clone();
     let view_upload_skin = view.clone();
     let view_upload_cape = view.clone();
     let view_model = view.clone();
@@ -340,6 +341,9 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                 }
             })
             .detach();
+        }))
+        .child(widgets::ghost_button("skin-paint", "Vẽ skin", &theme, move |_, _, cx| {
+            let _ = view_paint.update(cx, |this, cx| this.open_skin_painter(cx));
         }))
         .child(widgets::ghost_button("cape-upload", "Tải cape PNG", &theme, move |_, _, cx| {
             let view = view_upload_cape.clone();

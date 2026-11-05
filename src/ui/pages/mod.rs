@@ -247,6 +247,405 @@ pub fn modal_overlay(
         )
 }
 
+pub fn skin_paint_modal(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<LauncherApp>) -> impl IntoElement {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    let theme = app.theme.clone();
+    let view = cx.entity().downgrade();
+    let asset = app.skin_ui.paint_asset.clone();
+    let tool = app.skin_ui.paint_tool.clone();
+    let color = app.skin_ui.paint_color.clone();
+    let (target_w, target_h) = if asset == "cape" { (384.0f32, 192.0f32) } else { (384.0f32, 384.0f32) };
+
+    let bounds: Rc<RefCell<Option<gpui::Bounds<gpui::Pixels>>>> = Rc::new(RefCell::new(None));
+    let bounds_paint = bounds.clone();
+    let bounds_down = bounds.clone();
+    let bounds_move = bounds.clone();
+    let view_down = view.clone();
+    let view_move = view.clone();
+    let view_up = view.clone();
+    let view_up_out = view.clone();
+    let grid = app.skin_ui.paint_grid;
+    let canvas = gpui::canvas(
+        move |bounds, _, _| {
+            *bounds_paint.borrow_mut() = Some(bounds);
+        },
+        move |bounds, _, window, _| {
+            if grid {
+                let line = gpui::rgba(0xFFFFFF22);
+                for step in 0..=64 {
+                    let x = bounds.origin.x + gpui::px(step as f32 * 6.0);
+                    window.paint_quad(gpui::fill(
+                        gpui::Bounds::new(
+                            gpui::point(x, bounds.origin.y),
+                            gpui::size(gpui::px(1.0), bounds.size.height),
+                        ),
+                        line,
+                    ));
+                    let y = bounds.origin.y + gpui::px(step as f32 * 6.0);
+                    if step * 6 < target_h as usize * 6 {
+                        window.paint_quad(gpui::fill(
+                            gpui::Bounds::new(
+                                gpui::point(bounds.origin.x, y),
+                                gpui::size(bounds.size.width, gpui::px(1.0)),
+                            ),
+                            line,
+                        ));
+                    }
+                }
+            }
+        },
+    );
+
+    let surface = div()
+        .id("skin-paint-surface")
+        .relative()
+        .w(gpui::px(target_w))
+        .h(gpui::px(target_h))
+        .rounded(gpui::px(8.0))
+        .overflow_hidden()
+        .bg(theme.elevated)
+        .border_1()
+        .border_color(theme.border)
+        .cursor_pointer()
+        .when_some(app.paint_preview.clone(), |el, image| {
+            el.child(gpui::img(image).absolute().inset_0().size_full())
+        })
+        .child(canvas.absolute().inset_0().size_full())
+        .on_mouse_down(gpui::MouseButton::Left, move |event, _, cx| {
+            let point = bounds_down
+                .borrow()
+                .as_ref()
+                .and_then(|bounds| bounds.localize(&event.position));
+            let Some(point) = point else { return };
+            let x = (f32::from(point.x) / 6.0).floor() as i32;
+            let y = (f32::from(point.y) / 6.0).floor() as i32;
+            let _ = view_down.update(cx, |this, cx| {
+                this.paint_begin_stroke();
+                this.skin_ui.paint_painting = true;
+                this.skin_ui.paint_last = None;
+                this.paint_at(x, y, cx);
+                if this.skin_ui.paint_tool == "fill" || this.skin_ui.paint_tool == "picker" {
+                    this.skin_ui.paint_painting = false;
+                    this.skin_ui.paint_last = None;
+                }
+                cx.notify();
+            });
+        })
+        .on_mouse_move(move |event, _, cx| {
+            let point = bounds_move
+                .borrow()
+                .as_ref()
+                .and_then(|bounds| bounds.localize(&event.position));
+            let Some(point) = point else { return };
+            let x = (f32::from(point.x) / 6.0).floor() as i32;
+            let y = (f32::from(point.y) / 6.0).floor() as i32;
+            let _ = view_move.update(cx, |this, cx| {
+                if this.skin_ui.paint_painting {
+                    this.paint_at(x, y, cx);
+                }
+            });
+        })
+        .on_mouse_up(gpui::MouseButton::Left, move |_, _, cx| {
+            let _ = view_up.update(cx, |this, cx| {
+                this.skin_ui.paint_painting = false;
+                this.skin_ui.paint_last = None;
+                cx.notify();
+            });
+        })
+        .on_mouse_up_out(gpui::MouseButton::Left, move |_, _, cx| {
+            let _ = view_up_out.update(cx, |this, cx| {
+                this.skin_ui.paint_painting = false;
+                this.skin_ui.paint_last = None;
+                cx.notify();
+            });
+        });
+
+    let mut asset_row = div().flex().items_center().gap_2();
+    for (key, label) in [("skin", "Skin 64×64"), ("cape", "Cape 64×32")] {
+        let active = asset == key;
+        let view = view.clone();
+        let key = key.to_string();
+        asset_row = asset_row.child(
+            div()
+                .id(gpui::SharedString::from(format!("paint-asset-{key}")))
+                .h(gpui::px(28.0))
+                .px(gpui::px(10.0))
+                .flex()
+                .items_center()
+                .rounded(gpui::px(6.0))
+                .bg(if active { theme.accent_dim } else { theme.surface })
+                .border_1()
+                .border_color(if active { theme.accent } else { theme.border_soft })
+                .text_size(gpui::px(TEXT_XS))
+                .text_color(if active { theme.accent_soft } else { theme.muted })
+                .cursor_pointer()
+                .on_click(move |_, _, cx| {
+                    let key = key.clone();
+                    let _ = view.update(cx, |this, cx| {
+                        this.skin_ui.paint_asset = key;
+                        this.refresh_paint_preview();
+                        cx.notify();
+                    });
+                })
+                .child(label),
+        );
+    }
+
+    let tools = [
+        ("pencil", "pencil-simple", "Bút"),
+        ("eraser", "eraser", "Tẩy"),
+        ("fill", "paint-brush", "Đổ màu"),
+        ("picker", "eye", "Hút màu"),
+    ];
+    let mut tool_row = div().flex().items_center().gap_2();
+    for (key, icon_name, label) in tools {
+        let active = tool == key;
+        let view = view.clone();
+        let key = key.to_string();
+        tool_row = tool_row.child(
+            div()
+                .id(gpui::SharedString::from(format!("paint-tool-{key}")))
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap(gpui::px(3.0))
+                .w(gpui::px(58.0))
+                .h(gpui::px(46.0))
+                .rounded(gpui::px(7.0))
+                .bg(if active { theme.accent_dim } else { theme.surface })
+                .border_1()
+                .border_color(if active { theme.accent } else { theme.border_soft })
+                .cursor_pointer()
+                .child(widgets::icon(icon_name, 16.0, if active { theme.accent_soft } else { theme.muted }))
+                .child(div().text_size(gpui::px(9.0)).text_color(if active { theme.accent_soft } else { theme.faint }).child(label))
+                .on_click(move |_, _, cx| {
+                    let key = key.clone();
+                    let _ = view.update(cx, |this, cx| {
+                        this.skin_ui.paint_tool = key;
+                        cx.notify();
+                    });
+                }),
+        );
+    }
+
+    let palette = [
+        "#000000", "#1D1D21", "#3C3C46", "#6B6B78", "#A5A5B0", "#D9D9E0", "#FFFFFF", "#8B5E3C",
+        "#5A3A22", "#C08A5A", "#E9B872", "#F0C991", "#F4D03F", "#F5A623", "#E74C3C", "#C0392B",
+        "#8E44AD", "#6C5CE7", "#3B82F6", "#4FC3F7", "#06B6D4", "#22C55E", "#4ADE80", "#A3E635",
+        "#166534", "#14532D", "#7F1D1D", "#B91C1C", "#9A3412", "#D97706", "#0F766E", "#1E3A8A",
+    ];
+    let mut palette_grid = div().flex().flex_wrap().gap(gpui::px(4.0));
+    for hex in palette {
+        let active = color.eq_ignore_ascii_case(hex);
+        let view = view.clone();
+        let hex = hex.to_string();
+        palette_grid = palette_grid.child(
+            div()
+                .id(gpui::SharedString::from(format!("paint-color-{hex}")))
+                .size(gpui::px(24.0))
+                .rounded(gpui::px(5.0))
+                .bg(gpui::rgb(
+                    u32::from_str_radix(&hex[1..3], 16).unwrap_or(0) << 16
+                        | u32::from_str_radix(&hex[3..5], 16).unwrap_or(0) << 8
+                        | u32::from_str_radix(&hex[5..7], 16).unwrap_or(0),
+                ))
+                .border_2()
+                .border_color(if active { theme.accent } else { theme.border_soft })
+                .cursor_pointer()
+                .on_click(move |_, _, cx| {
+                    let hex = hex.clone();
+                    let _ = view.update(cx, |this, cx| {
+                        this.skin_ui.paint_color = hex;
+                        if this.skin_ui.paint_tool == "eraser" || this.skin_ui.paint_tool == "picker" {
+                            this.skin_ui.paint_tool = "pencil".into();
+                        }
+                        cx.notify();
+                    });
+                }),
+        );
+    }
+
+    let view_grid = view.clone();
+    let view_undo = view.clone();
+    let view_redo = view.clone();
+    let view_save = view.clone();
+    let view_close = view.clone();
+    let current_swatch = div()
+        .size(gpui::px(30.0))
+        .rounded(gpui::px(6.0))
+        .bg(gpui::rgb(
+            u32::from_str_radix(color.trim_start_matches('#').get(0..2).unwrap_or("E9"), 16).unwrap_or(233) << 16
+                | u32::from_str_radix(color.trim_start_matches('#').get(2..4).unwrap_or("B8"), 16).unwrap_or(184) << 8
+                | u32::from_str_radix(color.trim_start_matches('#').get(4..6).unwrap_or("72"), 16).unwrap_or(114),
+        ))
+        .border_1()
+        .border_color(theme.border);
+
+    let right = div()
+        .flex()
+        .flex_col()
+        .gap(gpui::px(14.0))
+        .w(gpui::px(300.0))
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(div().text_size(gpui::px(TEXT_SM)).text_color(theme.muted).child("Tư liệu"))
+                .child(asset_row),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(div().text_size(gpui::px(TEXT_SM)).text_color(theme.muted).child("Công cụ"))
+                .child(tool_row),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(div().text_size(gpui::px(TEXT_SM)).text_color(theme.muted).child("Màu"))
+                        .child(current_swatch)
+                        .child(div().text_size(gpui::px(10.0)).font_family(MONO).text_color(theme.faint).child(color.clone())),
+                )
+                .child(palette_grid),
+        )
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(
+                    div()
+                        .id("paint-grid")
+                        .h(gpui::px(30.0))
+                        .px(gpui::px(9.0))
+                        .flex()
+                        .items_center()
+                        .rounded(gpui::px(6.0))
+                        .bg(if app.skin_ui.paint_grid { theme.accent_dim } else { theme.surface })
+                        .border_1()
+                        .border_color(if app.skin_ui.paint_grid { theme.accent } else { theme.border_soft })
+                        .text_size(gpui::px(10.0))
+                        .text_color(if app.skin_ui.paint_grid { theme.accent_soft } else { theme.muted })
+                        .cursor_pointer()
+                        .on_click(move |_, _, cx| {
+                            let _ = view_grid.update(cx, |this, cx| {
+                                this.skin_ui.paint_grid = !this.skin_ui.paint_grid;
+                                this.refresh_paint_preview();
+                                cx.notify();
+                            });
+                        })
+                        .child("Lưới"),
+                )
+                .child(widgets::ghost_button("paint-undo", "Hoàn tác", &theme, move |_, _, cx| {
+                    let _ = view_undo.update(cx, |this, cx| {
+                        this.paint_undo();
+                        cx.notify();
+                    });
+                }))
+                .child(widgets::ghost_button("paint-redo", "Làm lại", &theme, move |_, _, cx| {
+                    let _ = view_redo.update(cx, |this, cx| {
+                        this.paint_redo();
+                        cx.notify();
+                    });
+                })),
+        )
+        .child(
+            div()
+                .text_size(gpui::px(TEXT_XS))
+                .text_color(theme.faint)
+                .child("Bấm và kéo để tô. Dùng Hút màu để lấy màu có sẵn, Đổ màu để lấp kín vùng cùng màu."),
+        );
+
+    let content = div()
+        .flex()
+        .flex_col()
+        .gap_4()
+        .child(
+            div()
+                .flex()
+                .items_start()
+                .justify_between()
+                .gap_3()
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .child(div().text_size(gpui::px(TEXT_2XL)).font_weight(bold()).text_color(theme.text).child("Vẽ skin"))
+                        .child(div().text_size(gpui::px(TEXT_SM)).text_color(theme.muted).child("Chỉnh từng pixel rồi lưu; skin sẽ được chia sẻ cho người dùng launcher khác.")),
+                )
+                .child(widgets::icon_button("paint-close", "x", &theme, move |_, _, cx| {
+                    let _ = view_close.update(cx, |this, cx| {
+                        this.modal = Modal::None;
+                        cx.notify();
+                    });
+                })),
+        )
+        .child(
+            div()
+                .flex()
+                .gap_4()
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .child(surface)
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_3()
+                                .text_size(gpui::px(10.0))
+                                .text_color(theme.faint)
+                                .child(format!("{asset} · 6× zoom"))
+                                .child(format!("{} thao tác hoàn tác", app.skin_ui.paint_undo.len())),
+                        ),
+                )
+                .child(right),
+        )
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .justify_end()
+                .gap_2()
+                .child(widgets::ghost_button("paint-cancel", "Huỷ", &theme, {
+                    let view = view.clone();
+                    move |_, _, cx| {
+                        let _ = view.update(cx, |this, cx| {
+                            this.modal = Modal::None;
+                            cx.notify();
+                        });
+                    }
+                }))
+                .child(widgets::button("paint-save", "Lưu skin", &theme, true, move |_, _, cx| {
+                    let _ = view_save.update(cx, |this, cx| {
+                        this.paint_save(cx);
+                    });
+                })),
+        );
+
+    let backdrop = cx.entity().downgrade();
+    modal_overlay(theme, 780.0, content, move |_, _, cx| {
+        let _ = backdrop.update(cx, |this, cx| {
+            this.modal = Modal::None;
+            cx.notify();
+        });
+    })
+}
+
 pub fn world_edit_modal(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<LauncherApp>) -> impl IntoElement {
     let theme = app.theme.clone();
     let (id, folder) = match &app.modal {

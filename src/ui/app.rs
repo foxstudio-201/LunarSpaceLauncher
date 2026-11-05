@@ -119,6 +119,16 @@ pub struct SkinState {
     pub dragging: bool,
     pub auto_spin: bool,
     pub spin_gen: u64,
+    pub paint_asset: String,
+    pub paint_tool: String,
+    pub paint_color: String,
+    pub paint_skin: Vec<u8>,
+    pub paint_cape: Vec<u8>,
+    pub paint_undo: Vec<Vec<u8>>,
+    pub paint_redo: Vec<Vec<u8>>,
+    pub paint_last: Option<(i32, i32)>,
+    pub paint_painting: bool,
+    pub paint_grid: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -266,6 +276,7 @@ pub enum Modal {
         folder: String,
         settings: Value,
     },
+    SkinPaint,
 }
 
 #[derive(Clone, Debug)]
@@ -319,6 +330,7 @@ pub struct LauncherApp {
     pub account_ui: AddAccountState,
     pub skin_ui: SkinState,
     pub skin_preview: Option<Arc<gpui::RenderImage>>,
+    pub paint_preview: Option<Arc<gpui::RenderImage>>,
     pub skin_drag_x: f32,
     pub content: ContentState,
     pub settings_ui: SettingsUi,
@@ -489,6 +501,7 @@ impl LauncherApp {
                 ..Default::default()
             },
             skin_preview: None,
+            paint_preview: None,
             skin_drag_x: 0.0,
             content: ContentState {
                 detail_tab: "about".into(),
@@ -585,6 +598,331 @@ impl LauncherApp {
                 }
             }
         }
+    }
+
+    fn paint_dims(&self) -> (u32, u32) {
+        if self.skin_ui.paint_asset == "cape" {
+            (64, 32)
+        } else {
+            (64, 64)
+        }
+    }
+
+    fn paint_buffer(&self) -> &Vec<u8> {
+        if self.skin_ui.paint_asset == "cape" {
+            &self.skin_ui.paint_cape
+        } else {
+            &self.skin_ui.paint_skin
+        }
+    }
+
+    fn paint_buffer_mut(&mut self) -> &mut Vec<u8> {
+        if self.skin_ui.paint_asset == "cape" {
+            &mut self.skin_ui.paint_cape
+        } else {
+            &mut self.skin_ui.paint_skin
+        }
+    }
+
+    fn paint_color_rgba(&self) -> [u8; 4] {
+        let hex = self.skin_ui.paint_color.trim_start_matches('#');
+        if hex.len() >= 6 {
+            if let (Ok(r), Ok(g), Ok(b)) = (
+                u8::from_str_radix(&hex[0..2], 16),
+                u8::from_str_radix(&hex[2..4], 16),
+                u8::from_str_radix(&hex[4..6], 16),
+            ) {
+                return [r, g, b, 255];
+            }
+        }
+        [233, 184, 114, 255]
+    }
+
+    pub fn refresh_paint_preview(&mut self) {
+        let (width, height) = self.paint_dims();
+        let Some(buffer) = image::RgbaImage::from_raw(width, height, self.paint_buffer().clone()) else {
+            return;
+        };
+        let zoom = 6u32;
+        let mut scaled = image::imageops::resize(
+            &buffer,
+            width * zoom,
+            height * zoom,
+            image::imageops::FilterType::Nearest,
+        );
+        let checker = |x: u32, y: u32| {
+            if ((x / 12) + (y / 12)) % 2 == 0 {
+                [40u8, 43, 48, 255]
+            } else {
+                [30u8, 33, 37, 255]
+            }
+        };
+        for (x, y, pixel) in scaled.enumerate_pixels_mut() {
+            if pixel[3] < 255 {
+                let bg = checker(x, y);
+                let a = pixel[3] as f32 / 255.0;
+                for channel in 0..3 {
+                    pixel[channel] = (pixel[channel] as f32 * a + bg[channel] as f32 * (1.0 - a)) as u8;
+                }
+                pixel[3] = 255;
+            }
+        }
+        if self.skin_ui.paint_grid {
+            for step in 0..=width.max(height) {
+                let pos = step * zoom;
+                if pos < scaled.width() {
+                    for y in 0..scaled.height() {
+                        let pixel = scaled.get_pixel_mut(pos, y);
+                        let blend = |c: u8| ((c as u16 * 3 + 255) / 4) as u8;
+                        pixel[0] = blend(pixel[0]);
+                        pixel[1] = blend(pixel[1]);
+                        pixel[2] = blend(pixel[2]);
+                    }
+                }
+                if pos < scaled.height() {
+                    for x in 0..scaled.width() {
+                        let pixel = scaled.get_pixel_mut(x, pos);
+                        let blend = |c: u8| ((c as u16 * 3 + 255) / 4) as u8;
+                        pixel[0] = blend(pixel[0]);
+                        pixel[1] = blend(pixel[1]);
+                        pixel[2] = blend(pixel[2]);
+                    }
+                }
+            }
+        }
+        let frame = image::Frame::new(scaled);
+        self.paint_preview = Some(Arc::new(gpui::RenderImage::new(vec![frame])));
+    }
+
+    pub fn open_skin_painter(&mut self, cx: &mut Context<Self>) {
+        let uuid = self.skin_ui.uuid.clone();
+        if uuid.is_empty() {
+            return;
+        }
+        let skin = self.backend.skin_read(&uuid);
+        let load = |key: &str, width: u32, height: u32, fallback: Option<&str>| -> Vec<u8> {
+            let path = skin
+                .get(key)
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+                .or_else(|| fallback.map(str::to_string));
+            if let Some(path) = path {
+                if let Ok(image) = image::open(&path) {
+                    let image = image.to_rgba8();
+                    if image.width() == width && image.height() == height {
+                        return image.into_raw();
+                    }
+                }
+            }
+            vec![0u8; (width * height * 4) as usize]
+        };
+        self.skin_ui.paint_skin = load(
+            "skinPath",
+            64,
+            64,
+            self.skin_ui.skin_path.as_deref(),
+        );
+        self.skin_ui.paint_cape = load(
+            "capePath",
+            64,
+            32,
+            self.skin_ui.cape_path.as_deref(),
+        );
+        self.skin_ui.paint_asset = "skin".into();
+        self.skin_ui.paint_tool = "pencil".into();
+        if self.skin_ui.paint_color.is_empty() {
+            self.skin_ui.paint_color = "#E9B872".into();
+        }
+        self.skin_ui.paint_grid = true;
+        self.skin_ui.paint_undo.clear();
+        self.skin_ui.paint_redo.clear();
+        self.skin_ui.paint_last = None;
+        self.skin_ui.paint_painting = false;
+        self.refresh_paint_preview();
+        self.modal = Modal::SkinPaint;
+        cx.notify();
+    }
+
+    pub fn paint_begin_stroke(&mut self) {
+        let buffer = self.paint_buffer().clone();
+        self.skin_ui.paint_undo.push(buffer);
+        if self.skin_ui.paint_undo.len() > 40 {
+            self.skin_ui.paint_undo.remove(0);
+        }
+        self.skin_ui.paint_redo.clear();
+    }
+
+    pub fn paint_undo(&mut self) {
+        if let Some(previous) = self.skin_ui.paint_undo.pop() {
+            let current = self.paint_buffer().clone();
+            self.skin_ui.paint_redo.push(current);
+            if self.skin_ui.paint_asset == "cape" {
+                self.skin_ui.paint_cape = previous;
+            } else {
+                self.skin_ui.paint_skin = previous;
+            }
+            self.refresh_paint_preview();
+        }
+    }
+
+    pub fn paint_redo(&mut self) {
+        if let Some(next) = self.skin_ui.paint_redo.pop() {
+            let current = self.paint_buffer().clone();
+            self.skin_ui.paint_undo.push(current);
+            if self.skin_ui.paint_asset == "cape" {
+                self.skin_ui.paint_cape = next;
+            } else {
+                self.skin_ui.paint_skin = next;
+            }
+            self.refresh_paint_preview();
+        }
+    }
+
+    fn paint_pixel_now(&mut self, x: i32, y: i32) {
+        let (width, height) = self.paint_dims();
+        if x < 0 || y < 0 || x >= width as i32 || y >= height as i32 {
+            return;
+        }
+        let tool = self.skin_ui.paint_tool.clone();
+        let index = ((y as u32 * width + x as u32) * 4) as usize;
+        if tool == "picker" {
+            let buffer = self.paint_buffer();
+            if let Some(pixel) = buffer.get(index..index + 4) {
+                self.skin_ui.paint_color = format!("#{:02X}{:02X}{:02X}", pixel[0], pixel[1], pixel[2]);
+            }
+            return;
+        }
+        let color = if tool == "eraser" {
+            [0u8, 0, 0, 0]
+        } else {
+            self.paint_color_rgba()
+        };
+        let width = width as i32;
+        let height = height as i32;
+        if tool == "fill" {
+            let buffer = self.paint_buffer().clone();
+            let target = [
+                buffer[index],
+                buffer[index + 1],
+                buffer[index + 2],
+                buffer[index + 3],
+            ];
+            if target == color {
+                return;
+            }
+            let mut stack = vec![(x, y)];
+            let mut visited = vec![false; (width * height) as usize];
+            while let Some((cx, cy)) = stack.pop() {
+                if cx < 0 || cy < 0 || cx >= width || cy >= height {
+                    continue;
+                }
+                let at = (cy * width + cx) as usize;
+                if visited[at] {
+                    continue;
+                }
+                visited[at] = true;
+                let offset = at * 4;
+                let current = [
+                    buffer[offset],
+                    buffer[offset + 1],
+                    buffer[offset + 2],
+                    buffer[offset + 3],
+                ];
+                if current != target {
+                    continue;
+                }
+                let output = self.paint_buffer_mut();
+                output[offset..offset + 4].copy_from_slice(&color);
+                stack.push((cx + 1, cy));
+                stack.push((cx - 1, cy));
+                stack.push((cx, cy + 1));
+                stack.push((cx, cy - 1));
+            }
+        } else {
+            let output = self.paint_buffer_mut();
+            output[index..index + 4].copy_from_slice(&color);
+        }
+        self.refresh_paint_preview();
+    }
+
+    pub fn paint_at(&mut self, x: i32, y: i32, cx: &mut Context<Self>) {
+        let tool = self.skin_ui.paint_tool.clone();
+        if tool == "fill" || tool == "picker" {
+            self.paint_pixel_now(x, y);
+            cx.notify();
+            return;
+        }
+        if let Some((last_x, last_y)) = self.skin_ui.paint_last {
+            let steps = (x - last_x).abs().max((y - last_y).abs()).max(1);
+            for step in 0..=steps {
+                let px = last_x + (x - last_x) * step / steps;
+                let py = last_y + (y - last_y) * step / steps;
+                self.paint_pixel_now(px, py);
+            }
+        } else {
+            self.paint_pixel_now(x, y);
+        }
+        self.skin_ui.paint_last = Some((x, y));
+        cx.notify();
+    }
+
+    pub fn paint_save(&mut self, cx: &mut Context<Self>) {
+        let uuid = self.skin_ui.uuid.clone();
+        if uuid.is_empty() {
+            return;
+        }
+        let dir = self.backend.store.data_dir.join("paint-tmp");
+        let _ = std::fs::create_dir_all(&dir);
+        let id = crate::util::safe_id(&uuid);
+        let skin_path = dir.join(format!("{id}-skin.png"));
+        let cape_path = dir.join(format!("{id}-cape.png"));
+        if image::save_buffer(&skin_path, &self.skin_ui.paint_skin, 64, 64, image::ColorType::Rgba8).is_err() {
+            return;
+        }
+        if image::save_buffer(&cape_path, &self.skin_ui.paint_cape, 64, 32, image::ColorType::Rgba8).is_err() {
+            return;
+        }
+        let name = self
+            .accounts
+            .iter()
+            .find(|account| account.uuid == uuid)
+            .map(|account| account.name.clone())
+            .unwrap_or_default();
+        let model = if self.skin_ui.model.is_empty() {
+            "classic".to_string()
+        } else {
+            self.skin_ui.model.clone()
+        };
+        let rx = self.backend.skin_save(
+            uuid.clone(),
+            name,
+            model,
+            Some(skin_path.to_string_lossy().into_owned()),
+            Some(cape_path.to_string_lossy().into_owned()),
+        );
+        self.on_result(cx, rx, move |this, value, cx| {
+            if value.get("ok").and_then(serde_json::Value::as_bool).unwrap_or(false) {
+                let skin = this.backend.skin_read(&uuid);
+                this.skin_ui.skin_path = skin
+                    .get("skinPath")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string);
+                this.skin_ui.cape_path = skin
+                    .get("capePath")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string);
+                this.refresh_skin_preview();
+                this.modal = Modal::None;
+                this.toast("ok", "Đã lưu skin", "Mở lại game để áp dụng.", cx);
+            } else {
+                this.toast(
+                    "bad",
+                    "Lưu skin thất bại",
+                    value.get("error").and_then(serde_json::Value::as_str).unwrap_or(""),
+                    cx,
+                );
+            }
+        });
     }
 
     pub fn refresh_skin_preview(&mut self) {
@@ -1970,6 +2308,7 @@ impl LauncherApp {
             Modal::LogUpload { .. } => None,
             Modal::ModpackUpdate { .. } => Some(pages::modpack_update_modal(self, window, cx).into_any_element()),
             Modal::WorldEdit { .. } => Some(pages::world_edit_modal(self, window, cx).into_any_element()),
+            Modal::SkinPaint => Some(pages::skin_paint_modal(self, window, cx).into_any_element()),
         }
     }
 }
