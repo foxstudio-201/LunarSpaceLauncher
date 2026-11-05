@@ -11,12 +11,35 @@ use tokio::io::AsyncWriteExt;
 
 pub const USER_AGENT: &str = "XyoLauncher/2.0.0";
 
+pub fn is_allowed_url(url: &reqwest::Url) -> bool {
+    match url.scheme() {
+        "https" => true,
+        "http" => matches!(url.host_str(), Some("127.0.0.1") | Some("localhost") | Some("[::1]") | Some("::1")),
+        _ => false,
+    }
+}
+
+pub fn validate_url(url: &str) -> Result<()> {
+    let parsed = reqwest::Url::parse(url).map_err(|_| anyhow!("URL không hợp lệ"))?;
+    if !is_allowed_url(&parsed) {
+        return Err(anyhow!("Chỉ cho phép tải qua HTTPS: {url}"));
+    }
+    Ok(())
+}
+
 static CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
     reqwest::Client::builder()
         .user_agent(USER_AGENT)
         .connect_timeout(Duration::from_secs(20))
         .timeout(Duration::from_secs(180))
         .pool_max_idle_per_host(24)
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            if attempt.previous().len() >= 10 || !is_allowed_url(attempt.url()) {
+                attempt.stop()
+            } else {
+                attempt.follow()
+            }
+        }))
         .build()
         .unwrap_or_else(|_| reqwest::Client::new())
 });
@@ -72,6 +95,7 @@ pub async fn fetch_json(url: &str) -> Result<Value> {
 }
 
 pub async fn fetch_json_retry(url: &str, tries: u32) -> Result<Value> {
+    validate_url(url)?;
     let mut last = anyhow!("lỗi không xác định");
     for attempt in 0..tries {
         match CLIENT
@@ -100,6 +124,7 @@ pub async fn fetch_json_retry(url: &str, tries: u32) -> Result<Value> {
 }
 
 pub async fn fetch_text(url: &str) -> Result<String> {
+    validate_url(url)?;
     let res = CLIENT.get(url).send().await?;
     if !res.status().is_success() {
         return Err(anyhow!("HTTP {} cho {}", res.status(), url));
@@ -108,6 +133,7 @@ pub async fn fetch_text(url: &str) -> Result<String> {
 }
 
 pub async fn fetch_bytes(url: &str, max: usize) -> Result<Vec<u8>> {
+    validate_url(url)?;
     let res = CLIENT.get(url).send().await?;
     if !res.status().is_success() {
         return Err(anyhow!("HTTP {} cho {}", res.status(), url));
@@ -142,6 +168,7 @@ pub async fn is_fresh(task: &DownloadTask) -> bool {
 }
 
 async fn stream_download(task: &DownloadTask, on_delta: Arc<dyn Fn(u64) + Send + Sync>) -> Result<u64> {
+    validate_url(&task.url)?;
     if let Some(parent) = task.dest.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
@@ -322,4 +349,19 @@ pub fn join_url(base: &str, rel: &str) -> String {
         base.trim_end_matches('/'),
         rel.trim_start_matches('/').replace('\\', "/")
     )
+}
+
+
+#[cfg(test)]
+mod security_tests {
+    use super::*;
+
+    #[test]
+    fn url_policy() {
+        assert!(validate_url("https://api.modrinth.com/v2/search").is_ok());
+        assert!(validate_url("http://127.0.0.1:4040/api/tunnels").is_ok());
+        assert!(validate_url("http://example.com/file").is_err());
+        assert!(validate_url("file:///C:/Windows/win.ini").is_err());
+        assert!(validate_url("ftp://example.com/file").is_err());
+    }
 }

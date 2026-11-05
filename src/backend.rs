@@ -64,6 +64,16 @@ fn fail(message: impl Into<String>) -> Value {
 
 impl Backend {
     pub fn new(store: Arc<Store>, events: Sender<Value>) -> Arc<Self> {
+        if let Some(token) = store
+            .settings()
+            .extra
+            .get("hostToken")
+            .and_then(Value::as_str)
+            .filter(|token| !token.trim().is_empty())
+        {
+            store.set_token("host-token", Some(json!({"token": token})));
+        }
+        store.remove_setting("hostToken");
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(6)
             .enable_all()
@@ -2935,12 +2945,12 @@ impl Backend {
     // ---------- ngrok host ----------
     pub fn host_status(self: &Arc<Self>, instance_id: Option<String>) -> Value {
         let settings = self.store.settings();
-        let token = settings
-            .extra
-            .get("hostToken")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string();
+        let token = self
+            .store
+            .token("host-token")
+            .and_then(|value| value.get("token").and_then(Value::as_str).map(str::to_string))
+            .unwrap_or_default();
+        let _ = settings;
         let dir = self.store.data_dir.join("tools");
         let agent = dir.join("ngrok.exe");
         let detected = instance_id
@@ -2982,7 +2992,14 @@ impl Backend {
     }
 
     pub fn host_set_token(&self, token: String) -> Value {
-        self.store.mutate_settings(json!({"hostToken": token}));
+        let trimmed = token.trim().to_string();
+        if trimmed.is_empty() {
+            self.store.set_token("host-token", None);
+        } else {
+            self.store
+                .set_token("host-token", Some(json!({"token": trimmed})));
+        }
+        self.store.remove_setting("hostToken");
         ok(json!({}))
     }
 
@@ -3006,11 +3023,8 @@ impl Backend {
                 .map(str::to_string)
                 .or_else(|| {
                     this.store
-                        .settings()
-                        .extra
-                        .get("hostToken")
-                        .and_then(Value::as_str)
-                        .map(str::to_string)
+                        .token("host-token")
+                        .and_then(|value| value.get("token").and_then(Value::as_str).map(str::to_string))
                 })
                 .unwrap_or_default();
             if token.trim().is_empty() {
@@ -3463,3 +3477,32 @@ pub fn urlencode(value: &str) -> String {
 }
 
 pub struct BackendHandle(pub Arc<Backend>);
+
+
+#[cfg(test)]
+mod security_tests {
+    use super::*;
+
+    #[test]
+    fn version_compare() {
+        assert_eq!(version_cmp("2.0.0", "1.9.9"), 1);
+        assert_eq!(version_cmp("1.0.0", "1.0.0"), 0);
+        assert_eq!(version_cmp("1.0.0", "2.0.0"), -1);
+        assert_eq!(version_cmp("26.3", "26.2"), 1);
+    }
+
+    #[test]
+    fn crash_rules_detect_oom() {
+        let lines = vec!["java.lang.OutOfMemoryError: Java heap space".to_string()];
+        let value = analyze_crash(&lines);
+        assert_eq!(value["kind"], "memory");
+        assert_eq!(value["crashed"], true);
+    }
+
+    #[test]
+    fn crash_rules_allow_clean_exit() {
+        let lines = vec!["[12:00:00] [Client thread/INFO]: Stopping!".to_string()];
+        let value = analyze_crash(&lines);
+        assert_eq!(value["kind"], "none");
+    }
+}

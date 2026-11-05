@@ -701,13 +701,13 @@ async fn mr_version_detail(version_id: &str) -> Result<Value> {
 
 fn mr_file_task(kind: Kind, version: &Value, root: &Path) -> Option<InstallTask> {
     let file = pick_file(version.get("files")?)?;
-    let filename = file.get("filename")?.as_str()?.to_string();
+    let raw_name = file.get("filename")?.as_str()?;
+    let filename = std::path::Path::new(raw_name)
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .filter(|name| !name.is_empty())?;
     let url = file.get("url")?.as_str()?.to_string();
-    let rel = if kind == Kind::Mods {
-        format!("{}/{filename}", kind.folder())
-    } else {
-        format!("{}/{filename}", kind.folder())
-    };
+    let rel = format!("{}/{filename}", kind.folder());
     Some(InstallTask {
         url,
         dest: root.join(rel.replace('/', "\\")),
@@ -806,13 +806,17 @@ async fn cf_dependencies(
             cf_file_url(file_row),
             file_row.get("fileName").and_then(Value::as_str),
         ) {
+            let name = std::path::Path::new(name)
+                .file_name()
+                .map(|value| value.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "download.bin".into());
             out.push(InstallTask {
                 url: file_url,
-                dest: root.join(kind.folder()).join(name),
+                dest: root.join(kind.folder()).join(&name),
                 sha1: cf_sha1(file_row),
                 size: file_row.get("fileLength").and_then(Value::as_u64).unwrap_or(0),
                 alts: cf_file_alts(file_row),
-                name: name.to_string(),
+                name,
             });
         }
     }
@@ -847,8 +851,8 @@ pub async fn plan(
         let name = file
             .get("fileName")
             .and_then(Value::as_str)
-            .unwrap_or("download.bin")
-            .to_string();
+            .and_then(|value| std::path::Path::new(value).file_name().map(|n| n.to_string_lossy().into_owned()))
+            .unwrap_or_else(|| "download.bin".into());
         tasks.push(InstallTask {
             url,
             dest: root.join(kind.folder()).join(&name),

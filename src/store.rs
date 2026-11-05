@@ -458,26 +458,43 @@ pub fn validate_mc_name(name: &str) -> bool {
 }
 
 pub fn safe_join(root: &Path, rel: &str) -> Result<PathBuf> {
-    let base = root
-        .canonicalize()
-        .unwrap_or_else(|_| root.to_path_buf());
-    let joined = base.join(rel.trim_start_matches('/').replace('\\', "/"));
-    let normalized = joined
-        .components()
-        .fold(PathBuf::new(), |mut acc, part| {
-            match part {
-                std::path::Component::ParentDir => {
-                    acc.pop();
-                }
-                std::path::Component::CurDir => {}
-                other => acc.push(other.as_os_str()),
-            }
-            acc
-        });
-    if !normalized.starts_with(&base) && normalized != base {
+    let base = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let cleaned = rel.trim_start_matches('/').replace(char::from(92), "/");
+    let relative = Path::new(&cleaned);
+    if relative.is_absolute()
+        || relative.components().any(|part| {
+            matches!(
+                part,
+                std::path::Component::ParentDir | std::path::Component::Prefix(_)
+            )
+        })
+    {
         return Err(anyhow!("Đường dẫn không hợp lệ"));
     }
-    Ok(normalized)
+    let target = base.join(relative);
+    if let Some(parent) = target.parent() {
+        if let Ok(canonical) = parent.canonicalize() {
+            if !canonical.starts_with(&base) {
+                return Err(anyhow!("Đường dẫn không hợp lệ"));
+            }
+        }
+    }
+    if target.exists() {
+        if let Ok(canonical) = target.canonicalize() {
+            if !canonical.starts_with(&base) {
+                return Err(anyhow!("Đường dẫn không hợp lệ"));
+            }
+        }
+    }
+    Ok(target)
+}
+
+impl Store {
+    pub fn remove_setting(&self, key: &str) {
+        let mut settings = self.settings.read().unwrap().clone();
+        settings.extra.remove(key);
+        self.set_settings(settings);
+    }
 }
 
 pub fn account_payload(account: &Account) -> Value {
@@ -625,4 +642,43 @@ fn unseal(text: &str) -> Option<String> {
     let raw = text.strip_prefix("plain:")?;
     let bytes = base64::engine::general_purpose::STANDARD.decode(raw).ok()?;
     String::from_utf8(bytes).ok()
+}
+
+
+#[cfg(test)]
+mod security_tests {
+    use super::*;
+
+    fn temp_root(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("xyo-test-{}-{}", name, uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn safe_join_blocks_traversal() {
+        let root = temp_root("join");
+        assert!(safe_join(&root, "mods/a.jar").is_ok());
+        assert!(safe_join(&root, "../outside.txt").is_err());
+        assert!(safe_join(&root, "mods/../../outside.txt").is_err());
+        assert!(safe_join(&root, "C:\\Windows\\system32").is_err());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn offline_uuid_is_version3() {
+        let uuid = offline_uuid("Player");
+        let clean: String = uuid.chars().filter(|c| *c != '-').collect();
+        assert_eq!(clean.len(), 32);
+        assert_eq!(&clean[12..13], "3");
+        assert!(matches!(&clean[16..17], "8" | "9" | "a" | "b"));
+    }
+
+    #[test]
+    fn mc_name_validation() {
+        assert!(validate_mc_name("Player_1"));
+        assert!(!validate_mc_name("ab"));
+        assert!(!validate_mc_name("bad name"));
+        assert!(!validate_mc_name("toolong_name_1234"));
+    }
 }

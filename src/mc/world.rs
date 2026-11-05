@@ -129,7 +129,10 @@ impl<'a> Reader<'a> {
         Ok(value)
     }
 
-    fn payload(&mut self, kind: u8) -> Result<Value> {
+    fn payload(&mut self, kind: u8, depth: u32) -> Result<Value> {
+        if depth > 256 {
+            return Err(anyhow!("NBT lồng quá sâu"));
+        }
         Ok(match kind {
             TAG_BYTE => json!(self.i8()?),
             TAG_SHORT => json!(self.i16()?),
@@ -139,7 +142,10 @@ impl<'a> Reader<'a> {
             TAG_DOUBLE => json!(self.f64()?),
             TAG_BYTE_ARRAY => {
                 let size = self.i32()?.max(0) as usize;
-                let mut out = Vec::with_capacity(size);
+                if size > 20_000_000 {
+                    return Err(anyhow!("Mảng NBT quá lớn"));
+                }
+                let mut out = Vec::with_capacity(size.min(1_000_000));
                 for _ in 0..size {
                     out.push(json!(self.i8()?));
                 }
@@ -149,12 +155,15 @@ impl<'a> Reader<'a> {
             TAG_LIST => {
                 let item_type = self.u8()?;
                 let size = self.i32()?.max(0) as usize;
+                if size > 10_000_000 {
+                    return Err(anyhow!("Danh sách NBT quá lớn"));
+                }
                 let mut out = Vec::with_capacity(size.min(65536));
                 for _ in 0..size {
                     out.push(json!({
                         "type": type_name(item_type),
                         "name": "",
-                        "value": self.payload(item_type)?,
+                        "value": self.payload(item_type, depth + 1)?,
                     }));
                 }
                 Value::Array(out)
@@ -170,14 +179,17 @@ impl<'a> Reader<'a> {
                     out.push(json!({
                         "type": type_name(child_type),
                         "name": name,
-                        "value": self.payload(child_type)?,
+                        "value": self.payload(child_type, depth + 1)?,
                     }));
                 }
                 Value::Array(out)
             }
             TAG_INT_ARRAY => {
                 let size = self.i32()?.max(0) as usize;
-                let mut out = Vec::with_capacity(size.min(65536));
+                if size > 20_000_000 {
+                    return Err(anyhow!("Mảng NBT quá lớn"));
+                }
+                let mut out = Vec::with_capacity(size.min(1_000_000));
                 for _ in 0..size {
                     out.push(json!(self.i32()?));
                 }
@@ -185,7 +197,10 @@ impl<'a> Reader<'a> {
             }
             TAG_LONG_ARRAY => {
                 let size = self.i32()?.max(0) as usize;
-                let mut out = Vec::with_capacity(size.min(65536));
+                if size > 20_000_000 {
+                    return Err(anyhow!("Mảng NBT quá lớn"));
+                }
+                let mut out = Vec::with_capacity(size.min(1_000_000));
                 for _ in 0..size {
                     out.push(json!(self.i64()?.to_string()));
                 }
@@ -215,7 +230,7 @@ pub fn parse_bytes(raw: &[u8]) -> Result<Value> {
     Ok(json!({
         "type": "compound",
         "name": name,
-        "value": reader.payload(TAG_COMPOUND)?,
+        "value": reader.payload(TAG_COMPOUND, 0)?,
     }))
 }
 
@@ -314,6 +329,10 @@ pub fn serialize_root(root: &Value) -> Result<Vec<u8>> {
 }
 
 pub fn read_nbt(path: &Path) -> Result<Value> {
+    let size = std::fs::metadata(path)?.len();
+    if size > 128 * 1024 * 1024 {
+        return Err(anyhow!("Tệp NBT quá lớn"));
+    }
     let raw = std::fs::read(path)?;
     parse_bytes(&raw)
 }
@@ -517,4 +536,35 @@ pub fn folder_bytes(root: &Path, cap: u64) -> u64 {
     let mut total = 0;
     walk(root, &mut total, cap);
     total
+}
+
+
+#[cfg(test)]
+mod nbt_tests {
+    use super::*;
+
+    #[test]
+    fn truncated_nbt_is_rejected() {
+        assert!(parse_bytes(&[10, 0, 0]).is_err());
+        assert!(parse_bytes(&[]).is_err());
+    }
+
+    #[test]
+    fn nbt_roundtrip() {
+        let root = serde_json::json!({
+            "type": "compound",
+            "name": "",
+            "value": [
+                {"type": "string", "name": "LevelName", "value": "Test"},
+                {"type": "int", "name": "GameType", "value": 1},
+                {"type": "compound", "name": "Data", "value": [
+                    {"type": "long", "name": "RandomSeed", "value": "123456789"}
+                ]}
+            ]
+        });
+        let bytes = serialize_root(&root).unwrap();
+        let parsed = parse_bytes(&bytes).unwrap();
+        assert_eq!(parsed["value"][0]["name"], "LevelName");
+        assert_eq!(parsed["value"][0]["value"], "Test");
+    }
 }

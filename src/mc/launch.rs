@@ -26,6 +26,19 @@ fn junction_path(link_dir: &Path, target: &str) -> Option<PathBuf> {
         return Some(link);
     }
     let _ = std::fs::create_dir_all(link_dir);
+    #[cfg(windows)]
+    {
+        if std::os::windows::fs::symlink_dir(target, &link).is_ok() {
+            return Some(link);
+        }
+    }
+    // The cmd fallback must never see shell metacharacters from the target path.
+    if target
+        .chars()
+        .any(|c| matches!(c, '&' | '|' | '<' | '>' | '^' | '%' | '!' | '"') || c as u32 == 39)
+    {
+        return None;
+    }
     let ok = std::process::Command::new("cmd")
         .args(["/C", "mklink", "/J"])
         .arg(&link)
