@@ -360,6 +360,7 @@ pub struct LauncherApp {
     pub version_search: Entity<TextField>,
     pub content_search: Entity<TextField>,
     pub name_input: Entity<TextField>,
+    pub account_name: Entity<TextField>,
     pub memory_input: Entity<TextField>,
     pub jvm_input: Entity<TextField>,
     pub ely_user: Entity<TextField>,
@@ -433,6 +434,7 @@ impl LauncherApp {
             })
         };
         let name_input = cx.new(|cx| TextField::new(cx, "Tên phiên bản…"));
+        let account_name = cx.new(|cx| TextField::new(cx, "Tên người chơi (3–16 ký tự)…"));
         let memory_input = cx.new(|cx| TextField::new(cx, "4096"));
         let jvm_input = cx.new(|cx| TextField::new(cx, "Ví dụ: -XX:+UseG1GC"));
         let ely_user = cx.new(|cx| TextField::new(cx, "Tên đăng nhập hoặc email ely.by"));
@@ -560,6 +562,7 @@ impl LauncherApp {
             version_search,
             content_search,
             name_input,
+            account_name,
             memory_input,
             jvm_input,
             ely_user,

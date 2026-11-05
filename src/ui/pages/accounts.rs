@@ -913,11 +913,11 @@ pub fn add_account_modal(app: &mut LauncherApp, _window: &mut Window, cx: &mut C
                     .text_color(theme.muted)
                     .child("Chơi không cần tài khoản Mojang. Tên chỉ gồm chữ, số, gạch dưới và dài 3–16 ký tự."),
             )
-            .child(pages::field(&theme, "Tên người chơi", app.name_input.clone(), "UUID được tạo chuẩn Mojang từ OfflinePlayer:tên."))
+            .child(pages::field(&theme, "Tên người chơi", app.account_name.clone(), "UUID được tạo chuẩn Mojang từ OfflinePlayer:tên."))
             .child(widgets::button("off-add", "Thêm tài khoản", &theme, true, move |_, _, cx| {
                 let view = offline_view.clone();
                 let _ = view.update(cx, |this, cx| {
-                    let name = this.name_input.read(cx).text().to_string();
+                    let name = this.account_name.read(cx).text().to_string();
                     let value = this.backend.account_add_offline(&name);
                     if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
                         this.refresh_accounts();
