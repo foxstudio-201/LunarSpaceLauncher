@@ -965,7 +965,7 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                         )
                         .child(div().text_size(px(10.0)).font_family(MONO).text_color(theme.faint).child(format!("{count} kết quả")))
                         .when(use_loader_games, |el| {
-                            el.child(div().text_size(px(10.0)).font_family(MONO).text_color(theme.accent_soft).child(format!("{} hỗ trợ {} phiên bản", active_name, app.create.loader_games.len())))
+                            el.child(div().text_size(px(10.0)).font_family(MONO).text_color(theme.accent_soft).child(format!("{} hỗ trợ {} phiên bản", active_name, count)))
                         }),
                 )
                 .child(game_grid),
