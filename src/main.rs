@@ -5,6 +5,7 @@ mod models;
 mod server;
 mod net;
 mod store;
+mod tray;
 mod ui;
 mod util;
 
@@ -96,6 +97,7 @@ fn main() {
             .unwrap();
             cx.activate(true);
             let icon = ui::assets::assets_root().join("img").join("icon.ico");
+            tray::start(icon.clone());
             cx.spawn(async move |cx| {
                 cx.background_executor()
                     .timer(std::time::Duration::from_millis(350))

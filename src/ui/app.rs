@@ -640,6 +640,13 @@ impl LauncherApp {
                 }
             }
         }
+        crate::tray::set_running(
+            self.instances
+                .iter()
+                .filter(|entry| entry.running || matches!(entry.status.as_str(), "running" | "starting" | "stopping"))
+                .map(|entry| entry.name.clone())
+                .collect(),
+        );
     }
 
     fn paint_dims(&self) -> (u32, u32) {
@@ -1455,6 +1462,13 @@ impl LauncherApp {
                     entry.status = status.to_string();
                     entry.running = status == "running" || status == "starting";
                 }
+                crate::tray::set_running(
+                    self.instances
+                        .iter()
+                        .filter(|entry| entry.running || matches!(entry.status.as_str(), "running" | "starting" | "stopping"))
+                        .map(|entry| entry.name.clone())
+                        .collect(),
+                );
             }
             "exit" => {
                 self.refresh_instances();
