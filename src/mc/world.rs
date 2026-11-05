@@ -771,6 +771,111 @@ pub fn list_tree(root: &Path, rel: &str) -> Result<Vec<FileEntry>> {
     Ok(out)
 }
 
+fn world_data(root: &Value) -> Option<&Vec<Value>> {
+    root.get("value")?
+        .as_array()?
+        .iter()
+        .find(|node| node.get("name").and_then(Value::as_str) == Some("Data"))?
+        .get("value")?
+        .as_array()
+}
+
+fn data_node<'a>(data: &'a [Value], name: &str) -> Option<&'a Value> {
+    data.iter()
+        .find(|node| node.get("name").and_then(Value::as_str) == Some(name))
+}
+
+fn data_number(data: &[Value], name: &str) -> i64 {
+    data_node(data, name)
+        .and_then(|node| node.get("value"))
+        .and_then(|value| {
+            value
+                .as_i64()
+                .or_else(|| value.as_str().and_then(|text| text.parse().ok()))
+        })
+        .unwrap_or(0)
+}
+
+pub fn read_world_settings(instance_dir: &Path, world: &str) -> Result<Value> {
+    let root = read_world_file(instance_dir, world, "level.dat")?;
+    let data = world_data(&root).ok_or_else(|| anyhow!("level.dat không có dữ liệu Data"))?;
+    let text = |name: &str| {
+        data_node(data, name)
+            .and_then(|node| node.get("value"))
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string()
+    };
+    Ok(serde_json::json!({
+        "name": text("LevelName"),
+        "seed": text("RandomSeed"),
+        "gameType": data_number(data, "GameType"),
+        "difficulty": data_number(data, "Difficulty"),
+        "hardcore": data_number(data, "hardcore") != 0,
+        "cheats": data_number(data, "allowCommands") != 0,
+        "time": text("Time"),
+        "dayTime": text("DayTime"),
+        "spawnX": data_number(data, "SpawnX"),
+        "spawnY": data_number(data, "SpawnY"),
+        "spawnZ": data_number(data, "SpawnZ"),
+    }))
+}
+
+fn set_world_value(root: &mut Value, name: &str, value: Value) -> bool {
+    let Some(entries) = root.get_mut("value").and_then(Value::as_array_mut) else {
+        return false;
+    };
+    let Some(data) = entries
+        .iter_mut()
+        .find(|node| node.get("name").and_then(Value::as_str) == Some("Data"))
+    else {
+        return false;
+    };
+    let Some(nodes) = data.get_mut("value").and_then(Value::as_array_mut) else {
+        return false;
+    };
+    let Some(node) = nodes
+        .iter_mut()
+        .find(|node| node.get("name").and_then(Value::as_str) == Some(name))
+    else {
+        return false;
+    };
+    if let Some(object) = node.as_object_mut() {
+        object.insert("value".into(), value);
+        true
+    } else {
+        false
+    }
+}
+
+pub fn write_world_settings(instance_dir: &Path, world: &str, patch: &Value) -> Result<()> {
+    let mut root = read_world_file(instance_dir, world, "level.dat")?;
+    if let Some(name) = patch.get("name").and_then(Value::as_str).filter(|v| !v.trim().is_empty()) {
+        set_world_value(&mut root, "LevelName", serde_json::json!(name.trim()));
+    }
+    if let Some(seed) = patch.get("seed").and_then(Value::as_str).filter(|v| !v.trim().is_empty()) {
+        if seed.trim().parse::<i64>().is_ok() {
+            set_world_value(&mut root, "RandomSeed", serde_json::json!(seed.trim()));
+        }
+    }
+    if let Some(game) = patch.get("gameType").and_then(Value::as_i64) {
+        set_world_value(&mut root, "GameType", serde_json::json!(game));
+    }
+    if let Some(difficulty) = patch.get("difficulty").and_then(Value::as_i64) {
+        set_world_value(&mut root, "Difficulty", serde_json::json!(difficulty));
+    }
+    if let Some(hardcore) = patch.get("hardcore").and_then(Value::as_bool) {
+        set_world_value(&mut root, "hardcore", serde_json::json!(if hardcore { 1 } else { 0 }));
+    }
+    if let Some(cheats) = patch.get("cheats").and_then(Value::as_bool) {
+        set_world_value(&mut root, "allowCommands", serde_json::json!(if cheats { 1 } else { 0 }));
+    }
+    let path = world_dir(instance_dir, world)?.join("level.dat");
+    let bytes = write_nbt(&path, &root, true, true)?;
+    let _ = bytes;
+    Ok(())
+}
+
 pub fn read_world_file(instance_dir: &Path, world: &str, file: &str) -> Result<Value> {
     let dir = world_dir(instance_dir, world)?;
     let path = crate::store::safe_join(&dir, file)?;

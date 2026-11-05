@@ -2630,6 +2630,26 @@ impl Backend {
         }
     }
 
+    pub fn world_settings_read(&self, id: &str, folder: &str) -> Value {
+        let Some(entry) = self.store.find_instance(id) else {
+            return fail("Không tìm thấy instance.");
+        };
+        match crate::mc::world::read_world_settings(Path::new(&entry.dir), folder) {
+            Ok(value) => ok(value),
+            Err(err) => fail(err.to_string()),
+        }
+    }
+
+    pub fn world_settings_write(&self, id: &str, folder: &str, patch: Value) -> Value {
+        let Some(entry) = self.store.find_instance(id) else {
+            return fail("Không tìm thấy instance.");
+        };
+        match crate::mc::world::write_world_settings(Path::new(&entry.dir), folder, &patch) {
+            Ok(_) => ok(json!({})),
+            Err(err) => fail(err.to_string()),
+        }
+    }
+
     pub fn world_map(self: &Arc<Self>, id: String, folder: String) -> Receiver<Value> {
         let this = self.clone();
         self.request(async move {

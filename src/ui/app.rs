@@ -177,6 +177,10 @@ pub struct InstanceUi {
     pub console_hidden: usize,
     pub console_search_open: bool,
     pub modpack_busy: bool,
+    pub world_game_type: i64,
+    pub world_difficulty: i64,
+    pub world_hardcore: bool,
+    pub world_cheats: bool,
 }
 
 impl Default for InstanceUi {
@@ -203,6 +207,10 @@ impl Default for InstanceUi {
             console_hidden: 0,
             console_search_open: false,
             modpack_busy: false,
+            world_game_type: 0,
+            world_difficulty: 2,
+            world_hardcore: false,
+            world_cheats: false,
         }
     }
 }
@@ -247,6 +255,11 @@ pub enum Modal {
         versions: Vec<Value>,
         selected: Option<String>,
         current: Option<String>,
+    },
+    WorldEdit {
+        id: String,
+        folder: String,
+        settings: Value,
     },
 }
 
@@ -1944,6 +1957,7 @@ impl LauncherApp {
             Modal::Confirm { .. } => Some(pages::confirm_modal(self, window, cx).into_any_element()),
             Modal::LogUpload { .. } => None,
             Modal::ModpackUpdate { .. } => Some(pages::modpack_update_modal(self, window, cx).into_any_element()),
+            Modal::WorldEdit { .. } => Some(pages::world_edit_modal(self, window, cx).into_any_element()),
         }
     }
 }

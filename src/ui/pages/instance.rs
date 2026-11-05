@@ -2052,6 +2052,33 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                                 .child(widgets::ghost_button("world-folder", "Mở thư mục", &theme, move |_, _, _cx| {
                                     let _ = open::that(Path::new(&dir).join("saves").join(&folder));
                                 }))
+                                .child(widgets::ghost_button("world-edit", "Sửa", &theme, {
+                                    let view = view.clone();
+                                    let folder = folder_map.clone();
+                                    move |_, _, cx| {
+                                        let folder = folder.clone();
+                                        let _ = view.update(cx, |this, cx| {
+                                            let Some(id) = this.selected_instance.clone() else { return };
+                                            let value = this.backend.world_settings_read(&id, &folder);
+                                            if !value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+                                                this.toast("bad", "Không đọc được level.dat", value.get("error").and_then(Value::as_str).unwrap_or(""), cx);
+                                                return;
+                                            }
+                                            this.instance_ui.world_game_type = value.get("gameType").and_then(Value::as_i64).unwrap_or(0);
+                                            this.instance_ui.world_difficulty = value.get("difficulty").and_then(Value::as_i64).unwrap_or(2);
+                                            this.instance_ui.world_hardcore = value.get("hardcore").and_then(Value::as_bool).unwrap_or(false);
+                                            this.instance_ui.world_cheats = value.get("cheats").and_then(Value::as_bool).unwrap_or(false);
+                                            let name = value.get("name").and_then(Value::as_str).unwrap_or("").to_string();
+                                            let seed = value.get("seed").and_then(Value::as_str).unwrap_or("").to_string();
+                                            let input = this.name_input.clone();
+                                            input.update(cx, |input, cx| input.set_text(name, cx));
+                                            let input = this.memory_input.clone();
+                                            input.update(cx, |input, cx| input.set_text(seed, cx));
+                                            this.modal = Modal::WorldEdit { id, folder: folder.clone(), settings: value };
+                                            cx.notify();
+                                        });
+                                    }
+                                }))
                                 .child(widgets::ghost_button("world-map", "Bản đồ", &theme, {
                                     let folder = folder_map.clone();
                                     move |_, _, cx| {

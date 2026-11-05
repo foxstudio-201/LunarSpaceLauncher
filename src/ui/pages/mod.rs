@@ -247,6 +247,231 @@ pub fn modal_overlay(
         )
 }
 
+pub fn world_edit_modal(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<LauncherApp>) -> impl IntoElement {
+    let theme = app.theme.clone();
+    let (id, folder) = match &app.modal {
+        Modal::WorldEdit { id, folder, .. } => (id.clone(), folder.clone()),
+        _ => (String::new(), String::new()),
+    };
+    let view_close = cx.entity().downgrade();
+    let view_save = cx.entity().downgrade();
+    let view_game = cx.entity().downgrade();
+    let view_difficulty = cx.entity().downgrade();
+    let view_hardcore = cx.entity().downgrade();
+    let view_cheats = cx.entity().downgrade();
+
+    let mut game_row = div().flex().items_center().gap_2();
+    for (value, label) in [(0i64, "Sinh tồn"), (1, "Sáng tạo"), (2, "Phiêu lưu"), (3, "Khán giả")] {
+        let active = app.instance_ui.world_game_type == value;
+        let view = view_game.clone();
+        game_row = game_row.child(
+            div()
+                .id(gpui::SharedString::from(format!("world-game-{value}")))
+                .h(px(28.0))
+                .px(px(10.0))
+                .flex()
+                .items_center()
+                .rounded(px(6.0))
+                .bg(if active { theme.accent_dim } else { theme.surface })
+                .border_1()
+                .border_color(if active { theme.accent } else { theme.border_soft })
+                .text_size(px(TEXT_XS))
+                .text_color(if active { theme.accent_soft } else { theme.muted })
+                .cursor_pointer()
+                .on_click(move |_, _, cx| {
+                    let _ = view.update(cx, |this, cx| {
+                        this.instance_ui.world_game_type = value;
+                        cx.notify();
+                    });
+                })
+                .child(label.to_string()),
+        );
+    }
+    let mut difficulty_row = div().flex().items_center().gap_2();
+    for (value, label) in [(0i64, "Bình yên"), (1, "Dễ"), (2, "Thường"), (3, "Khó")] {
+        let active = app.instance_ui.world_difficulty == value;
+        let view = view_difficulty.clone();
+        difficulty_row = difficulty_row.child(
+            div()
+                .id(gpui::SharedString::from(format!("world-diff-{value}")))
+                .h(px(28.0))
+                .px(px(10.0))
+                .flex()
+                .items_center()
+                .rounded(px(6.0))
+                .bg(if active { theme.accent_dim } else { theme.surface })
+                .border_1()
+                .border_color(if active { theme.accent } else { theme.border_soft })
+                .text_size(px(TEXT_XS))
+                .text_color(if active { theme.accent_soft } else { theme.muted })
+                .cursor_pointer()
+                .on_click(move |_, _, cx| {
+                    let _ = view.update(cx, |this, cx| {
+                        this.instance_ui.world_difficulty = value;
+                        cx.notify();
+                    });
+                })
+                .child(label.to_string()),
+        );
+    }
+
+    let toggle = |key: &'static str,
+                  label: &'static str,
+                  active: bool,
+                  view: gpui::WeakEntity<LauncherApp>,
+                  hardcore: bool| {
+        let theme = theme.clone();
+        div()
+            .id(gpui::SharedString::from(format!("world-toggle-{key}")))
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_4()
+            .child(div().text_size(px(TEXT_SM)).text_color(theme.muted).child(label))
+            .child(
+                div()
+                    .id(gpui::SharedString::from(format!("world-switch-{key}")))
+                    .w(px(40.0))
+                    .h(px(22.0))
+                    .rounded_full()
+                    .bg(if active { theme.accent } else { theme.surface_active })
+                    .p(px(3.0))
+                    .flex()
+                    .items_center()
+                    .when(active, |el| el.justify_end())
+                    .cursor_pointer()
+                    .on_click(move |_, _, cx| {
+                        let _ = view.update(cx, |this, cx| {
+                            if hardcore {
+                                this.instance_ui.world_hardcore = !this.instance_ui.world_hardcore;
+                            } else {
+                                this.instance_ui.world_cheats = !this.instance_ui.world_cheats;
+                            }
+                            cx.notify();
+                        });
+                    })
+                    .child(div().size(px(16.0)).rounded_full().bg(gpui::white())),
+            )
+    };
+
+    let content = div()
+        .flex()
+        .flex_col()
+        .gap_4()
+        .child(
+            div()
+                .flex()
+                .items_start()
+                .justify_between()
+                .gap_3()
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .child(div().text_size(px(TEXT_2XL)).font_weight(bold()).text_color(theme.text).child("Sửa thế giới"))
+                        .child(
+                            div()
+                                .text_size(px(TEXT_SM))
+                                .text_color(theme.muted)
+                                .child(format!("saves/{folder} · level.dat sẽ được sao lưu trước khi ghi.")),
+                        ),
+                )
+                .child(widgets::icon_button("world-close", "x", &theme, move |_, _, cx| {
+                    let _ = view_close.update(cx, |this, cx| {
+                        this.modal = Modal::None;
+                        cx.notify();
+                    });
+                })),
+        )
+        .child(
+            div()
+                .flex()
+                .gap_3()
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .flex_1()
+                        .child(div().text_size(px(TEXT_SM)).text_color(theme.muted).child("Tên thế giới"))
+                        .child(widgets::text_input_box(&theme).child(app.name_input.clone())),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .flex_1()
+                        .child(div().text_size(px(TEXT_SM)).text_color(theme.muted).child("Seed (số nguyên)"))
+                        .child(widgets::text_input_box(&theme).child(app.memory_input.clone())),
+                ),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(div().text_size(px(TEXT_SM)).text_color(theme.muted).child("Chế độ chơi"))
+                .child(game_row)
+                .child(div().text_size(px(TEXT_SM)).text_color(theme.muted).child("Độ khó"))
+                .child(difficulty_row),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(toggle("hardcore", "Chế độ sinh tồn khó (hardcore)", app.instance_ui.world_hardcore, view_hardcore, true))
+                .child(toggle("cheats", "Cho phép lệnh (cheats)", app.instance_ui.world_cheats, view_cheats, false)),
+        )
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .justify_end()
+                .gap_2()
+                .child(widgets::ghost_button("world-cancel", "Huỷ", &theme, {
+                    let view = cx.entity().downgrade();
+                    move |_, _, cx| {
+                        let _ = view.update(cx, |this, cx| {
+                            this.modal = Modal::None;
+                            cx.notify();
+                        });
+                    }
+                }))
+                .child(widgets::button("world-save", "Lưu thay đổi", &theme, true, move |_, _, cx| {
+                    let _ = view_save.update(cx, |this, cx| {
+                        let name = this.name_input.read(cx).text().trim().to_string();
+                        let seed = this.memory_input.read(cx).text().trim().to_string();
+                        let patch = json!({
+                            "name": name,
+                            "seed": seed,
+                            "gameType": this.instance_ui.world_game_type,
+                            "difficulty": this.instance_ui.world_difficulty,
+                            "hardcore": this.instance_ui.world_hardcore,
+                            "cheats": this.instance_ui.world_cheats,
+                        });
+                        let value = this.backend.world_settings_write(&id, &folder, patch);
+                        if value.get("ok").and_then(serde_json::Value::as_bool).unwrap_or(false) {
+                            this.modal = Modal::None;
+                            this.toast("ok", "Đã lưu thế giới", "level.dat được sao lưu thành .bak", cx);
+                            this.load_worlds(cx);
+                        } else {
+                            this.toast("bad", "Lưu thế giới thất bại", value.get("error").and_then(serde_json::Value::as_str).unwrap_or(""), cx);
+                        }
+                    });
+                })),
+        );
+
+    let backdrop = cx.entity().downgrade();
+    modal_overlay(theme, 520.0, content, move |_, _, cx| {
+        let _ = backdrop.update(cx, |this, cx| {
+            this.modal = Modal::None;
+            cx.notify();
+        });
+    })
+}
+
 pub fn modpack_update_modal(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<LauncherApp>) -> impl IntoElement {
     let theme = app.theme.clone();
     let (id, versions, selected, current) = match &app.modal {
