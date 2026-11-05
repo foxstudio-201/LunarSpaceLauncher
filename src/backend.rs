@@ -50,6 +50,17 @@ pub struct Backend {
     host: Mutex<HostState>,
     presence: Mutex<Option<crate::discord::Discord>>,
     schedule_marks: Mutex<HashMap<String, String>>,
+    discord_pending: Mutex<Option<DiscordPending>>,
+    discord_stop: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+}
+
+#[derive(Clone, Debug)]
+struct DiscordPending {
+    state: String,
+    name: String,
+    account_id: String,
+    link_id: String,
+    force: bool,
 }
 
 fn ok(mut value: Value) -> Value {
@@ -94,6 +105,8 @@ impl Backend {
             host: Mutex::new(HostState::default()),
             presence: Mutex::new(if rpc { Some(crate::discord::Discord::start()) } else { None }),
             schedule_marks: Mutex::new(HashMap::new()),
+            discord_pending: Mutex::new(None),
+            discord_stop: Mutex::new(None),
         });
         backend.start_scheduler();
         backend
@@ -1820,45 +1833,20 @@ impl Backend {
     pub fn start_ms_login(self: &Arc<Self>) -> Receiver<Value> {
         let this = self.clone();
         self.request(async move {
-            match auth::start_device_code().await {
-                Ok(device) => {
-                    let url = device.verification_uri.clone();
-                    let code = device.user_code.clone();
-                    let _ = open::that(&url);
-                    let tx = this.events.clone();
-                    let poll_device = device.clone();
-                    this.runtime.spawn(async move {
-                        match auth::wait_device_token(&poll_device).await {
-                            Ok(ms) => match auth::build_ms_session(&ms).await {
-                                Ok(session) => {
-                                    let result = {
-                                        // Account is added through an event; the UI applies it.
-                                        json!({"session": session})
-                                    };
-                                    let _ = tx.send(json!({"type": "ms_login", "ok": true, "data": result})).await;
-                                }
-                                Err(err) => {
-                                    let _ = tx.send(json!({"type": "ms_login", "ok": false, "error": err.to_string()})).await;
-                                }
-                            },
-                            Err(err) => {
-                                let _ = tx.send(json!({"type": "ms_login", "ok": false, "error": err.to_string()})).await;
-                            }
-                        }
-                    });
-                    ok(json!({
-                        "userCode": code,
-                        "verificationUri": url,
-                        "expiresIn": device.expires_in,
-                    }))
-                }
+            let code = match tokio::task::spawn_blocking(crate::ms_login::login_code).await {
+                Ok(Ok(code)) => code,
+                Ok(Err(err)) => return fail(err),
+                Err(err) => return fail(err.to_string()),
+            };
+            let ms = match auth::exchange_oauth_code(&code).await {
+                Ok(value) => value,
+                Err(err) => return fail(err.to_string()),
+            };
+            match auth::build_ms_session(&ms).await {
+                Ok(session) => this.add_auth_account(&session, "microsoft"),
                 Err(err) => fail(err.to_string()),
             }
         })
-    }
-
-    pub fn complete_ms_login(&self, session: AuthSession) -> Value {
-        self.add_auth_account(&session, "microsoft")
     }
 
     pub fn ely_login(self: &Arc<Self>, username: String, password: String) -> Receiver<Value> {
@@ -3171,6 +3159,393 @@ impl Backend {
         match crate::server::prune_client_mods(&entry) {
             Ok((checked, moved)) => ok(json!({"checked": checked, "moved": moved})),
             Err(err) => fail(err.to_string()),
+        }
+    }
+
+    pub fn discord_links(self: &Arc<Self>) -> Receiver<Value> {
+        self.request(async move {
+            match crate::discord_link::links().await {
+                Ok(value) => value,
+                Err(err) => fail(err.to_string()),
+            }
+        })
+    }
+
+    fn stop_discord_server(&self) {
+        if let Some(stop) = self.discord_stop.lock().take() {
+            let _ = stop.send(());
+        }
+    }
+
+    pub fn discord_cancel(&self) -> Value {
+        *self.discord_pending.lock() = None;
+        self.stop_discord_server();
+        ok(json!({}))
+    }
+
+    pub fn discord_unlink(self: &Arc<Self>, account_id: String) -> Receiver<Value> {
+        let this = self.clone();
+        self.request(async move {
+            let Some(account) = this.store.accounts().into_iter().find(|row| row.id == account_id) else {
+                return fail("Không tìm thấy tài khoản.");
+            };
+            let list = match crate::discord_link::links().await {
+                Ok(value) => value,
+                Err(err) => return fail(err.to_string()),
+            };
+            let Some(link) = list
+                .get("items")
+                .and_then(Value::as_array)
+                .and_then(|rows| {
+                    rows.iter().find(|row| {
+                        row.get("accountUuid").and_then(Value::as_str) == Some(account.uuid.as_str())
+                            || row.get("accountId").and_then(Value::as_str) == Some(account.id.as_str())
+                    })
+                })
+                .cloned()
+            else {
+                return fail("Tài khoản này chưa liên kết Discord.");
+            };
+            let id = link.get("id").and_then(Value::as_str).unwrap_or("");
+            match crate::discord_link::unlink(id).await {
+                Ok(value) if value.get("ok").and_then(Value::as_bool).unwrap_or(false) => {
+                    this.emit(json!({"type": "discord-unlinked", "accountId": account.id, "link": link}));
+                    ok(json!({"link": link}))
+                }
+                Ok(value) => fail(value.get("error").and_then(Value::as_str).unwrap_or("Gỡ liên kết thất bại.")),
+                Err(err) => fail(err.to_string()),
+            }
+        })
+    }
+
+    pub fn discord_link_start(self: &Arc<Self>, opts: Value) -> Receiver<Value> {
+        let this = self.clone();
+        self.request(async move {
+            let name = opts.get("name").and_then(Value::as_str).unwrap_or("").trim().to_string();
+            let account_id = opts.get("accountId").and_then(Value::as_str).unwrap_or("").to_string();
+            let link_id = opts.get("linkId").and_then(Value::as_str).unwrap_or("").to_string();
+            let force = opts.get("force").and_then(Value::as_bool).unwrap_or(false);
+            if name.is_empty() && account_id.is_empty() {
+                return fail("Nhập tên tài khoản hoặc chọn tài khoản có sẵn trước khi liên kết.");
+            }
+            let config = match crate::discord_link::config().await {
+                Ok(value) => value,
+                Err(err) => return fail(err.to_string()),
+            };
+            if config.get("mode").and_then(Value::as_str).unwrap_or("loopback") != "loopback" {
+                return fail("Bot Discord chưa bật chế độ loopback.");
+            }
+            let port = config
+                .get("loopbackPort")
+                .and_then(Value::as_u64)
+                .unwrap_or(53682) as u16;
+            let authorize_template = config
+                .get("authorizeUrl")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string);
+            let Some(authorize_template) = authorize_template else {
+                return fail("Bot Discord chưa cấu hình liên kết uỷ quyền.");
+            };
+
+            this.stop_discord_server();
+            let listener = match tokio::net::TcpListener::bind(("127.0.0.1", port)).await {
+                Ok(listener) => listener,
+                Err(err) => {
+                    return fail(format!(
+                        "Không mở được cổng {port} để nhận uỷ quyền: {err}. Hãy thoát hẳn launcher cũ rồi thử lại."
+                    ))
+                }
+            };
+            let (stop_tx, mut stop_rx) = tokio::sync::oneshot::channel();
+            *this.discord_stop.lock() = Some(stop_tx);
+            let state = crate::discord_link::new_state();
+            *this.discord_pending.lock() = Some(DiscordPending {
+                state: state.clone(),
+                name,
+                account_id,
+                link_id,
+                force,
+            });
+            let server = this.clone();
+            this.runtime.spawn(async move {
+                loop {
+                    tokio::select! {
+                        _ = &mut stop_rx => break,
+                        accepted = listener.accept() => {
+                            if let Ok((stream, _)) = accepted {
+                                let server = server.clone();
+                                tokio::spawn(async move {
+                                    server.handle_discord_conn(stream).await;
+                                });
+                            }
+                        }
+                    }
+                }
+            });
+            let url = crate::discord_link::authorize_url(&authorize_template, &state);
+            let _ = open::that(&url);
+            ok(json!({
+                "authorizeUrl": url,
+                "mode": "loopback",
+                "port": port,
+                "state": state,
+            }))
+        })
+    }
+
+    async fn handle_discord_conn(self: &Arc<Self>, mut stream: tokio::net::TcpStream) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let mut raw = Vec::new();
+        let mut buffer = [0u8; 4096];
+        let mut header_end = None;
+        loop {
+            let read = match tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                stream.read(&mut buffer),
+            )
+            .await
+            {
+                Ok(Ok(read)) => read,
+                _ => break,
+            };
+            if read == 0 {
+                break;
+            }
+            raw.extend_from_slice(&buffer[..read]);
+            if raw.len() > 256 * 1024 {
+                break;
+            }
+            if header_end.is_none() {
+                header_end = raw.windows(4).position(|window| window == b"\r\n\r\n").map(|at| at + 4);
+                if header_end.is_some() {
+                    let headers = String::from_utf8_lossy(&raw[..header_end.unwrap()]).to_string();
+                    let length = headers
+                        .lines()
+                        .find_map(|line| {
+                            let (name, value) = line.split_once(':')?;
+                            if name.eq_ignore_ascii_case("content-length") {
+                                value.trim().parse::<usize>().ok()
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or(0);
+                    if length > 64 * 1024 {
+                        break;
+                    }
+                    if raw.len() >= header_end.unwrap() + length {
+                        break;
+                    }
+                }
+            } else if let Some(end) = header_end {
+                let headers = String::from_utf8_lossy(&raw[..end]).to_string();
+                let length = headers
+                    .lines()
+                    .find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        if name.eq_ignore_ascii_case("content-length") {
+                            value.trim().parse::<usize>().ok()
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(0);
+                if raw.len() >= end + length {
+                    break;
+                }
+            }
+        }
+        let Some(end) = header_end else {
+            let _ = stream.shutdown().await;
+            return;
+        };
+        let headers = String::from_utf8_lossy(&raw[..end]).to_string();
+        let request_line = headers.lines().next().unwrap_or("").to_string();
+        let mut parts = request_line.split_whitespace();
+        let method = parts.next().unwrap_or("");
+        let path = parts.next().unwrap_or("");
+        let length = headers
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                if name.eq_ignore_ascii_case("content-length") {
+                    value.trim().parse::<usize>().ok()
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(0);
+        let body = if raw.len() > end {
+            raw[end..(end + length).min(raw.len())].to_vec()
+        } else {
+            Vec::new()
+        };
+
+        if method == "GET" && path.starts_with("/discord") {
+            let html = crate::discord_link::html_page();
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{}",
+                html.len(),
+                html
+            );
+            let _ = stream.write_all(response.as_bytes()).await;
+            let _ = stream.shutdown().await;
+            return;
+        }
+
+        if method == "POST" && path.starts_with("/discord/token") {
+            let payload: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+            let response = if let Some(error) = payload.get("error").and_then(Value::as_str).filter(|value| !value.is_empty()) {
+                let message = if error == "access_denied" {
+                    "Đã huỷ uỷ quyền Discord.".to_string()
+                } else {
+                    format!("Discord báo lỗi: {error}")
+                };
+                self.emit(json!({"type": "discord-failed", "error": message}));
+                json!({"ok": false, "error": message})
+            } else {
+                let token = payload.get("access_token").and_then(Value::as_str).unwrap_or("");
+                let state = payload.get("state").and_then(Value::as_str).unwrap_or("");
+                self.finish_discord_link(token, state).await
+            };
+            let text = response.to_string();
+            let reply = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                text.len(),
+                text
+            );
+            let _ = stream.write_all(reply.as_bytes()).await;
+            let _ = stream.shutdown().await;
+            return;
+        }
+
+        let _ = stream
+            .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            .await;
+        let _ = stream.shutdown().await;
+    }
+
+    async fn finish_discord_link(self: &Arc<Self>, token: &str, state: &str) -> Value {
+        if token.trim().is_empty() {
+            self.emit(json!({"type": "discord-failed", "error": "Discord không trả về access token."}));
+            return json!({"ok": false, "error": "Thiếu access token."});
+        }
+        let pending = self.discord_pending.lock().clone();
+        let Some(pending) = pending else {
+            self.emit(json!({"type": "discord-failed", "error": "Không có phiên liên kết đang chờ."}));
+            return json!({"ok": false, "error": "Không có phiên liên kết."});
+        };
+        if !state.is_empty() && state != pending.state {
+            self.emit(json!({"type": "discord-failed", "error": "Phiên liên kết không khớp. Hãy bắt đầu lại."}));
+            return json!({"ok": false, "error": "State không khớp."});
+        }
+        let (account, created) = if !pending.account_id.is_empty() {
+            match self.store.accounts().into_iter().find(|row| row.id == pending.account_id) {
+                Some(account) => (account, false),
+                None => {
+                    self.emit(json!({"type": "discord-failed", "error": "Không tìm thấy tài khoản cần liên kết."}));
+                    return json!({"ok": false, "error": "Không tìm thấy tài khoản."});
+                }
+            }
+        } else {
+            let mut name = crate::discord_link::account_name(&pending.name, "");
+            if name.is_empty() {
+                match crate::discord_link::verify(token).await {
+                    Ok(value) if value.get("ok").and_then(Value::as_bool).unwrap_or(false) => {
+                        let discord = value.get("discord").cloned().unwrap_or(Value::Null);
+                        name = crate::discord_link::account_name(
+                            pending.name.as_str().is_empty()
+                                .then(|| discord.get("name").and_then(Value::as_str).unwrap_or(""))
+                                .unwrap_or(pending.name.as_str()),
+                            discord.get("id").and_then(Value::as_str).unwrap_or(""),
+                        );
+                    }
+                    Ok(value) => {
+                        let message = value
+                            .get("error")
+                            .and_then(Value::as_str)
+                            .unwrap_or("Không xác minh được Discord.");
+                        self.emit(json!({"type": "discord-failed", "error": message}));
+                        return json!({"ok": false, "error": message});
+                    }
+                    Err(err) => {
+                        self.emit(json!({"type": "discord-failed", "error": err.to_string()}));
+                        return json!({"ok": false, "error": err.to_string()});
+                    }
+                }
+            }
+            if name.is_empty() {
+                self.emit(json!({"type": "discord-failed", "error": "Tên Discord không hợp lệ cho tài khoản Minecraft."}));
+                return json!({"ok": false, "error": "Tên không hợp lệ."});
+            }
+            if let Some(existing) = self.store.accounts().into_iter().find(|row| row.name.eq_ignore_ascii_case(&name)) {
+                (existing, false)
+            } else {
+                let value = self.account_add_offline(&name);
+                let Some(account) = value
+                    .get("added")
+                    .cloned()
+                    .and_then(|row| serde_json::from_value::<Account>(row).ok())
+                else {
+                    let message = value.get("error").and_then(Value::as_str).unwrap_or("Không tạo được tài khoản.");
+                    self.emit(json!({"type": "discord-failed", "error": message}));
+                    return json!({"ok": false, "error": message});
+                };
+                (account, true)
+            }
+        };
+        let payload = json!({
+            "id": account.id,
+            "name": account.name,
+            "uuid": account.uuid,
+            "type": account.kind,
+        });
+        let result = crate::discord_link::link_account(token, &pending.link_id, pending.force, payload).await;
+        *self.discord_pending.lock() = None;
+        self.stop_discord_server();
+        match result {
+            Ok(value) if value.get("ok").and_then(Value::as_bool).unwrap_or(false) => {
+                let link = value.get("link").cloned().unwrap_or(Value::Null);
+                self.emit(json!({
+                    "type": "discord-linked",
+                    "link": link,
+                    "account": {
+                        "id": account.id,
+                        "name": account.name,
+                        "uuid": account.uuid,
+                        "type": account.kind,
+                    },
+                    "created": created,
+                }));
+                json!({
+                    "ok": true,
+                    "discord": {
+                        "name": link.get("discordName").cloned().unwrap_or(Value::Null),
+                        "tag": link.get("discordTag").cloned().unwrap_or(Value::Null),
+                        "avatar": link.get("discordAvatar").cloned().unwrap_or(Value::Null),
+                    },
+                    "account": account.name,
+                })
+            }
+            Ok(value) => {
+                let message = value
+                    .get("error")
+                    .and_then(Value::as_str)
+                    .unwrap_or("Liên kết Discord thất bại.");
+                let conflict = value.get("conflict").and_then(Value::as_bool).unwrap_or(false);
+                self.emit(json!({
+                    "type": "discord-failed",
+                    "error": message,
+                    "conflict": conflict,
+                    "holder": value.get("holder").cloned().unwrap_or(Value::Null),
+                }));
+                json!({"ok": false, "error": message, "conflict": conflict, "holder": value.get("holder").cloned().unwrap_or(Value::Null)})
+            }
+            Err(err) => {
+                self.emit(json!({"type": "discord-failed", "error": err.to_string()}));
+                json!({"ok": false, "error": err.to_string()})
+            }
         }
     }
 

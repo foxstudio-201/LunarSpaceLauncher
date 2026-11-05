@@ -1,6 +1,8 @@
 mod backend;
 mod discord;
+mod discord_link;
 mod mc;
+mod ms_login;
 mod models;
 mod server;
 mod net;

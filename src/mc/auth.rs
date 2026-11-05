@@ -10,98 +10,28 @@ pub const ELY_AUTH_SERVER: &str = "https://authserver.ely.by";
 pub const ELY_AUTHLIB_API: &str = "https://authserver.ely.by/api/authlib-injector";
 const INJECTOR_META: &str = "https://authlib-injector.yushi.moe/artifact/latest.json";
 
-#[derive(Clone, Debug)]
-pub struct DeviceAuth {
-    pub user_code: String,
-    pub device_code: String,
-    pub verification_uri: String,
-    pub interval: u64,
-    pub expires_in: u64,
-}
-
-pub async fn start_device_code() -> Result<DeviceAuth> {
+pub async fn exchange_oauth_code(code: &str) -> Result<Value> {
     let res = crate::net::client()
-        .post("https://login.live.com/oauth20_connect.srf")
+        .post("https://login.live.com/oauth20_token.srf")
         .form(&[
             ("client_id", MS_CLIENT_ID),
+            ("code", code),
+            ("grant_type", "authorization_code"),
+            ("redirect_uri", "https://login.live.com/oauth20_desktop.srf"),
             ("scope", MS_SCOPE),
-            ("response_type", "device_code"),
         ])
         .send()
         .await?;
     let status = res.status();
     let body: Value = res.json().await.unwrap_or(Value::Null);
-    if !status.is_success() {
-        return Err(anyhow!(
-            "Không tạo được mã đăng nhập Microsoft (HTTP {status})."
-        ));
-    }
-    let user_code = body
-        .get("user_code")
-        .and_then(Value::as_str)
-        .ok_or_else(|| anyhow!("Microsoft không trả về mã đăng nhập."))?;
-    Ok(DeviceAuth {
-        user_code: user_code.to_string(),
-        device_code: body
-            .get("device_code")
+    if !status.is_success() || body.get("access_token").and_then(Value::as_str).is_none() {
+        let message = body
+            .get("error_description")
             .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string(),
-        verification_uri: body
-            .get("verification_uri")
-            .and_then(Value::as_str)
-            .unwrap_or("https://www.microsoft.com/link")
-            .to_string(),
-        interval: body.get("interval").and_then(Value::as_u64).unwrap_or(5),
-        expires_in: body.get("expires_in").and_then(Value::as_u64).unwrap_or(900),
-    })
-}
-
-pub async fn wait_device_token(device: &DeviceAuth) -> Result<Value> {
-    let deadline = std::time::Instant::now() + Duration::from_secs(device.expires_in);
-    let mut interval = device.interval.max(1);
-    loop {
-        if std::time::Instant::now() >= deadline {
-            return Err(anyhow!("Mã đăng nhập Microsoft đã hết hạn. Hãy thử lại."));
-        }
-        tokio::time::sleep(Duration::from_secs(interval)).await;
-        let res = crate::net::client()
-            .post("https://login.live.com/oauth20_token.srf")
-            .form(&[
-                ("client_id", MS_CLIENT_ID),
-                (
-                    "grant_type",
-                    "urn:ietf:params:oauth:grant-type:device_code",
-                ),
-                ("device_code", device.device_code.as_str()),
-            ])
-            .send()
-            .await?;
-        let status = res.status();
-        let body: Value = res.json().await.unwrap_or(Value::Null);
-        if status.is_success() && body.get("access_token").and_then(Value::as_str).is_some() {
-            return Ok(body);
-        }
-        let error = body.get("error").and_then(Value::as_str).unwrap_or("");
-        match error {
-            "authorization_pending" => continue,
-            "slow_down" => {
-                interval += 5;
-                continue;
-            }
-            "expired_token" => return Err(anyhow!("Mã đăng nhập Microsoft đã hết hạn.")),
-            "authorization_declined" | "access_denied" => {
-                return Err(anyhow!("Bạn đã huỷ đăng nhập Microsoft."))
-            }
-            other => {
-                let description = body
-                    .get("error_description")
-                    .and_then(Value::as_str)
-                    .unwrap_or(other);
-                return Err(anyhow!("Đăng nhập Microsoft thất bại: {description}"));
-            }
-        }
+            .unwrap_or("Đổi mã đăng nhập Microsoft thất bại.");
+        return Err(anyhow!("{message}"));
     }
+    Ok(body)
 }
 
 async fn refresh_ms_token(refresh_token: &str) -> Result<Value> {

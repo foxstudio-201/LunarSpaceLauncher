@@ -100,10 +100,24 @@ pub struct CreateState {
 pub struct AddAccountState {
     pub open: bool,
     pub tab: String,
-    pub ms_code: String,
-    pub ms_uri: String,
     pub ms_waiting: bool,
     pub error: String,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct DiscordUi {
+    pub open: bool,
+    pub name: String,
+    pub account_id: String,
+    pub phase: String,
+    pub error: String,
+    pub conflict: bool,
+    pub holder: String,
+    pub authorize_url: String,
+    pub link: Value,
+    pub created: bool,
+    pub links: Vec<Value>,
+    pub links_loaded: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -287,6 +301,7 @@ pub enum Modal {
         settings: Value,
     },
     SkinPaint,
+    DiscordLink,
     LoaderChange {
         id: String,
         loader: String,
@@ -346,6 +361,7 @@ pub struct LauncherApp {
     pub modal: Modal,
     pub create: CreateState,
     pub account_ui: AddAccountState,
+    pub discord_ui: DiscordUi,
     pub skin_ui: SkinState,
     pub skin_preview: Option<Arc<gpui::RenderImage>>,
     pub paint_preview: Option<Arc<gpui::RenderImage>>,
@@ -361,6 +377,7 @@ pub struct LauncherApp {
     pub content_search: Entity<TextField>,
     pub name_input: Entity<TextField>,
     pub account_name: Entity<TextField>,
+    pub discord_name_input: Entity<TextField>,
     pub memory_input: Entity<TextField>,
     pub jvm_input: Entity<TextField>,
     pub ely_user: Entity<TextField>,
@@ -435,6 +452,7 @@ impl LauncherApp {
         };
         let name_input = cx.new(|cx| TextField::new(cx, "Tên phiên bản…"));
         let account_name = cx.new(|cx| TextField::new(cx, "Tên người chơi (3–16 ký tự)…"));
+        let discord_name_input = cx.new(|cx| TextField::new(cx, "Tên tài khoản launcher…"));
         let memory_input = cx.new(|cx| TextField::new(cx, "4096"));
         let jvm_input = cx.new(|cx| TextField::new(cx, "Ví dụ: -XX:+UseG1GC"));
         let ely_user = cx.new(|cx| TextField::new(cx, "Tên đăng nhập hoặc email ely.by"));
@@ -532,6 +550,7 @@ impl LauncherApp {
                 tab: "offline".into(),
                 ..Default::default()
             },
+            discord_ui: DiscordUi::default(),
             skin_ui: SkinState {
                 model: "classic".into(),
                 ..Default::default()
@@ -563,6 +582,7 @@ impl LauncherApp {
             content_search,
             name_input,
             account_name,
+            discord_name_input,
             memory_input,
             jvm_input,
             ely_user,
@@ -1047,6 +1067,29 @@ impl LauncherApp {
     pub fn stop_skin_spin(&mut self) {
         self.skin_ui.auto_spin = false;
         self.skin_ui.spin_gen += 1;
+    }
+
+    pub fn load_discord_links(&mut self, cx: &mut Context<Self>) {
+        let rx = self.backend.discord_links();
+        self.on_result(cx, rx, |this, value, cx| {
+            this.discord_ui.links = value
+                .get("items")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            this.discord_ui.links_loaded = true;
+            let avatars: Vec<String> = this
+                .discord_ui
+                .links
+                .iter()
+                .filter_map(|row| row.get("discordAvatar").and_then(Value::as_str).map(str::to_string))
+                .filter(|url| !url.is_empty())
+                .collect();
+            if !avatars.is_empty() {
+                this.cache_icons(avatars, cx);
+            }
+            cx.notify();
+        });
     }
 
     pub fn refresh_accounts(&mut self) {
@@ -1583,26 +1626,30 @@ impl LauncherApp {
                     self.crash = event.get("crash").cloned();
                 }
             }
-            "ms_login" => {
-                if event.get("ok").and_then(Value::as_bool).unwrap_or(false) {
-                    let session = event.pointer("/data/session").cloned().unwrap_or(Value::Null);
-                    let value = self.backend.complete_ms_login(
-                        serde_json::from_value(session).unwrap_or_default(),
-                    );
-                    if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
-                        self.refresh_accounts();
-                        self.account_ui.open = false;
-                        self.account_ui.ms_waiting = false;
-                        self.toast("ok", "Đã thêm tài khoản Microsoft", "", cx);
-                    }
-                } else {
-                    self.account_ui.ms_waiting = false;
-                    self.account_ui.error = event
-                        .get("error")
-                        .and_then(Value::as_str)
-                        .unwrap_or("Đăng nhập Microsoft thất bại")
-                        .to_string();
-                }
+            "discord-linked" => {
+                self.discord_ui.phase = "done".into();
+                self.discord_ui.link = event.get("link").cloned().unwrap_or(Value::Null);
+                self.discord_ui.created = event.get("created").and_then(Value::as_bool).unwrap_or(false);
+                self.discord_ui.error.clear();
+                self.discord_ui.conflict = false;
+                self.refresh_accounts();
+                self.load_discord_links(cx);
+                let name = self.discord_ui.link.get("discordTag")
+                    .or_else(|| self.discord_ui.link.get("discordName"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("Discord")
+                    .to_string();
+                self.toast("ok", "Đã liên kết Discord", name, cx);
+            }
+            "discord-failed" => {
+                self.discord_ui.phase = "error".into();
+                self.discord_ui.error = event.get("error").and_then(Value::as_str).unwrap_or("Liên kết Discord thất bại.").to_string();
+                self.discord_ui.conflict = event.get("conflict").and_then(Value::as_bool).unwrap_or(false);
+                self.discord_ui.holder = event.get("holder").and_then(Value::as_str).unwrap_or("").to_string();
+            }
+            "discord-unlinked" => {
+                self.load_discord_links(cx);
+                self.toast("ok", "Đã gỡ liên kết Discord", "", cx);
             }
             _ => {}
         }
@@ -2427,6 +2474,7 @@ impl LauncherApp {
             Modal::ModpackUpdate { .. } => Some(pages::modpack_update_modal(self, window, cx).into_any_element()),
             Modal::WorldEdit { .. } => Some(pages::world_edit_modal(self, window, cx).into_any_element()),
             Modal::SkinPaint => Some(pages::skin_paint_modal(self, window, cx).into_any_element()),
+            Modal::DiscordLink => Some(pages::accounts::discord_link_modal(self, window, cx).into_any_element()),
             Modal::LoaderChange { .. } => Some(pages::loader_change_modal(self, window, cx).into_any_element()),
         }
     }
@@ -2474,6 +2522,12 @@ impl Render for LauncherApp {
             .text_color(theme.text)
             .text_size(px(TEXT_BASE))
             .relative()
+            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                if this.tip.is_some() {
+                    this.tip = None;
+                    cx.notify();
+                }
+            }))
             .when_some(titlebar, |el, bar| el.child(bar))
             .on_action(cx.listener(|this, _: &crate::GoHome, _window, cx| this.set_page(Page::Home, cx)))
             .on_action(cx.listener(|this, _: &crate::GoVersions, _window, cx| {

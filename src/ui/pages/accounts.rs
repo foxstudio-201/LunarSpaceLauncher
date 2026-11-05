@@ -3,7 +3,7 @@ use crate::ui::pages::{self, page_body, page_header, section_title};
 use crate::ui::theme::*;
 use crate::ui::widgets;
 use gpui::{AnyElement, Context, FontWeight, IntoElement, MouseButton, Window, div, prelude::*, px};
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::path::Path;
 
 pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<LauncherApp>) -> AnyElement {
@@ -11,6 +11,10 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
     let view = cx.entity().downgrade();
     let add_view = view.clone();
     let refresh_view = view.clone();
+    if !app.discord_ui.links_loaded {
+        app.discord_ui.links_loaded = true;
+        app.load_discord_links(cx);
+    }
 
     let mut list = div().flex().gap_3().flex_wrap();
     if app.accounts.is_empty() {
@@ -21,7 +25,7 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                     &theme,
                     "user",
                     "Chưa có tài khoản nào",
-                    "Thêm tài khoản ngoại tuyến, Microsoft hoặc ely.by để bắt đầu chơi.",
+                    "Thêm tài khoản ngoại tuyến, Microsoft, ely.by hoặc liên kết Discord để bắt đầu chơi.",
                 )),
         );
     }
@@ -51,10 +55,20 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
         } else {
             None
         };
+        let discord_link = app
+            .discord_ui
+            .links
+            .iter()
+            .find(|link| {
+                link.get("accountUuid").and_then(Value::as_str) == Some(account.uuid.as_str())
+                    || link.get("accountId").and_then(Value::as_str) == Some(account.id.as_str())
+            })
+            .cloned();
         let view_use = view.clone();
         let view_copy = view.clone();
         let view_refresh = view.clone();
         let view_remove = view.clone();
+        let view_discord = view.clone();
         let id = account.id.clone();
         let id_use = id.clone();
         let id_copy = id.clone();
@@ -123,6 +137,30 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                                 .child(widgets::tag(kind_label.to_string(), kind_color, &theme))
                                 .when(active, |el| {
                                     el.child(widgets::tag("Đang dùng", theme.ok, &theme))
+                                })
+                                .when_some(discord_link.clone(), |el, link| {
+                                    let label = link
+                                        .get("label")
+                                        .or_else(|| link.get("discordName"))
+                                        .or_else(|| link.get("discordTag"))
+                                        .and_then(Value::as_str)
+                                        .unwrap_or("Discord")
+                                        .to_string();
+                                    el.child(
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .gap(px(4.0))
+                                            .h(px(18.0))
+                                            .px(px(6.0))
+                                            .rounded(px(4.0))
+                                            .bg(gpui::rgba(0x5865F22A))
+                                            .text_size(px(9.0))
+                                            .font_weight(bold())
+                                            .text_color(gpui::rgb(0x8B95F7))
+                                            .child(widgets::icon("discord-logo", 10.0, gpui::rgb(0x8B95F7)))
+                                            .child(label),
+                                    )
                                 }),
                         ),
                 ),
@@ -207,6 +245,71 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                             });
                         },
                     ))
+                })
+                .when_some(discord_link.clone(), |el, _link| {
+                    let view = view_discord.clone();
+                    let id = account.id.clone();
+                    el.child(
+                        div()
+                            .id(gpui::SharedString::from(format!("discord-unlink-{}", account.id)))
+                            .size(px(28.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(7.0))
+                            .bg(gpui::rgba(0x5865F226))
+                            .border_1()
+                            .border_color(gpui::rgba(0x5865F266))
+                            .cursor_pointer()
+                            .on_click(move |_, _, cx| {
+                                let id = id.clone();
+                                let _ = view.update(cx, |this, cx| {
+                                    let rx = this.backend.discord_unlink(id.clone());
+                                    this.on_result(cx, rx, |this, value, cx| {
+                                        if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+                                            this.load_discord_links(cx);
+                                            this.toast("ok", "Đã gỡ liên kết Discord", "", cx);
+                                        } else {
+                                            this.toast("bad", "Gỡ liên kết thất bại", value.get("error").and_then(Value::as_str).unwrap_or(""), cx);
+                                        }
+                                    });
+                                });
+                            })
+                            .child(widgets::icon("x", 12.0, gpui::rgb(0x8B95F7))),
+                    )
+                })
+                .when(discord_link.is_none(), |el| {
+                    let view = view_discord.clone();
+                    let id = account.id.clone();
+                    let name = account.name.clone();
+                    el.child(
+                        div()
+                            .id(gpui::SharedString::from(format!("discord-link-{}", account.id)))
+                            .h(px(28.0))
+                            .px(px(8.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(4.0))
+                            .rounded(px(6.0))
+                            .bg(gpui::rgba(0x5865F21F))
+                            .border_1()
+                            .border_color(gpui::rgba(0x5865F259))
+                            .text_size(px(9.5))
+                            .font_weight(bold())
+                            .text_color(gpui::rgb(0x8B95F7))
+                            .cursor_pointer()
+                            .on_click(move |_, _, cx| {
+                                let id = id.clone();
+                                let name = name.clone();
+                                let _ = view.update(cx, |this, cx| {
+                                    let input = this.discord_name_input.clone();
+                                    input.update(cx, |input, cx| input.set_text(name.clone(), cx));
+                                    open_discord_link(this, name.clone(), id.clone(), true, cx);
+                                });
+                            })
+                            .child(widgets::icon("discord-logo", 11.0, gpui::rgb(0x8B95F7)))
+                            .child("Discord"),
+                    )
                 })
                 .child(widgets::ghost_button(
                     gpui::SharedString::from(format!("remove-{}", remove_id)),
@@ -438,6 +541,34 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                 .flex()
                 .items_center()
                 .gap_2()
+                .child({
+                    let discord_view = view.clone();
+                    let discord_blue = gpui::rgb(0x5865F2);
+                    div()
+                        .id("acc-discord-header")
+                        .h(px(34.0))
+                        .px(px(11.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(6.0))
+                        .rounded(px(6.0))
+                        .bg(gpui::rgba(0x5865F21F))
+                        .border_1()
+                        .border_color(gpui::rgba(0x5865F259))
+                        .text_size(px(11.0))
+                        .font_weight(semibold())
+                        .text_color(gpui::rgb(0x8B95F7))
+                        .cursor_pointer()
+                        .on_click(move |_, _, cx| {
+                            let _ = discord_view.update(cx, |this, cx| {
+                                let input = this.discord_name_input.clone();
+                                input.update(cx, |input, cx| input.clear(cx));
+                                open_discord_link(this, String::new(), String::new(), false, cx);
+                            });
+                        })
+                        .child(widgets::icon("discord-logo", 13.0, discord_blue))
+                        .child("Liên kết Discord")
+                })
                 .child(widgets::ghost_button("acc-refresh", "Làm mới", &theme, move |_, _, cx| {
                     let _ = refresh_view.update(cx, |this, cx| {
                         this.refresh_accounts();
@@ -450,7 +581,6 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                         this.account_ui.open = true;
                         this.account_ui.error.clear();
                         this.account_ui.ms_waiting = false;
-                        this.account_ui.ms_code.clear();
                         cx.notify();
                     });
                 })),
@@ -467,7 +597,7 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                 .text_size(px(TEXT_SM))
                 .text_color(theme.accent_soft)
                 .child(widgets::icon("info", 15.0, theme.accent_soft))
-                .child("Hỗ trợ Ngoại tuyến, Microsoft (vào được server online) và ely.by. Phiên đăng nhập được lưu trên máy và tự làm mới.")
+                .child("Hỗ trợ Ngoại tuyến, Microsoft (vào được server online), ely.by và liên kết Discord. Phiên đăng nhập được lưu trên máy và tự làm mới.")
                 .when(app.accounts_tab != "list", |el| el.hidden()),
         )
         .child(
@@ -723,32 +853,43 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
 pub fn add_account_modal(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<LauncherApp>) -> AnyElement {
     let theme = app.theme.clone();
     let close_view = cx.entity().downgrade();
-    let close_view2 = close_view.clone();
     let tab_view = cx.entity().downgrade();
-    let offline_view = cx.entity().downgrade();
-    let ms_view = cx.entity().downgrade();
-    let ely_view = cx.entity().downgrade();
+    let submit_view = cx.entity().downgrade();
+    let discord_blue = gpui::rgb(0x5865F2);
 
-    let tabs = [("offline", "Ngoại tuyến"), ("microsoft", "Microsoft"), ("ely", "ely.by")];
-    let mut tab_row = div().flex().gap_2();
-    for (key, label) in tabs {
+    let kinds = [
+        ("offline", "user", "Ngoại tuyến", theme.accent, "Chơi không cần tài khoản Mojang. Tên chỉ gồm chữ, số, gạch dưới và dài 3–16 ký tự."),
+        ("microsoft", "microsoft", "Microsoft", theme.accent, "Đăng nhập bằng tài khoản Microsoft đã sở hữu Minecraft Java Edition trong cửa sổ Microsoft riêng."),
+        ("ely", "globe", "ely.by", theme.accent, "Tài khoản ely.by qua authlib-injector: chơi được trên server có bật ely.by và dùng skin của ely.by."),
+        ("discord", "discord-logo", "Discord", discord_blue, "Tạo tài khoản launcher và xác minh quyền sở hữu qua Discord. Không cần mật khẩu."),
+    ];
+    let active_kind = app.account_ui.tab.clone();
+    let description = kinds
+        .iter()
+        .find(|(key, ..)| *key == active_kind)
+        .map(|(_, _, _, _, desc)| *desc)
+        .unwrap_or("");
+
+    let mut kind_row = div().flex().items_center().gap_2();
+    for (key, icon_name, label, tint, _) in kinds {
         let active = app.account_ui.tab == key;
         let view = tab_view.clone();
         let key = key.to_string();
-        tab_row = tab_row.child(
+        kind_row = kind_row.child(
             div()
-                .id(gpui::SharedString::from(format!("acc-tab-{key}")))
-                .h(px(32.0))
-                .px(px(12.0))
+                .id(gpui::SharedString::from(format!("acc-kind-{key}")))
                 .flex()
-                .items_center()
-                .rounded(px(6.0))
-                .bg(if active { theme.accent_dim } else { theme.surface })
+                .flex_col()
+                .items_start()
+                .justify_center()
+                .gap(px(5.0))
+                .flex_1()
+                .h(px(62.0))
+                .px(px(10.0))
+                .rounded(px(10.0))
+                .bg(if active { theme.elevated } else { theme.bg })
                 .border_1()
-                .border_color(if active { theme.accent } else { theme.border_soft })
-                .text_size(px(TEXT_SM))
-                .font_weight(if active { semibold() } else { medium() })
-                .text_color(if active { theme.accent_soft } else { theme.muted })
+                .border_color(if active { tint } else { theme.border_soft })
                 .cursor_pointer()
                 .on_click(move |_, _, cx| {
                     let key = key.clone();
@@ -758,234 +899,714 @@ pub fn add_account_modal(app: &mut LauncherApp, _window: &mut Window, cx: &mut C
                         cx.notify();
                     });
                 })
-                .child(label),
+                .child(widgets::icon(icon_name, 15.0, if active { tint } else { theme.muted }))
+                .child(
+                    div()
+                        .text_size(px(11.0))
+                        .font_weight(bold())
+                        .text_color(if active { theme.text } else { theme.muted })
+                        .child(label),
+                ),
         );
     }
 
     let body = match app.account_ui.tab.as_str() {
-        "microsoft" => {
-            let waiting = app.account_ui.ms_waiting;
-            let code = app.account_ui.ms_code.clone();
-            let uri = app.account_ui.ms_uri.clone();
-            div()
-                .flex()
-                .flex_col()
-                .gap_3()
-                .child(
-                    div()
-                        .text_size(px(TEXT_SM))
-                        .text_color(theme.muted)
-                        .child("Đăng nhập bằng tài khoản Microsoft đã sở hữu Minecraft Java Edition. Mã sẽ hiện bên dưới — nhập mã tại trang Microsoft rồi quay lại đây."),
-                )
-                .when(code.is_empty(), |el| {
-                    el.child(widgets::button("ms-start", "Mở trang đăng nhập", &theme, true, move |_, _, cx| {
-                        let view = ms_view.clone();
-                        let _ = view.update(cx, |this, cx| {
-                            this.account_ui.ms_waiting = true;
-                            this.account_ui.error.clear();
-                            let rx = this.backend.start_ms_login();
-                            this.on_result(cx, rx, |this, value, _cx| {
-                                if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
-                                    this.account_ui.ms_code = value
-                                        .get("userCode")
-                                        .and_then(Value::as_str)
-                                        .unwrap_or("")
-                                        .to_string();
-                                    this.account_ui.ms_uri = value
-                                        .get("verificationUri")
-                                        .and_then(Value::as_str)
-                                        .unwrap_or("https://www.microsoft.com/link")
-                                        .to_string();
-                                } else {
-                                    this.account_ui.ms_waiting = false;
-                                    this.account_ui.error = value
-                                        .get("error")
-                                        .and_then(Value::as_str)
-                                        .unwrap_or("Không tạo được mã đăng nhập")
-                                        .to_string();
-                                }
-                            });
-                        });
-                    }))
-                })
-                .when(!code.is_empty(), |el| {
-                    el.child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap_2()
-                            .items_center()
-                            .p(px(18.0))
-                            .rounded(px(RADIUS))
-                            .bg(theme.surface)
-                            .border_1()
-                            .border_color(theme.border)
-                            .child(
-                                div()
-                                    .text_size(px(TEXT_XS))
-                                    .text_color(theme.faint)
-                                    .child("MÃ ĐĂNG NHẬP"),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(32.0))
-                                    .font_weight(bold())
-                                    .text_color(theme.accent_soft)
-                                    .child(code.clone()),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(TEXT_SM))
-                                    .text_color(theme.muted)
-                                    .child(format!("Nhập mã tại {uri}")),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_2()
-                                    .when(waiting, |el| {
-                                        el.child(widgets::spinner(14.0, theme.accent_soft))
-                                            .child(
-                                                div()
-                                                    .text_size(px(TEXT_SM))
-                                                    .text_color(theme.muted)
-                                                    .child("Đang chờ bạn hoàn tất đăng nhập…"),
-                                            )
-                                    })
-                                    .child(widgets::ghost_button("ms-open", "Mở lại trang", &theme, {
-                                        let uri = uri.clone();
-                                        move |_, _, _cx| {
-                                            let _ = open::that(&uri);
-                                        }
-                                    })),
-                            ),
-                    )
-                })
-        }
-        "ely" => div()
+        "microsoft" => div()
             .flex()
             .flex_col()
             .gap_3()
             .child(
                 div()
-                    .text_size(px(TEXT_SM))
-                    .text_color(theme.muted)
-                    .child("Tài khoản ely.by qua authlib-injector: chơi được trên server có bật ely.by và dùng skin của ely.by."),
+                    .flex()
+                    .items_start()
+                    .gap_2()
+                    .p(px(12.0))
+                    .rounded(px(RADIUS_SM))
+                    .bg(theme.elevated)
+                    .border_1()
+                    .border_color(theme.border)
+                    .child(widgets::icon("shield-check", 14.0, theme.accent_soft))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .text_size(px(TEXT_SM))
+                            .text_color(theme.muted)
+                            .child("Cửa sổ đăng nhập Microsoft sẽ mở riêng.
+Launcher không thấy mật khẩu của bạn.
+Phiên đăng nhập được lưu an toàn trên máy."),
+                    ),
             )
+            .when(app.account_ui.ms_waiting, |el| {
+                el.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(widgets::spinner(14.0, theme.accent_soft))
+                        .child(div().text_size(px(TEXT_SM)).text_color(theme.muted).child("Đang chờ bạn đăng nhập trong cửa sổ Microsoft…")),
+                )
+            })
+            .into_any_element(),
+        "ely" => div()
+            .flex()
+            .flex_col()
+            .gap_3()
             .child(pages::field(&theme, "Tên đăng nhập hoặc email", app.ely_user.clone(), ""))
             .child(pages::field(&theme, "Mật khẩu", app.ely_pass.clone(), "Mật khẩu chỉ gửi trực tiếp tới authserver.ely.by."))
-            .child(widgets::button("ely-login", "Đăng nhập ely.by", &theme, true, move |_, _, cx| {
-                let view = ely_view.clone();
-                let _ = view.update(cx, |this, cx| {
-                    let user = this.ely_user.read(cx).text().to_string();
-                    let pass = this.ely_pass.read(cx).text().to_string();
-                    if user.trim().is_empty() || pass.is_empty() {
-                        this.account_ui.error = "Nhập đủ tên đăng nhập và mật khẩu ely.by.".into();
-                        cx.notify();
-                        return;
-                    }
-                    let rx = this.backend.ely_login(user, pass);
-                    this.on_result(cx, rx, |this, value, cx| {
-                        if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
-                            this.refresh_accounts();
-                            this.modal = Modal::None;
-                            this.account_ui.open = false;
-                            this.toast("ok", "Đã thêm tài khoản ely.by", "", cx);
-                        } else {
-                            this.account_ui.error = value
-                                .get("error")
-                                .and_then(Value::as_str)
-                                .unwrap_or("Đăng nhập ely.by thất bại")
-                                .to_string();
-                        }
-                    });
-                });
-            }))
-        ,
+            .child(
+                div()
+                    .flex()
+                    .items_start()
+                    .gap_2()
+                    .p(px(12.0))
+                    .rounded(px(RADIUS_SM))
+                    .bg(theme.elevated)
+                    .border_1()
+                    .border_color(theme.border)
+                    .child(widgets::icon("shield-check", 14.0, theme.accent_soft))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .text_size(px(TEXT_SM))
+                            .text_color(theme.muted)
+                            .child("Launcher tự cài authlib-injector để đăng nhập ely.by khi chơi."),
+                    ),
+            )
+            .into_any_element(),
+        "discord" => div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .child(
+                        div()
+                            .size(px(38.0))
+                            .rounded(px(9.0))
+                            .bg(gpui::rgba(0x5865F22A))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(widgets::icon("discord-logo", 18.0, discord_blue)),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .child(div().text_size(px(10.0)).font_weight(bold()).text_color(theme.muted).child("Tên tài khoản launcher"))
+                            .child(widgets::text_input_box(&theme).child(app.discord_name_input.clone())),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_start()
+                    .gap_2()
+                    .p(px(12.0))
+                    .rounded(px(RADIUS_SM))
+                    .bg(theme.elevated)
+                    .border_1()
+                    .border_color(theme.border)
+                    .child(widgets::icon("arrow-square-out", 14.0, discord_blue))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .text_size(px(TEXT_SM))
+                            .text_color(theme.muted)
+                            .child("Bạn sẽ được chuyển sang trang Discord để xác minh.
+Tài khoản launcher sẽ được tạo và liên kết sau khi xác minh xong."),
+                    ),
+            )
+            .into_any_element(),
         _ => div()
             .flex()
             .flex_col()
             .gap_3()
             .child(
                 div()
-                    .text_size(px(TEXT_SM))
-                    .text_color(theme.muted)
-                    .child("Chơi không cần tài khoản Mojang. Tên chỉ gồm chữ, số, gạch dưới và dài 3–16 ký tự."),
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .child(
+                        div()
+                            .size(px(38.0))
+                            .rounded(px(9.0))
+                            .bg(theme.surface_active)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(widgets::icon("user", 18.0, theme.accent_soft)),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .child(widgets::text_input_box(&theme).child(app.account_name.clone())),
+                    ),
             )
-            .child(pages::field(&theme, "Tên người chơi", app.account_name.clone(), "UUID được tạo chuẩn Mojang từ OfflinePlayer:tên."))
-            .child(widgets::button("off-add", "Thêm tài khoản", &theme, true, move |_, _, cx| {
-                let view = offline_view.clone();
-                let _ = view.update(cx, |this, cx| {
-                    let name = this.account_name.read(cx).text().to_string();
-                    let value = this.backend.account_add_offline(&name);
-                    if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
-                        this.refresh_accounts();
-                        this.modal = Modal::None;
-                        this.account_ui.open = false;
-                        this.toast("ok", "Đã thêm tài khoản", "", cx);
-                    } else {
-                        this.account_ui.error = value
-                            .get("error")
-                            .and_then(Value::as_str)
-                            .unwrap_or("Tên không hợp lệ")
-                            .to_string();
-                        cx.notify();
+            .child(
+                div()
+                    .text_size(px(TEXT_XS))
+                    .text_color(theme.faint)
+                    .child("UUID được tạo chuẩn Mojang từ OfflinePlayer:tên."),
+            )
+            .into_any_element(),
+    };
+
+    let tab = app.account_ui.tab.clone();
+    let busy = app.account_ui.ms_waiting;
+    let submit_label = match tab.as_str() {
+        "offline" => "Tạo",
+        "discord" => "Xác minh Discord",
+        _ => "Đăng nhập",
+    };
+    let footer_hint = match tab.as_str() {
+        "offline" => "Tên chỉ gồm chữ, số, gạch dưới và dài 3–16 ký tự.",
+        "microsoft" => "Cửa sổ đăng nhập Microsoft mở riêng; launcher không lưu mật khẩu.",
+        "ely" => "Đăng nhập qua authserver.ely.by và tự cài authlib-injector.",
+        _ => "Bạn sẽ được chuyển sang Discord để xác minh.",
+    };
+    let submit_bg = if tab == "discord" { discord_blue } else { theme.accent };
+    let submit_fg: gpui::Rgba = if tab == "discord" { gpui::rgb(0xFFFFFF) } else { theme.on_accent };
+
+    let content = div()
+        .flex()
+        .flex_col()
+        .gap(px(14.0))
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(widgets::icon("user", 15.0, theme.accent_soft))
+                .child(div().flex_1().text_size(px(12.0)).font_weight(bold()).text_color(theme.text).child("Thêm tài khoản"))
+                .child(widgets::icon_button("acc-close", "x", &theme, {
+                    let view = close_view.clone();
+                    move |_, _, cx| {
+                        let _ = view.update(cx, |this, cx| {
+                            this.modal = Modal::None;
+                            this.account_ui.open = false;
+                            cx.notify();
+                        });
                     }
-                });
-            })),
+                })),
+        )
+        .child(kind_row)
+        .child(div().text_size(px(10.5)).text_color(theme.faint).child(description))
+        .child(body)
+        .when(!app.account_ui.error.is_empty(), |el| {
+            el.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .p(px(10.0))
+                    .rounded(px(RADIUS_SM))
+                    .bg(gpui::rgba(0xEF44441A))
+                    .border_1()
+                    .border_color(gpui::rgba(0xEF44444D))
+                    .child(widgets::icon("warning-circle", 13.0, theme.bad))
+                    .child(div().flex_1().min_w(px(0.0)).text_size(px(TEXT_SM)).text_color(theme.bad).child(app.account_ui.error.clone())),
+            )
+        })
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .pt(px(4.0))
+                .child(div().flex_1().text_size(px(10.0)).text_color(theme.faint).child(footer_hint))
+                .child(widgets::ghost_button("acc-cancel", "Huỷ", &theme, {
+                    let view = close_view.clone();
+                    move |_, _, cx| {
+                        let _ = view.update(cx, |this, cx| {
+                            this.modal = Modal::None;
+                            this.account_ui.open = false;
+                            cx.notify();
+                        });
+                    }
+                }))
+                .child(
+                    div()
+                        .id("acc-submit")
+                        .h(px(34.0))
+                        .px(px(13.0))
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .rounded(px(6.0))
+                        .bg(submit_bg)
+                        .text_size(px(11.0))
+                        .font_weight(bold())
+                        .text_color(submit_fg)
+                        .when(busy, |el| el.opacity(0.4))
+                        .cursor_pointer()
+                        .on_click(move |_, _, cx| {
+                            let _ = submit_view.update(cx, |this, cx| {
+                                if this.account_ui.ms_waiting {
+                                    return;
+                                }
+                                match this.account_ui.tab.as_str() {
+                                    "offline" => {
+                                        let name = this.account_name.read(cx).text().trim().to_string();
+                                        let value = this.backend.account_add_offline(&name);
+                                        if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+                                            this.refresh_accounts();
+                                            this.modal = Modal::None;
+                                            this.account_ui.open = false;
+                                            this.toast("ok", "Đã thêm tài khoản", "", cx);
+                                        } else {
+                                            this.account_ui.error = value
+                                                .get("error")
+                                                .and_then(Value::as_str)
+                                                .unwrap_or("Tên không hợp lệ")
+                                                .to_string();
+                                            cx.notify();
+                                        }
+                                    }
+                                    "microsoft" => {
+                                        this.account_ui.error.clear();
+                                        this.account_ui.ms_waiting = true;
+                                        let rx = this.backend.start_ms_login();
+                                        this.on_result(cx, rx, |this, value, cx| {
+                                            this.account_ui.ms_waiting = false;
+                                            if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+                                                this.refresh_accounts();
+                                                this.modal = Modal::None;
+                                                this.account_ui.open = false;
+                                                this.toast("ok", "Đã đăng nhập Microsoft", "", cx);
+                                            } else {
+                                                this.account_ui.error = value
+                                                    .get("error")
+                                                    .and_then(Value::as_str)
+                                                    .unwrap_or("Đăng nhập Microsoft thất bại")
+                                                    .to_string();
+                                                cx.notify();
+                                            }
+                                        });
+                                    }
+                                    "ely" => {
+                                        let user = this.ely_user.read(cx).text().to_string();
+                                        let pass = this.ely_pass.read(cx).text().to_string();
+                                        if user.trim().is_empty() || pass.is_empty() {
+                                            this.account_ui.error = "Nhập đủ tên đăng nhập và mật khẩu ely.by.".into();
+                                            cx.notify();
+                                            return;
+                                        }
+                                        let rx = this.backend.ely_login(user, pass);
+                                        this.on_result(cx, rx, |this, value, cx| {
+                                            if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+                                                this.refresh_accounts();
+                                                this.modal = Modal::None;
+                                                this.account_ui.open = false;
+                                                this.toast("ok", "Đã thêm tài khoản ely.by", "", cx);
+                                            } else {
+                                                this.account_ui.error = value
+                                                    .get("error")
+                                                    .and_then(Value::as_str)
+                                                    .unwrap_or("Đăng nhập ely.by thất bại")
+                                                    .to_string();
+                                                cx.notify();
+                                            }
+                                        });
+                                    }
+                                    _ => {
+                                        let name = this.discord_name_input.read(cx).text().trim().to_string();
+                                        this.account_ui.open = false;
+                                        open_discord_link(this, name, String::new(), true, cx);
+                                    }
+                                }
+                            });
+                        })
+                        .child(if tab == "discord" {
+                            widgets::icon("discord-logo", 13.0, gpui::rgb(0xFFFFFF)).into_any_element()
+                        } else if busy {
+                            widgets::spinner(12.0, submit_fg).into_any_element()
+                        } else {
+                            widgets::icon("check-circle", 12.0, submit_fg).into_any_element()
+                        })
+                        .child(submit_label),
+                ),
+        );
+
+    let backdrop_view = cx.entity().downgrade();
+    pages::modal_overlay(theme, 560.0, content, move |_, _, cx| {
+        let _ = backdrop_view.update(cx, |this, cx| {
+            if !this.account_ui.ms_waiting {
+                this.modal = Modal::None;
+                this.account_ui.open = false;
+                cx.notify();
+            }
+        });
+    })
+    .into_any_element()
+}
+
+pub fn open_discord_link(app: &mut LauncherApp, name: String, account_id: String, start: bool, cx: &mut Context<LauncherApp>) {
+    app.discord_ui.open = true;
+    app.discord_ui.name = name.clone();
+    app.discord_ui.account_id = account_id;
+    app.discord_ui.phase = "idle".into();
+    app.discord_ui.error.clear();
+    app.discord_ui.conflict = false;
+    app.discord_ui.holder.clear();
+    app.discord_ui.authorize_url.clear();
+    app.discord_ui.link = Value::Null;
+    app.discord_ui.created = false;
+    let input = app.discord_name_input.clone();
+    input.update(cx, |input, cx| input.set_text(name.clone(), cx));
+    app.modal = Modal::DiscordLink;
+    if start {
+        app.start_discord_link(false, cx);
+    } else {
+        cx.notify();
+    }
+}
+
+impl LauncherApp {
+    pub fn start_discord_link(&mut self, force: bool, cx: &mut Context<Self>) {
+        let name = self.discord_name_input.read(cx).text().trim().to_string();
+        if name.is_empty() && self.discord_ui.account_id.is_empty() {
+            self.discord_ui.phase = "error".into();
+            self.discord_ui.error = "Nhập tên tài khoản launcher trước khi liên kết.".into();
+            cx.notify();
+            return;
+        }
+        self.discord_ui.name = name.clone();
+        self.discord_ui.phase = "starting".into();
+        self.discord_ui.error.clear();
+        self.discord_ui.conflict = false;
+        let rx = self.backend.discord_link_start(json!({
+            "name": name,
+            "accountId": self.discord_ui.account_id,
+            "force": force,
+        }));
+        self.on_result(cx, rx, |this, value, cx| {
+            if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+                this.discord_ui.phase = "waiting".into();
+                this.discord_ui.authorize_url = value
+                    .get("authorizeUrl")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+            } else {
+                this.discord_ui.phase = "error".into();
+                this.discord_ui.error = value
+                    .get("error")
+                    .and_then(Value::as_str)
+                    .unwrap_or("Không bắt đầu được liên kết Discord.")
+                    .to_string();
+            }
+            cx.notify();
+        });
+    }
+}
+
+pub fn discord_link_modal(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<LauncherApp>) -> AnyElement {
+    let theme = app.theme.clone();
+    let discord_blue = gpui::rgb(0x5865F2);
+    let close_view = cx.entity().downgrade();
+    let start_view = cx.entity().downgrade();
+    let cancel_view = cx.entity().downgrade();
+    let override_view = cx.entity().downgrade();
+    let reopen_view = cx.entity().downgrade();
+    let phase = app.discord_ui.phase.clone();
+    let link = app.discord_ui.link.clone();
+    let account_name = if app.discord_ui.account_id.is_empty() {
+        app.discord_ui.name.clone()
+    } else {
+        app.accounts
+            .iter()
+            .find(|row| row.id == app.discord_ui.account_id)
+            .map(|row| row.name.clone())
+            .unwrap_or_else(|| app.discord_ui.name.clone())
+    };
+    let avatar_url = link
+        .get("discordAvatar")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let avatar = app.icon_cache.get(&avatar_url).cloned();
+    let tag = link
+        .get("discordTag")
+        .or_else(|| link.get("discordName"))
+        .and_then(Value::as_str)
+        .unwrap_or("Discord")
+        .to_string();
+
+    let body: AnyElement = match phase.as_str() {
+        "done" => div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .p(px(12.0))
+                    .rounded(px(RADIUS))
+                    .bg(theme.elevated)
+                    .border_1()
+                    .border_color(theme.accent)
+                    .child(widgets::icon("check-circle", 20.0, theme.accent_soft))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .child(div().text_size(px(TEXT_MD)).font_weight(semibold()).text_color(theme.text).child("Đã liên kết Discord"))
+                            .child(div().text_size(px(11.0)).text_color(theme.muted).truncate().child(format!("{tag} → {account_name}"))),
+                    )
+                    .when_some(avatar, |el, path| {
+                        el.child(gpui::img(path).size(px(36.0)).rounded_full().object_fit(gpui::ObjectFit::Cover))
+                    }),
+            )
+            .when(app.discord_ui.created, |el| {
+                el.child(div().text_size(px(10.5)).text_color(theme.accent_soft).child(format!("Đã tạo tài khoản launcher {account_name}.")))
+            })
+            .child(div().text_size(px(10.5)).text_color(theme.faint).child("Tài khoản đã sẵn sàng dùng để chơi và đã có huy hiệu Discord trong danh sách tài khoản."))
+            .into_any_element(),
+        _ => {
+            let mut card = div()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .child(
+                    div()
+                        .text_size(px(10.5))
+                        .text_color(theme.faint)
+                        .child("Kết quả uỷ quyền được gửi về launcher qua cổng nội bộ 127.0.0.1."),
+                );
+            if phase == "waiting" || phase == "starting" {
+                card = card.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .p(px(12.0))
+                        .rounded(px(RADIUS))
+                        .bg(theme.elevated)
+                        .border_1()
+                        .border_color(theme.border)
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_2()
+                                .child(widgets::spinner(13.0, theme.accent_soft))
+                                .child(div().text_size(px(TEXT_SM)).font_weight(semibold()).text_color(theme.text).child(
+                                    if phase == "starting" { "Đang mở trang Discord…" } else { "Đang chờ Discord xác minh…" },
+                                )),
+                        )
+                        .child(div().text_size(px(10.0)).text_color(theme.faint).child("Hoàn tất cấp quyền trong trình duyệt rồi quay lại đây."))
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_2()
+                                .child(div()
+                                    .id("discord-reopen")
+                                    .h(px(30.0)).px(px(10.0)).flex().items_center().rounded(px(6.0))
+                                    .bg(discord_blue).text_size(px(10.0)).font_weight(bold()).text_color(gpui::white()).cursor_pointer()
+                                    .on_click(move |_, _, cx| {
+                                        let _ = reopen_view.update(cx, |this, _cx| {
+                                            if !this.discord_ui.authorize_url.is_empty() {
+                                                let _ = open::that(&this.discord_ui.authorize_url);
+                                            }
+                                        });
+                                    })
+                                    .child("Mở lại trang Discord"))
+                                .child(widgets::ghost_button("discord-cancel", "Huỷ chờ", &theme, move |_, _, cx| {
+                                    let _ = cancel_view.update(cx, |this, cx| {
+                                        this.backend.discord_cancel();
+                                        this.discord_ui.phase = "idle".into();
+                                        this.discord_ui.error.clear();
+                                        cx.notify();
+                                    });
+                                })),
+                        ),
+                );
+            } else {
+                let mut field = div().flex().items_center().gap_3();
+                if !app.discord_ui.account_id.is_empty() {
+                    field = field.child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .flex_1()
+                            .p(px(10.0))
+                            .rounded(px(RADIUS_SM))
+                            .bg(theme.elevated)
+                            .border_1()
+                            .border_color(theme.border)
+                            .child(widgets::icon("user", 14.0, theme.accent_soft))
+                            .child(div().text_size(px(TEXT_SM)).text_color(theme.text).child(account_name.clone())),
+                    );
+                } else {
+                    field = field.child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .flex_1()
+                            .child(div().text_size(px(10.0)).font_weight(bold()).text_color(theme.muted).child("Tên tài khoản launcher"))
+                            .child(widgets::text_input_box(&theme).child(app.discord_name_input.clone())),
+                    );
+                }
+                card = card
+                    .child(field)
+                    .child(
+                        div()
+                            .flex()
+                            .items_start()
+                            .gap_2()
+                            .p(px(10.0))
+                            .rounded(px(RADIUS_SM))
+                            .bg(theme.elevated)
+                            .border_1()
+                            .border_color(theme.border)
+                            .child(widgets::icon("discord-logo", 14.0, discord_blue))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .text_size(px(10.5))
+                                    .text_color(theme.muted)
+                                    .child(if app.discord_ui.account_id.is_empty() {
+                                        "Một tài khoản launcher mới sẽ được tạo nếu tên chưa tồn tại."
+                                    } else {
+                                        "Tài khoản này sẽ được gắn huy hiệu Discord sau khi xác minh."
+                                    }),
+                            ),
+                    );
+                if phase == "error" {
+                    let mut error_box = div()
+                        .flex()
+                        .items_start()
+                        .gap_2()
+                        .p(px(10.0))
+                        .rounded(px(RADIUS_SM))
+                        .bg(gpui::rgba(0xEF44441A))
+                        .border_1()
+                        .border_color(gpui::rgba(0xEF44444D))
+                        .child(widgets::icon("warning-circle", 13.0, theme.bad))
+                        .child(div().flex_1().text_size(px(10.5)).text_color(theme.bad).child(app.discord_ui.error.clone()));
+                    if app.discord_ui.conflict {
+                        let holder = app.discord_ui.holder.clone();
+                        error_box = error_box.child(widgets::ghost_button("discord-override", "Ghi đè liên kết cũ", &theme, move |_, _, cx| {
+                            let _ = override_view.update(cx, |this, cx| {
+                                let _ = holder;
+                                this.start_discord_link(true, cx);
+                            });
+                        }));
+                    }
+                    card = card.child(error_box);
+                }
+            }
+            card.into_any_element()
+        }
+    };
+
+    let footer = if phase == "done" {
+        div()
+            .flex()
+            .justify_end()
+            .child(widgets::button("discord-done", "Xong", &theme, true, {
+                let view = close_view.clone();
+                move |_, _, cx| {
+                    let _ = view.update(cx, |this, cx| {
+                        this.discord_ui.open = false;
+                        this.modal = Modal::None;
+                        cx.notify();
+                    });
+                }
+            }))
+    } else if phase == "waiting" || phase == "starting" {
+        div()
+    } else {
+        div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(div().flex_1().text_size(px(10.0)).text_color(theme.faint).child("Xác minh để gắn huy hiệu Discord vào tài khoản launcher."))
+            .child(widgets::ghost_button("discord-close", "Huỷ", &theme, {
+                let view = close_view.clone();
+                move |_, _, cx| {
+                    let _ = view.update(cx, |this, cx| {
+                        this.backend.discord_cancel();
+                        this.discord_ui.open = false;
+                        this.modal = Modal::None;
+                        cx.notify();
+                    });
+                }
+            }))
+            .child(
+                div()
+                    .id("discord-start")
+                    .h(px(34.0))
+                    .px(px(12.0))
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .rounded(px(6.0))
+                    .bg(discord_blue)
+                    .text_size(px(11.0))
+                    .font_weight(bold())
+                    .text_color(gpui::white())
+                    .cursor_pointer()
+                    .on_click(move |_, _, cx| {
+                        let _ = start_view.update(cx, |this, cx| this.start_discord_link(false, cx));
+                    })
+                    .child(widgets::icon("discord-logo", 13.0, gpui::rgb(0xFFFFFF)))
+                    .child("Xác minh Discord"),
+            )
     };
 
     let content = div()
         .flex()
         .flex_col()
-        .gap_4()
+        .gap(px(14.0))
         .child(
             div()
                 .flex()
                 .items_center()
-                .justify_between()
-                .child(
-                    div()
-                        .text_size(px(TEXT_XL))
-                        .font_weight(semibold())
-                        .text_color(theme.text)
-                        .child("Thêm tài khoản"),
-                )
-                .child(widgets::icon_button("acc-close", "x", &theme, move |_, _, cx| {
-                    let _ = close_view2.update(cx, |this, cx| {
-                        this.modal = Modal::None;
-                        this.account_ui.open = false;
-                        cx.notify();
-                    });
+                .gap_2()
+                .child(widgets::icon("discord-logo", 16.0, discord_blue))
+                .child(div().flex_1().text_size(px(12.0)).font_weight(bold()).text_color(theme.text).child("Liên kết Discord"))
+                .child(widgets::icon_button("discord-x", "x", &theme, {
+                    let view = close_view.clone();
+                    move |_, _, cx| {
+                        let _ = view.update(cx, |this, cx| {
+                            if this.discord_ui.phase == "waiting" || this.discord_ui.phase == "starting" {
+                                this.backend.discord_cancel();
+                            }
+                            this.discord_ui.open = false;
+                            this.modal = Modal::None;
+                            cx.notify();
+                        });
+                    }
                 })),
         )
-        .child(tab_row)
-        .child(if app.account_ui.ms_waiting && app.account_ui.ms_code.is_empty() {
-            div()
-                .flex()
-                .items_center()
-                .gap_2()
-                .child(widgets::spinner(14.0, theme.accent_soft))
-                .child("Đang tạo mã đăng nhập…")
-                .into_any_element()
-        } else {
-            body.into_any_element()
-        })
-        .when(!app.account_ui.error.is_empty(), |el| {
-            el.child(
-                div()
-                    .text_size(px(TEXT_SM))
-                    .text_color(theme.bad)
-                    .child(app.account_ui.error.clone()),
-            )
-        });
+        .child(body)
+        .child(footer);
 
     let backdrop_view = cx.entity().downgrade();
-    pages::modal_overlay(theme.clone(), 560.0, content, move |_, _, cx| {
+    pages::modal_overlay(theme, 520.0, content, move |_, _, cx| {
         let _ = backdrop_view.update(cx, |this, cx| {
+            if this.discord_ui.phase == "waiting" || this.discord_ui.phase == "starting" {
+                return;
+            }
+            this.discord_ui.open = false;
             this.modal = Modal::None;
-            this.account_ui.open = false;
             cx.notify();
         });
     })
