@@ -84,6 +84,9 @@ pub fn export(instance: &Instance, dest: &Path, format: &str) -> Result<Value> {
     let files = walk(base);
     let mut count = 0usize;
     for (path, rel) in &files {
+        if path == dest {
+            continue;
+        }
         add_file(&mut zip, rel, path)?;
         count += 1;
     }
@@ -144,7 +147,7 @@ fn export_mrpack(instance: &Instance, base: &Path, dest: &Path) -> Result<Value>
     let files = walk(base);
     let mut count = 0usize;
     for (path, rel) in &files {
-        if indexed.contains(rel) {
+        if indexed.contains(rel) || path == dest {
             continue;
         }
         add_file(&mut zip, &format!("overrides/{rel}"), path)?;
