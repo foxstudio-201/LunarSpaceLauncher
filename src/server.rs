@@ -421,15 +421,32 @@ enum StreamKind {
 pub fn launch_command(entry: &ServerEntry, java: &Path) -> (PathBuf, Vec<String>) {
     let dir = PathBuf::from(&entry.dir);
     let ram = format!("-Xmx{}M", entry.ram_mb.max(512));
+    let mut extra: Vec<String> = entry
+        .vars
+        .get("jvmArgs")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .split_whitespace()
+        .map(str::to_string)
+        .collect();
     let args = if entry.egg == "forge" || entry.egg == "neoforge" {
         let args_file = if dir.join("win_args.txt").is_file() {
             "win_args.txt".to_string()
         } else {
             "unix_args.txt".to_string()
         };
-        vec![ram, format!("@{args_file}"), "nogui".into()]
+        let mut args = vec![ram];
+        args.append(&mut extra);
+        args.push(format!("@{args_file}"));
+        args.push("nogui".into());
+        args
     } else {
-        vec![ram, "-jar".into(), "server.jar".into(), "nogui".into()]
+        let mut args = vec![ram];
+        args.append(&mut extra);
+        args.push("-jar".into());
+        args.push("server.jar".into());
+        args.push("nogui".into());
+        args
     };
     (dir, args)
 }

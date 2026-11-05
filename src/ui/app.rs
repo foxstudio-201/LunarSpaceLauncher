@@ -373,9 +373,12 @@ pub struct LauncherApp {
     pub console_scroll: gpui::ScrollHandle,
     pub page_scroll: gpui::ScrollHandle,
     pub server_scroll: gpui::ScrollHandle,
+    pub last_window: (f32, f32),
+    pub window_gen: u64,
     pub server_cmd: Entity<TextField>,
     pub server_motd: Entity<TextField>,
     pub server_port: Entity<TextField>,
+    pub server_jvm: Entity<TextField>,
     pub sched_name: Entity<TextField>,
     pub sched_cron: Entity<TextField>,
     pub sched_command: Entity<TextField>,
@@ -441,6 +444,7 @@ impl LauncherApp {
         let file_name_input = cx.new(|cx| TextField::new(cx, "Tên tệp hoặc thư mục…"));
         let server_motd = cx.new(|cx| TextField::new(cx, "XyoLauncher Server"));
         let server_port = cx.new(|cx| TextField::new(cx, "25565"));
+        let server_jvm = cx.new(|cx| TextField::new(cx, "Ví dụ: -XX:+UseG1GC"));
         let sched_name = cx.new(|cx| TextField::new(cx, "Tên lịch…"));
         let sched_cron = cx.new(|cx| TextField::new(cx, "0 4 * * *"));
         let sched_command = cx.new(|cx| TextField::new(cx, "say Server sẽ khởi động lại sau 5 phút"));
@@ -568,9 +572,12 @@ impl LauncherApp {
             console_scroll: gpui::ScrollHandle::new(),
             page_scroll: gpui::ScrollHandle::new(),
             server_scroll: gpui::ScrollHandle::new(),
+            last_window: (0.0, 0.0),
+            window_gen: 0,
             server_cmd,
             server_motd,
             server_port,
+            server_jvm,
             sched_name,
             sched_cron,
             sched_command,
@@ -2355,6 +2362,31 @@ impl LauncherApp {
 impl Render for LauncherApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = self.theme.clone();
+        if !window.is_maximized() {
+            let bounds = window.bounds();
+            let width = f32::from(bounds.size.width);
+            let height = f32::from(bounds.size.height);
+            if (width - self.last_window.0).abs() > 2.0 || (height - self.last_window.1).abs() > 2.0 {
+                self.last_window = (width, height);
+                self.window_gen += 1;
+                let generation = self.window_gen;
+                let view = cx.entity().downgrade();
+                cx.spawn(async move |_this, cx| {
+                    cx.background_executor()
+                        .timer(std::time::Duration::from_millis(900))
+                        .await;
+                    let _ = view.update(cx, |this, _cx| {
+                        if this.window_gen == generation {
+                            this.backend.settings_set(json!({
+                                "windowWidth": this.last_window.0,
+                                "windowHeight": this.last_window.1,
+                            }));
+                        }
+                    });
+                })
+                .detach();
+            }
+        }
         let titlebar = if !self.boot_splash || self.splash_fading {
             Some(self.titlebar(cx).into_any_element())
         } else {

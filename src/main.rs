@@ -35,6 +35,21 @@ use std::sync::Arc;
 fn main() {
     let (events_tx, events_rx) = async_channel::unbounded();
     let store = Arc::new(Store::load());
+    let saved = store.settings();
+    let saved_width = saved
+        .extra
+        .get("windowWidth")
+        .and_then(serde_json::Value::as_f64)
+        .map(|value| value as f32)
+        .filter(|value| *value >= 980.0 && *value <= 3200.0)
+        .unwrap_or(1180.0);
+    let saved_height = saved
+        .extra
+        .get("windowHeight")
+        .and_then(serde_json::Value::as_f64)
+        .map(|value| value as f32)
+        .filter(|value| *value >= 640.0 && *value <= 2000.0)
+        .unwrap_or(760.0);
     let backend = Backend::new(store, events_tx);
     Application::new()
         .with_assets(FileAssets::new())
@@ -57,7 +72,7 @@ fn main() {
                 }
             })
             .detach();
-            let bounds = Bounds::centered(None, size(px(1180.0), px(760.0)), cx);
+            let bounds = Bounds::centered(None, size(px(saved_width), px(saved_height)), cx);
             cx.open_window(
                 WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),

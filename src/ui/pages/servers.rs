@@ -1170,6 +1170,7 @@ fn render_detail(app: &mut LauncherApp, cx: &mut Context<LauncherApp>, server: &
                                 .child(div().w(px(150.0)).child(pages::field(&theme, "Cổng", app.server_port.clone(), ""))),
                         )
                         .child(div().flex_1().child(pages::field(&theme, "MOTD", app.server_motd.clone(), "")))
+                        .child(pages::field(&theme, "Tham số JVM thêm", app.server_jvm.clone(), "Ví dụ: -XX:+UseG1GC -XX:+ParallelRefProcEnabled"))
                         .child(div().flex().items_center().gap_6()
                             .child(div().text_size(px(TEXT_SM)).text_color(theme.faint).child(format!("RAM hiện tại: {ram_value} MB")))
                             .child(switch("srv-online", "Chế độ online (xác thực Mojang)", app.server_ui.online, view_online, true))
@@ -1187,6 +1188,7 @@ fn render_detail(app: &mut LauncherApp, cx: &mut Context<LauncherApp>, server: &
                                 ram = ram.clamp(512, 65536);
                                 let port = this.server_port.read(cx).text().trim().parse::<u16>().unwrap_or(port as u16);
                                 let motd = this.server_motd.read(cx).text().trim().to_string();
+                                let jvm = this.server_jvm.read(cx).text().trim().to_string();
                                 let patch = json!({
                                     "name": name,
                                     "ramMb": ram,
@@ -1197,6 +1199,7 @@ fn render_detail(app: &mut LauncherApp, cx: &mut Context<LauncherApp>, server: &
                                         "difficulty": this.server_ui.difficulty,
                                         "online-mode": this.server_ui.online,
                                         "pvp": this.server_ui.pvp,
+                                        "jvmArgs": jvm,
                                     },
                                 });
                                 let value = this.backend.server_update(&id, patch);
@@ -1419,6 +1422,7 @@ impl LauncherApp {
             let ram = server.get("ramMb").and_then(Value::as_u64).unwrap_or(4096).to_string();
             let port = server.get("port").and_then(Value::as_u64).unwrap_or(25565).to_string();
             let motd = vars.get("motd").and_then(Value::as_str).unwrap_or("XyoLauncher Server").to_string();
+            let jvm = vars.get("jvmArgs").and_then(Value::as_str).unwrap_or("").to_string();
             let input = self.name_input.clone();
             input.update(cx, |input, cx| input.set_text(name, cx));
             let input = self.memory_input.clone();
@@ -1427,6 +1431,8 @@ impl LauncherApp {
             input.update(cx, |input, cx| input.set_text(port, cx));
             let input = self.server_motd.clone();
             input.update(cx, |input, cx| input.set_text(motd, cx));
+            let input = self.server_jvm.clone();
+            input.update(cx, |input, cx| input.set_text(jvm, cx));
         }
         cx.notify();
     }

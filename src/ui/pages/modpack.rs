@@ -68,6 +68,68 @@ pub fn search_content(app: &mut LauncherApp, query: String, cx: &mut Context<Lau
     });
 }
 
+pub fn load_more_content(app: &mut LauncherApp, cx: &mut Context<LauncherApp>) {
+    if app.content.loading {
+        return;
+    }
+    let offset = app.content.hits.len() as u32;
+    app.content.loading = true;
+    let kind = app.content.kind.clone();
+    let source = app.content.source.clone();
+    let sort = app.content.sort.clone();
+    let game = app.content.game.clone();
+    let loader = app.content.loader.clone();
+    let category = app.content.category.clone();
+    let environment = app.content.environment.clone();
+    let query = app.content_search.read(cx).text().to_string();
+    let rx = app.backend.content_search(json!({
+        "kind": kind,
+        "source": source,
+        "query": query,
+        "sort": sort,
+        "offset": offset,
+        "limit": 24,
+        "game": if game.is_empty() { Value::Null } else { Value::String(game) },
+        "loader": if loader.is_empty() { Value::Null } else { Value::String(loader) },
+        "category": if category.is_empty() { Value::Null } else { Value::String(category) },
+        "environment": if environment.is_empty() { Value::Null } else { Value::String(environment) },
+    }));
+    app.on_result(cx, rx, |this, value, cx| {
+        this.content.loading = false;
+        if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+            let rows = value.get("hits").and_then(Value::as_array).cloned().unwrap_or_default();
+            let existing: std::collections::HashSet<String> = this
+                .content
+                .hits
+                .iter()
+                .filter_map(|row| row.get("id").and_then(Value::as_str).map(str::to_string))
+                .collect();
+            let mut added = 0;
+            for row in &rows {
+                let id = row.get("id").and_then(Value::as_str).unwrap_or("");
+                if !id.is_empty() && !existing.contains(id) {
+                    this.content.hits.push(row.clone());
+                    added += 1;
+                }
+            }
+            if added == 0 {
+                this.content.total = this.content.hits.len() as u64;
+            }
+            this.content.total = this.content.total.max(this.content.hits.len() as u64);
+            let urls: Vec<String> = rows
+                .iter()
+                .filter_map(|hit| hit.get("icon").and_then(Value::as_str).map(str::to_string))
+                .filter(|url| !url.is_empty())
+                .collect();
+            if !urls.is_empty() {
+                this.cache_icons(urls, cx);
+            }
+        } else {
+            this.toast("bad", "Tải thêm thất bại", value.get("error").and_then(Value::as_str).unwrap_or(""), cx);
+        }
+    });
+}
+
 pub fn open_detail(app: &mut LauncherApp, hit: Value, cx: &mut Context<LauncherApp>) {
     app.content.selected = Some(hit.clone());
     app.content.selected_versions.clear();
@@ -628,6 +690,25 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                 ),
         )
         .child(grid)
+        .when(app.content.loading, |el| {
+            el.child(div().w_full().flex().justify_center().py(px(10.0)).child(widgets::spinner(18.0, theme.accent_soft)))
+        })
+        .when(
+            !app.content.loading && (app.content.total as usize) > app.content.hits.len(),
+            |el| {
+                let view = cx.entity().downgrade();
+                el.child(
+                    div().w_full().flex().justify_center().py(px(6.0)).child(widgets::ghost_button(
+                        "pack-more",
+                        format!("Tải thêm ({} / {})", app.content.hits.len(), app.content.total),
+                        &theme,
+                        move |_, _, cx| {
+                            let _ = view.update(cx, |this, cx| load_more_content(this, cx));
+                        },
+                    )),
+                )
+            },
+        )
         .into_any_element()
 }
 
@@ -1438,7 +1519,23 @@ pub fn browser_modal(app: &mut LauncherApp, _window: &mut Window, cx: &mut Conte
                         }),
                 ),
         )
-        .child(list);
+        .child(list)
+        .when(
+            !app.content.loading && (app.content.total as usize) > app.content.hits.len(),
+            |el| {
+                let view = cx.entity().downgrade();
+                el.child(
+                    div().w_full().flex().justify_center().child(widgets::ghost_button(
+                        "browser-more",
+                        format!("Tải thêm ({} / {})", app.content.hits.len(), app.content.total),
+                        &theme,
+                        move |_, _, cx| {
+                            let _ = view.update(cx, |this, cx| load_more_content(this, cx));
+                        },
+                    )),
+                )
+            },
+        );
     let backdrop_view = cx.entity().downgrade();
     pages::modal_overlay(theme, 840.0, content, move |_, _, cx| {
         let _ = backdrop_view.update(cx, |this, cx| {
