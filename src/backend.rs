@@ -3155,6 +3155,16 @@ impl Backend {
         }
     }
 
+    pub fn server_prune_mods(&self, id: &str) -> Value {
+        let Some(entry) = crate::server::find(self, id) else {
+            return fail("Không tìm thấy server.");
+        };
+        match crate::server::prune_client_mods(&entry) {
+            Ok((checked, moved)) => ok(json!({"checked": checked, "moved": moved})),
+            Err(err) => fail(err.to_string()),
+        }
+    }
+
     pub fn server_users(&self, id: &str) -> Value {
         let Some(entry) = crate::server::find(self, id) else {
             return fail("Không tìm thấy server.");

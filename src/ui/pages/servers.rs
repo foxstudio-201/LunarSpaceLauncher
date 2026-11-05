@@ -1236,6 +1236,28 @@ fn render_detail(app: &mut LauncherApp, cx: &mut Context<LauncherApp>, server: &
                             let dir = dir.clone();
                             move |_, _, _cx| { let _ = open::that(&dir); }
                         }))
+                        .child(widgets::ghost_button("srv-prune", "Dọn mod client", &theme, {
+                            let view = view.clone();
+                            let prune_id = id.clone();
+                            move |_, _, cx| {
+                                let prune_id = prune_id.clone();
+                                let _ = view.update(cx, |this, cx| {
+                                    let value = this.backend.server_prune_mods(&prune_id);
+                                    if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+                                        let checked = value.get("checked").and_then(Value::as_u64).unwrap_or(0);
+                                        let moved = value.get("moved").and_then(Value::as_u64).unwrap_or(0);
+                                        this.toast(
+                                            if moved == 0 { "ok" } else { "info" },
+                                            if moved == 0 { "Không có mod chỉ dành cho client" } else { "Đã tắt mod client" },
+                                            format!("Đã dò {checked} tệp · chuyển {moved} mod vào mods/_client-only"),
+                                            cx,
+                                        );
+                                    } else {
+                                        this.toast("bad", "Dọn mod thất bại", value.get("error").and_then(Value::as_str).unwrap_or(""), cx);
+                                    }
+                                });
+                            }
+                        }))
                         .child(widgets::button("srv-delete", "Xoá server", &theme, false, move |_, _, cx| {
                             let _ = view_delete.update(cx, |this, cx| {
                                 this.modal = Modal::Confirm {

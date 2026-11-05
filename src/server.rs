@@ -418,6 +418,78 @@ enum StreamKind {
     Err(tokio::process::ChildStderr),
 }
 
+fn jar_side(path: &Path) -> Option<&'static str> {
+    let file = std::fs::File::open(path).ok()?;
+    let mut zip = zip::ZipArchive::new(file).ok()?;
+    let mut text = String::new();
+    for name in ["fabric.mod.json", "quilt.mod.json"] {
+        if let Ok(mut entry) = zip.by_name(name) {
+            text.clear();
+            if entry.take(2 * 1024 * 1024).read_to_string(&mut text).is_ok() {
+                if let Ok(value) = serde_json::from_str::<Value>(&text) {
+                    let env = value
+                        .pointer("/environment")
+                        .or_else(|| value.pointer("/quilt_loader/environment"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("");
+                    if env.eq_ignore_ascii_case("client") {
+                        return Some("client");
+                    }
+                    if env.eq_ignore_ascii_case("server") {
+                        return Some("server");
+                    }
+                }
+            }
+        }
+    }
+    for name in ["META-INF/mods.toml", "META-INF/neoforge.mods.toml"] {
+        if let Ok(mut entry) = zip.by_name(name) {
+            text.clear();
+            if entry.take(2 * 1024 * 1024).read_to_string(&mut text).is_ok() {
+                for line in text.lines() {
+                    let line = line.trim().to_lowercase();
+                    if line.starts_with("side") && line.contains("client") {
+                        return Some("client");
+                    }
+                    if line.starts_with("side") && line.contains("server") {
+                        return Some("server");
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn prune_client_mods(entry: &ServerEntry) -> Result<(usize, usize)> {
+    let mods = Path::new(&entry.dir).join("mods");
+    let target = mods.join("_client-only");
+    let mut checked = 0;
+    let mut moved = 0;
+    let Ok(entries) = std::fs::read_dir(&mods) else {
+        return Ok((0, 0));
+    };
+    for item in entries.flatten() {
+        let path = item.path();
+        if !path.is_file() {
+            continue;
+        }
+        let name = item.file_name().to_string_lossy().to_lowercase();
+        if !name.ends_with(".jar") {
+            continue;
+        }
+        checked += 1;
+        if jar_side(&path) == Some("client") {
+            std::fs::create_dir_all(&target)?;
+            let dest = target.join(item.file_name());
+            if std::fs::rename(&path, &dest).is_ok() {
+                moved += 1;
+            }
+        }
+    }
+    Ok((checked, moved))
+}
+
 pub fn launch_command(entry: &ServerEntry, java: &Path) -> (PathBuf, Vec<String>) {
     let dir = PathBuf::from(&entry.dir);
     let ram = format!("-Xmx{}M", entry.ram_mb.max(512));
@@ -693,5 +765,38 @@ mod cron_tests {
         assert!(cron_matches("25-35 4 * * *", &at));
         assert!(!cron_matches("0 0 1 * *", &at));
         assert!(!cron_matches("bad", &at));
+    }
+}
+
+#[cfg(test)]
+mod prune_tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn client_only_mods_are_moved() {
+        let root = std::env::temp_dir().join(format!("xyo-prune-{}", uuid::Uuid::new_v4()));
+        let mods = root.join("mods");
+        std::fs::create_dir_all(&mods).unwrap();
+        let make = |name: &str, environment: &str| {
+            let file = std::fs::File::create(mods.join(name)).unwrap();
+            let mut zip = zip::ZipWriter::new(file);
+            let options = zip::write::SimpleFileOptions::default();
+            zip.start_file("fabric.mod.json", options).unwrap();
+            zip.write_all(format!("{{\"id\":\"test\",\"environment\":\"{environment}\"}}").as_bytes()).unwrap();
+            zip.finish().unwrap();
+        };
+        make("client.jar", "client");
+        make("server.jar", "server");
+        let entry = ServerEntry {
+            dir: root.to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+        let (checked, moved) = prune_client_mods(&entry).unwrap();
+        assert_eq!(checked, 2);
+        assert_eq!(moved, 1);
+        assert!(mods.join("_client-only").join("client.jar").is_file());
+        assert!(mods.join("server.jar").is_file());
+        let _ = std::fs::remove_dir_all(root);
     }
 }
