@@ -3289,7 +3289,10 @@ fn strip_signatures(path: &Path) -> Result<()> {
     let options = zip::write::SimpleFileOptions::default();
     for index in 0..archive.len() {
         let mut entry = archive.by_index(index)?;
-        let name = entry.name().to_string();
+        let Ok(name) = entry.name() else {
+            continue;
+        };
+        let name = name.into_owned();
         if name.starts_with("META-INF/")
             && (name.ends_with(".SF") || name.ends_with(".DSA") || name.ends_with(".RSA") || name.ends_with(".EC"))
         {

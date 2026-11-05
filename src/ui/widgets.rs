@@ -34,6 +34,83 @@ actions!(
     ]
 );
 
+static TIP_CONTEXT: once_cell::sync::Lazy<
+    parking_lot::Mutex<Option<gpui::WeakEntity<crate::ui::app::LauncherApp>>>,
+> = once_cell::sync::Lazy::new(|| parking_lot::Mutex::new(None));
+
+pub fn set_tooltip_context(view: gpui::WeakEntity<crate::ui::app::LauncherApp>) {
+    *TIP_CONTEXT.lock() = Some(view);
+}
+
+fn set_tooltip_position(position: gpui::Point<gpui::Pixels>, cx: &mut App) {
+    let view = TIP_CONTEXT.lock().clone();
+    if let Some(view) = view {
+        let _ = view.update(cx, |this, cx| {
+            this.mouse_pos = position;
+            if this.tip.is_some() {
+                cx.notify();
+            }
+        });
+    }
+}
+
+fn set_tooltip(text: Option<String>, cx: &mut App) {
+    let view = TIP_CONTEXT.lock().clone();
+    if let Some(view) = view {
+        let _ = view.update(cx, |this, cx| {
+            this.tip = text;
+            cx.notify();
+        });
+    }
+}
+
+fn tooltip_for_icon(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "x" => "Đóng",
+        "minus" => "Thu nhỏ",
+        "square" => "Phóng to",
+        "gear" | "gear-six" => "Cài đặt",
+        "trash" => "Xoá",
+        "play" | "play-fill" => "Chơi",
+        "stop" | "stop-fill" => "Dừng",
+        "plus" => "Thêm",
+        "arrow-left" => "Quay lại",
+        "arrow-right" => "Tiếp tục",
+        "folder" | "folder-open" => "Mở thư mục",
+        "arrows-clockwise" | "arrow-clockwise" => "Làm mới",
+        "download" | "download-simple" => "Tải xuống",
+        "copy" => "Sao chép",
+        "eye" => "Xem",
+        "magnifying-glass" => "Tìm kiếm",
+        "sidebar-simple" => "Thu gọn / mở rộng",
+        "terminal" => "Console",
+        "files" => "Tệp tin",
+        "puzzle-piece" => "Mods",
+        "image" => "Gói tài nguyên",
+        "paint-brush" => "Shader",
+        "archive" => "Bản lưu",
+        "map-trifold" => "Bản đồ",
+        "cloud" => "Host",
+        "hard-drives" => "Server",
+        "stack" => "Modpack",
+        "cube" => "Phiên bản",
+        "house" => "Trang chủ",
+        "user" => "Tài khoản",
+        "check-circle" => "Đã xong",
+        "warning-circle" | "warning" => "Cảnh báo",
+        "info" => "Thông tin",
+        "coffee" => "Java",
+        "memory" => "RAM",
+        "package" => "Gói",
+        "share-network" => "Chia sẻ",
+        "link-simple" => "Liên kết",
+        "floppy-disk" => "Lưu",
+        "file-arrow-up" => "Gửi log",
+        "arrow-square-out" => "Mở ra ngoài",
+        _ => return None,
+    })
+}
+
 pub fn bind_text_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("backspace", Backspace, None),
@@ -780,8 +857,19 @@ pub fn icon_button(
     theme: &Theme,
     on_click: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
+    let tip = tooltip_for_icon(name);
     div()
         .id(id)
+        .when_some(tip, |el, tip| {
+            el.on_hover(move |hovered, _window, cx| {
+                if *hovered {
+                    set_tooltip(Some(tip.to_string()), cx);
+                } else {
+                    set_tooltip(None, cx);
+                }
+            })
+            .on_mouse_move(|event, _window, cx| set_tooltip_position(event.position, cx))
+        })
         .flex()
         .items_center()
         .justify_center()
@@ -954,6 +1042,7 @@ pub fn tip(
                 cx.notify();
             });
         })
+        .on_mouse_move(|event, _window, cx| set_tooltip_position(event.position, cx))
         .child(element)
         .into_any_element()
 }

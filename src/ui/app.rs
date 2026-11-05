@@ -456,6 +456,7 @@ impl LauncherApp {
             instance_search,
             uptime: 0,
         };
+        widgets::set_tooltip_context(cx.entity().downgrade());
         app.refresh_settings();
         app.refresh_instances();
         app.refresh_accounts();

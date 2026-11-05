@@ -27,7 +27,7 @@ uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "6"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
-zip = { version = "2", default-features = false, features = ["deflate", "bzip2"] }
+zip = { version = "9", default-features = false, features = ["deflate", "bzip2"] }
 flate2 = "1"
 tar = "0.4"
 base64 = "0.22"
