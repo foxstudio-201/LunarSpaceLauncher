@@ -17,7 +17,19 @@ use gpui::{
     actions, px, size,
 };
 
-actions!(lunarspace, [CloseModal]);
+actions!(
+    lunarspace,
+    [
+        CloseModal,
+        GoHome,
+        GoVersions,
+        GoModpacks,
+        GoAccounts,
+        GoSettings,
+        GoHost,
+        GoServers
+    ]
+);
 use std::sync::Arc;
 
 fn main() {
@@ -29,7 +41,16 @@ fn main() {
         .run(move |cx: &mut App| {
             ui::assets::load_fonts(cx);
             widgets::bind_text_keys(cx);
-            cx.bind_keys([KeyBinding::new("escape", CloseModal, None)]);
+            cx.bind_keys([
+                KeyBinding::new("escape", CloseModal, None),
+                KeyBinding::new("ctrl-1", GoHome, None),
+                KeyBinding::new("ctrl-2", GoVersions, None),
+                KeyBinding::new("ctrl-3", GoModpacks, None),
+                KeyBinding::new("ctrl-4", GoAccounts, None),
+                KeyBinding::new("ctrl-5", GoSettings, None),
+                KeyBinding::new("ctrl-6", GoHost, None),
+                KeyBinding::new("ctrl-7", GoServers, None),
+            ]);
             cx.on_window_closed(|cx| {
                 if cx.windows().is_empty() {
                     cx.quit();
@@ -48,10 +69,13 @@ fn main() {
                     }),
                     ..Default::default()
                 },
-                |_, cx| {
-                    cx.new(|cx| {
+                |window, cx| {
+                    let view = cx.new(|cx| {
                         ui::LauncherApp::new(backend.clone(), events_rx.clone(), cx)
-                    })
+                    });
+                    let handle = view.read(cx).focus_handle();
+                    window.focus(&handle);
+                    view
                 },
             )
             .unwrap();

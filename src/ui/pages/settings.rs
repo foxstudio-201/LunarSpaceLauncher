@@ -221,6 +221,7 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
     }
 
     let mut page = page_body()
+        .max_w(px(820.0))
         .child(page_header(
             &theme,
             "Hệ thống",
@@ -249,14 +250,14 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
         .child(
             div()
                 .flex()
-                .gap_3()
-                .items_start()
+                .flex_col()
+                .gap(px(16.0))
                 .child(
                     div()
                         .flex()
                         .flex_col()
                         .gap_3()
-                        .flex_1()
+                        .w_full()
                         .min_w(px(0.0))
                         .child(
                             div()
@@ -463,8 +464,7 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                         .flex()
                         .flex_col()
                         .gap_3()
-                        .w(px(320.0))
-                        .flex_shrink_0()
+                        .w_full()
                         .child(
                             div()
                                 .flex()

@@ -218,6 +218,7 @@ pub enum ConfirmAction {
 
 pub struct LauncherApp {
     pub backend: Arc<Backend>,
+    pub root_focus: gpui::FocusHandle,
     pub theme: Theme,
     pub settings: Value,
     pub instances: Vec<Instance>,
@@ -361,6 +362,7 @@ impl LauncherApp {
         let splash_image = None;
         let mut app = Self {
             backend,
+            root_focus: cx.focus_handle(),
             theme,
             settings,
             instances: Vec::new(),
@@ -466,6 +468,10 @@ impl LauncherApp {
         app.start_splash(cx);
         app.host_timer(cx);
         app
+    }
+
+    pub fn focus_handle(&self) -> gpui::FocusHandle {
+        self.root_focus.clone()
     }
 
     pub fn refresh_settings(&mut self) {
@@ -1827,6 +1833,15 @@ impl Render for LauncherApp {
             .text_size(px(TEXT_BASE))
             .relative()
             .when_some(titlebar, |el, bar| el.child(bar))
+            .on_action(cx.listener(|this, _: &crate::GoHome, _window, cx| this.set_page(Page::Home, cx)))
+            .on_action(cx.listener(|this, _: &crate::GoVersions, _window, cx| {
+                crate::ui::pages::versions::open_versions(this, cx, None, None)
+            }))
+            .on_action(cx.listener(|this, _: &crate::GoModpacks, _window, cx| this.set_page(Page::Modpacks, cx)))
+            .on_action(cx.listener(|this, _: &crate::GoAccounts, _window, cx| this.set_page(Page::Accounts, cx)))
+            .on_action(cx.listener(|this, _: &crate::GoSettings, _window, cx| this.set_page(Page::Settings, cx)))
+            .on_action(cx.listener(|this, _: &crate::GoHost, _window, cx| this.set_page(Page::Host, cx)))
+            .on_action(cx.listener(|this, _: &crate::GoServers, _window, cx| this.set_page(Page::Servers, cx)))
             .on_action(cx.listener(|this, _: &crate::CloseModal, _window, cx| {
                 if !matches!(this.modal, Modal::None) {
                     this.modal = Modal::None;
