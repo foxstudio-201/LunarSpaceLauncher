@@ -2438,6 +2438,70 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                                     let _ = open::that(Path::new(&dir).join("launcher_profiles.json"));
                                 }
                             }))
+                            .child(widgets::ghost_button("inst-export-mrpack", "Xuất .mrpack", &theme, {
+                                let view = view.clone();
+                                let id = instance.id.clone();
+                                let file_name = format!("{}.mrpack", crate::util::safe_name(&instance.name));
+                                move |_, _, cx| {
+                                    let view = view.clone();
+                                    let id = id.clone();
+                                    let file_name = file_name.clone();
+                                    cx.spawn(async move |cx| {
+                                        let picked = rfd::AsyncFileDialog::new()
+                                            .set_file_name(file_name)
+                                            .add_filter("Modrinth modpack", &["mrpack"])
+                                            .save_file()
+                                            .await;
+                                        if let Some(file) = picked {
+                                            let path = file.path().to_string_lossy().into_owned();
+                                            let _ = view.update(cx, |this, cx| {
+                                                let rx = this.backend.export_instance(id.clone(), path, "mrpack".into());
+                                                this.on_result(cx, rx, |this, value, cx| {
+                                                    if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+                                                        let path = value.get("path").and_then(Value::as_str).unwrap_or("");
+                                                        this.toast("ok", "Đã xuất .mrpack", path.to_string(), cx);
+                                                    } else {
+                                                        this.toast("bad", "Xuất thất bại", value.get("error").and_then(Value::as_str).unwrap_or(""), cx);
+                                                    }
+                                                });
+                                            });
+                                        }
+                                    })
+                                    .detach();
+                                }
+                            }))
+                            .child(widgets::ghost_button("inst-export-zip", "Xuất .zip", &theme, {
+                                let view = view.clone();
+                                let id = instance.id.clone();
+                                let file_name = format!("{}.zip", crate::util::safe_name(&instance.name));
+                                move |_, _, cx| {
+                                    let view = view.clone();
+                                    let id = id.clone();
+                                    let file_name = file_name.clone();
+                                    cx.spawn(async move |cx| {
+                                        let picked = rfd::AsyncFileDialog::new()
+                                            .set_file_name(file_name)
+                                            .add_filter("Zip", &["zip"])
+                                            .save_file()
+                                            .await;
+                                        if let Some(file) = picked {
+                                            let path = file.path().to_string_lossy().into_owned();
+                                            let _ = view.update(cx, |this, cx| {
+                                                let rx = this.backend.export_instance(id.clone(), path, "zip".into());
+                                                this.on_result(cx, rx, |this, value, cx| {
+                                                    if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+                                                        let path = value.get("path").and_then(Value::as_str).unwrap_or("");
+                                                        this.toast("ok", "Đã xuất .zip", path.to_string(), cx);
+                                                    } else {
+                                                        this.toast("bad", "Xuất thất bại", value.get("error").and_then(Value::as_str).unwrap_or(""), cx);
+                                                    }
+                                                });
+                                            });
+                                        }
+                                    })
+                                    .detach();
+                                }
+                            }))
                             .child(
                                 div()
                                     .text_size(px(TEXT_XS))

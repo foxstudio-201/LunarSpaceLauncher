@@ -2102,6 +2102,21 @@ impl Backend {
         })
     }
 
+    pub fn export_instance(self: &Arc<Self>, id: String, path: String, format: String) -> Receiver<Value> {
+        let this = self.clone();
+        self.request(async move {
+            let Some(entry) = this.store.find_instance(&id) else {
+                return fail("Không tìm thấy instance.");
+            };
+            let dest = PathBuf::from(path);
+            match tokio::task::spawn_blocking(move || crate::mc::export::export(&entry, &dest, &format)).await {
+                Ok(Ok(value)) => ok(value),
+                Ok(Err(err)) => fail(err.to_string()),
+                Err(err) => fail(err.to_string()),
+            }
+        })
+    }
+
     pub fn modpack_versions(self: &Arc<Self>, id: String) -> Receiver<Value> {
         let this = self.clone();
         self.request(async move {
