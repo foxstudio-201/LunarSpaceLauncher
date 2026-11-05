@@ -2,7 +2,7 @@ use crate::ui::app::{ConfirmAction, LauncherApp, Modal};
 use crate::ui::pages::{self, page_body, page_header, section_title};
 use crate::ui::theme::*;
 use crate::ui::widgets;
-use gpui::{AnyElement, Context, FontWeight, IntoElement, Window, div, prelude::*, px};
+use gpui::{AnyElement, Context, FontWeight, IntoElement, MouseButton, Window, div, prelude::*, px};
 use serde_json::Value;
 use std::path::Path;
 
@@ -233,6 +233,21 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
     if app.skin_ui.uuid.is_empty() {
         if let Some(first) = offline.first() {
             app.skin_ui.uuid = first.uuid.clone();
+            let skin = app.backend.skin_read(&first.uuid);
+            app.skin_ui.model = skin
+                .get("model")
+                .and_then(Value::as_str)
+                .unwrap_or("classic")
+                .to_string();
+            app.skin_ui.skin_path = skin
+                .get("skinPath")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            app.skin_ui.cape_path = skin
+                .get("capePath")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            app.refresh_skin_preview();
         }
     }
     let mut skin_accounts = div().flex().items_center().gap_2().flex_wrap();
@@ -259,10 +274,23 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                 .on_click(move |_, _, cx| {
                     let uuid = uuid.clone();
                     let _ = view_acc.update(cx, |this, cx| {
-                        this.skin_ui.uuid = uuid;
-                        this.skin_ui.skin_path = None;
-                        this.skin_ui.cape_path = None;
+                        this.skin_ui.uuid = uuid.clone();
+                        let skin = this.backend.skin_read(&uuid);
+                        this.skin_ui.model = skin
+                            .get("model")
+                            .and_then(Value::as_str)
+                            .unwrap_or("classic")
+                            .to_string();
+                        this.skin_ui.skin_path = skin
+                            .get("skinPath")
+                            .and_then(Value::as_str)
+                            .map(str::to_string);
+                        this.skin_ui.cape_path = skin
+                            .get("capePath")
+                            .and_then(Value::as_str)
+                            .map(str::to_string);
                         this.skin_ui.message.clear();
+                        this.refresh_skin_preview();
                         cx.notify();
                     });
                 })
@@ -280,21 +308,6 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
         .and_then(Value::as_str)
         .unwrap_or("classic")
         .to_string();
-    let skin_image = skin
-        .get("skinPath")
-        .and_then(Value::as_str)
-        .and_then(|path| {
-            crate::mc::skins::front_png(
-                &app.backend.store,
-                Path::new(path),
-                &app.skin_ui.uuid,
-            )
-        })
-        .map(|path| path.to_string_lossy().into_owned());
-    let cape_image = skin
-        .get("capePath")
-        .and_then(Value::as_str)
-        .map(str::to_string);
     let skin_head = skin
         .get("skinPath")
         .and_then(Value::as_str)
@@ -321,6 +334,7 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                     let _ = view.update(cx, |this, cx| {
                         this.skin_ui.skin_path = Some(path);
                         this.skin_ui.message = "Đã nạp skin — nhấn Lưu để áp dụng.".into();
+                        this.refresh_skin_preview();
                         cx.notify();
                     });
                 }
@@ -339,6 +353,7 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                     let _ = view.update(cx, |this, cx| {
                         this.skin_ui.cape_path = Some(path);
                         this.skin_ui.message = "Đã nạp cape — nhấn Lưu để áp dụng.".into();
+                        this.refresh_skin_preview();
                         cx.notify();
                     });
                 }
@@ -493,52 +508,112 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                             div()
                                 .flex()
                                 .gap_4()
-                                .child(
+                                .child({
+                                    let view_drag = view.clone();
+                                    let view_drag_move = view_drag.clone();
+                                    let view_up = view.clone();
+                                    let view_up_out = view_up.clone();
+                                    let view_spin = view.clone();
                                     div()
-                                        .w(px(170.0))
-                                        .h(px(170.0))
+                                        .id("skin-preview-3d")
+                                        .relative()
+                                        .w(px(220.0))
+                                        .h(px(300.0))
                                         .rounded(px(RADIUS))
                                         .bg(theme.elevated)
                                         .border_1()
                                         .border_color(theme.border_soft)
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .truncate()
-                                        .when_some(skin_image.clone(), |el, path| {
+                                        .overflow_hidden()
+                                        .cursor_pointer()
+                                        .on_mouse_down(MouseButton::Left, move |event, _, cx| {
+                                            let x = f32::from(event.position.x);
+                                            let _ = view_drag.update(cx, |this, cx| {
+                                                this.skin_ui.dragging = true;
+                                                this.skin_drag_x = x;
+                                                cx.notify();
+                                            });
+                                        })
+                                        .on_mouse_move(move |event, _, cx| {
+                                            let x = f32::from(event.position.x);
+                                            let _ = view_drag_move.update(cx, |this, cx| {
+                                                if !this.skin_ui.dragging {
+                                                    return;
+                                                }
+                                                let delta = x - this.skin_drag_x;
+                                                this.skin_drag_x = x;
+                                                this.skin_ui.angle += delta * 0.012;
+                                                this.refresh_skin_preview();
+                                                cx.notify();
+                                            });
+                                        })
+                                        .on_mouse_up(MouseButton::Left, move |_, _, cx| {
+                                            let _ = view_up.update(cx, |this, cx| {
+                                                this.skin_ui.dragging = false;
+                                                cx.notify();
+                                            });
+                                        })
+                                        .on_mouse_up_out(MouseButton::Left, move |_, _, cx| {
+                                            let _ = view_up_out.update(cx, |this, cx| {
+                                                this.skin_ui.dragging = false;
+                                                cx.notify();
+                                            });
+                                        })
+                                        .child(
+                                            div()
+                                                .id("skin-spin")
+                                                .absolute()
+                                                .top(px(6.0))
+                                                .right(px(6.0))
+                                                .flex()
+                                                .items_center()
+                                                .justify_center()
+                                                .size(px(26.0))
+                                                .rounded(px(6.0))
+                                                .bg(theme.surface)
+                                                .border_1()
+                                                .border_color(theme.border_soft)
+                                                .cursor_pointer()
+                                                .hover(|s| s.bg(theme.surface_hover))
+                                                .on_click(move |_, _, cx| {
+                                                    let _ = view_spin.update(cx, |this, cx| {
+                                                        if this.skin_ui.auto_spin {
+                                                            this.stop_skin_spin();
+                                                        } else {
+                                                            this.start_skin_spin(cx);
+                                                        }
+                                                        cx.notify();
+                                                    });
+                                                })
+                                                .child(widgets::icon(
+                                                    "arrows-clockwise",
+                                                    13.0,
+                                                    if app.skin_ui.auto_spin { theme.accent_soft } else { theme.faint },
+                                                )),
+                                        )
+                                        .when_some(app.skin_preview.clone(), |el, image| {
+                                            el.child(gpui::img(image).absolute().inset_0().size_full().object_fit(gpui::ObjectFit::Contain))
+                                        })
+                                        .when(app.skin_preview.is_none(), |el| {
                                             el.child(
-                                                gpui::img(path)
-                                                    .size(px(160.0))
-                                                    .object_fit(gpui::ObjectFit::Contain),
+                                                div()
+                                                    .absolute()
+                                                    .inset_0()
+                                                    .flex()
+                                                    .items_center()
+                                                    .justify_center()
+                                                    .child(widgets::icon("user", 46.0, theme.faint)),
                                             )
                                         })
-                                        .when(skin_image.is_none(), |el| {
-                                            el.child(widgets::icon("image", 34.0, theme.faint))
-                                        }),
-                                )
-                                .child(
-                                    div()
-                                        .w(px(120.0))
-                                        .h(px(170.0))
-                                        .rounded(px(RADIUS))
-                                        .bg(theme.elevated)
-                                        .border_1()
-                                        .border_color(theme.border_soft)
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .truncate()
-                                        .when_some(cape_image.clone(), |el, path| {
-                                            el.child(
-                                                gpui::img(path)
-                                                    .size(px(110.0))
-                                                    .object_fit(gpui::ObjectFit::Contain),
-                                            )
-                                        })
-                                        .when(cape_image.is_none(), |el| {
-                                            el.child(widgets::icon("shield", 30.0, theme.faint))
-                                        }),
-                                )
+                                        .child(
+                                            div()
+                                                .absolute()
+                                                .bottom(px(7.0))
+                                                .left(px(9.0))
+                                                .text_size(px(TEXT_XS))
+                                                .text_color(theme.faint)
+                                                .child("Kéo để xoay"),
+                                        )
+                                })
                                 .child(
                                     div()
                                         .flex()

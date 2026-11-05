@@ -6,6 +6,7 @@ pub mod launch;
 pub mod meta;
 pub mod paths;
 pub mod modpack;
+pub mod skin3d;
 pub mod skins;
 pub mod world;
 

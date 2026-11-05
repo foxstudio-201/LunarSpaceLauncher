@@ -115,6 +115,10 @@ pub struct SkinState {
     pub skin_data: String,
     pub cape_data: String,
     pub message: String,
+    pub angle: f32,
+    pub dragging: bool,
+    pub auto_spin: bool,
+    pub spin_gen: u64,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -296,6 +300,8 @@ pub struct LauncherApp {
     pub create: CreateState,
     pub account_ui: AddAccountState,
     pub skin_ui: SkinState,
+    pub skin_preview: Option<Arc<gpui::RenderImage>>,
+    pub skin_drag_x: f32,
     pub content: ContentState,
     pub settings_ui: SettingsUi,
     pub instance_ui: InstanceUi,
@@ -460,6 +466,8 @@ impl LauncherApp {
                 model: "classic".into(),
                 ..Default::default()
             },
+            skin_preview: None,
+            skin_drag_x: 0.0,
             content: ContentState {
                 kind: "modpacks".into(),
                 source: "modrinth".into(),
@@ -552,6 +560,76 @@ impl LauncherApp {
                 }
             }
         }
+    }
+
+    pub fn refresh_skin_preview(&mut self) {
+        let Some(path) = self.skin_ui.skin_path.clone() else {
+            self.skin_preview = None;
+            return;
+        };
+        let Ok(skin) = image::open(&path) else {
+            self.skin_preview = None;
+            return;
+        };
+        let cape = self
+            .skin_ui
+            .cape_path
+            .as_ref()
+            .and_then(|path| image::open(path).ok())
+            .map(|image| image.to_rgba8());
+        let pixels = crate::mc::skin3d::render(
+            &skin.to_rgba8(),
+            cape.as_ref(),
+            &self.skin_ui.model,
+            self.skin_ui.angle,
+            320,
+            420,
+        );
+        let frame = image::Frame::new(pixels);
+        self.skin_preview = Some(Arc::new(gpui::RenderImage::new(vec![frame])));
+    }
+
+    pub fn start_skin_spin(&mut self, cx: &mut Context<Self>) {
+        if self.skin_ui.auto_spin {
+            return;
+        }
+        self.skin_ui.auto_spin = true;
+        self.skin_ui.spin_gen += 1;
+        self.refresh_skin_preview();
+        let generation = self.skin_ui.spin_gen;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(40))
+                    .await;
+                let keep = this
+                    .update(cx, |this, cx| {
+                        if !this.skin_ui.auto_spin || this.skin_ui.spin_gen != generation {
+                            return false;
+                        }
+                        if this.accounts_tab != "skin"
+                            || this.skin_ui.dragging
+                            || this.skin_ui.skin_path.is_none()
+                        {
+                            return true;
+                        }
+                        this.skin_ui.angle += 0.035;
+                        this.refresh_skin_preview();
+                        cx.notify();
+                        true
+                    })
+                    .unwrap_or(false);
+                if !keep {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    pub fn stop_skin_spin(&mut self) {
+        self.skin_ui.auto_spin = false;
+        self.skin_ui.spin_gen += 1;
     }
 
     pub fn refresh_accounts(&mut self) {
