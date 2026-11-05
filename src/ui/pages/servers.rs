@@ -261,23 +261,55 @@ fn render_detail(app: &mut LauncherApp, cx: &mut Context<LauncherApp>, server: &
     match app.server_ui.tab.as_str() {
         "console" => {
             let logs = app.server_ui.console.clone();
-            let start = logs.len().saturating_sub(700);
-            let mut lines = div().flex().flex_col().p(px(10.0));
+            let filter = app.server_filter.read(cx).text().to_lowercase();
+            let level = app.server_ui.console_level.clone();
+            let start = logs.len().saturating_sub(1200);
+            let mut filtered: Vec<String> = Vec::new();
             for line in &logs[start..] {
-                let color = if line.contains("ERROR") || line.contains("Exception") {
-                    theme.bad
-                } else if line.contains("WARN") {
-                    theme.warn
-                } else {
-                    theme.muted
-                };
-                lines = lines.child(div().text_size(px(11.5)).font_family(MONO).text_color(color).child(line.clone()));
+                let clean = crate::util::strip_minecraft_codes(&crate::util::strip_ansi(line));
+                let line_level = crate::ui::logs::level_of(&clean);
+                if !level.is_empty() && line_level != level {
+                    continue;
+                }
+                if !filter.is_empty() && !clean.to_lowercase().contains(&filter) {
+                    continue;
+                }
+                filtered.push(line.clone());
             }
+            let mut level_row = div().flex().items_center().gap(px(4.0));
+            for (key, label) in [("", "Tất cả"), ("INFO", "Info"), ("WARN", "Warn"), ("ERROR", "Lỗi")] {
+                let active = app.server_ui.console_level == key;
+                let view_level = view.clone();
+                let key = key.to_string();
+                level_row = level_row.child(
+                    div()
+                        .id(gpui::SharedString::from(format!("srv-level-{label}")))
+                        .h(px(24.0)).px(px(9.0)).flex().items_center().rounded_full()
+                        .bg(if active { theme.accent_dim } else { theme.elevated })
+                        .border_1().border_color(if active { theme.accent } else { theme.border_soft })
+                        .text_size(px(10.0))
+                        .font_weight(if active { semibold() } else { medium() })
+                        .text_color(if active { theme.accent_soft } else { theme.muted })
+                        .cursor_pointer()
+                        .on_click(move |_, _, cx| {
+                            let key = key.clone();
+                            let _ = view_level.update(cx, |this, cx| {
+                                this.server_ui.console_level = key;
+                                cx.notify();
+                            });
+                        })
+                        .child(label.to_string()),
+                );
+            }
+            let colored = crate::ui::logs::styled(&filtered, "", 11.5, &theme);
             let view_stop = view.clone();
             let view_start = view.clone();
             body = body
                 .child(
                     div().flex().items_center().gap_2()
+                        .child(level_row)
+                        .child(div().w(px(200.0)).child(widgets::text_input_box(&theme).child(app.server_filter.clone())))
+                        .child(div().flex_1())
                         .child(widgets::ghost_button("srv-console-copy", "Sao chép", &theme, {
                             let text = logs.join("\n");
                             move |_, _, cx| {
@@ -294,9 +326,15 @@ fn render_detail(app: &mut LauncherApp, cx: &mut Context<LauncherApp>, server: &
                             })),
                 )
                 .child(
-                    div().id("server-console").h(px(460.0)).overflow_y_scroll().rounded(px(RADIUS))
+                    div().id("server-console").h(px(460.0)).overflow_y_scroll().track_scroll(&app.server_scroll).rounded(px(RADIUS))
                         .bg(if theme.dark { gpui::rgb(0x07090c) } else { gpui::rgb(0xf7f8fa) })
-                        .border_1().border_color(theme.border_soft).child(lines),
+                        .border_1().border_color(theme.border_soft)
+                        .when_some(colored, |el, content| el.child(content))
+                        .when(filtered.is_empty(), |el| {
+                            el.child(div().h(px(430.0)).w_full().flex().items_center().justify_center()
+                                .text_size(px(11.0)).text_color(theme.faint)
+                                .child(if logs.is_empty() { "Chưa có log. Chạy server để xem console." } else { "Không có dòng log khớp bộ lọc." }))
+                        }),
                 )
                 .child(
                     div().flex().items_center().gap_2()
@@ -938,8 +976,11 @@ fn render_detail(app: &mut LauncherApp, cx: &mut Context<LauncherApp>, server: &
                 let created = backup.get("created").and_then(Value::as_str).unwrap_or("");
                 let view_restore = view.clone();
                 let view_delete = view.clone();
+                let view_download = view.clone();
                 let id_restore = backup_id.clone();
                 let id_delete = backup_id.clone();
+                let download_file = backup.get("file").and_then(Value::as_str).unwrap_or("").to_string();
+                let download_name = format!("{}.zip", crate::util::safe_name(&backup_name));
                 rows = rows.child(
                     div()
                         .flex().items_center().gap_3().h(px(44.0)).px(px(10.0)).rounded(px(6.0))
@@ -953,6 +994,34 @@ fn render_detail(app: &mut LauncherApp, cx: &mut Context<LauncherApp>, server: &
                         )
                         .child(
                             div().flex().items_center().gap(px(4.0))
+                                .child(widgets::ghost_button("srv-backup-download", "Tải xuống", &theme, {
+                                    let source = download_file.clone();
+                                    let file_name = download_name.clone();
+                                    move |_, _, cx| {
+                                        let view = view_download.clone();
+                                        let source = source.clone();
+                                        let file_name = file_name.clone();
+                                        cx.spawn(async move |cx| {
+                                            let picked = rfd::AsyncFileDialog::new()
+                                                .set_file_name(file_name)
+                                                .add_filter("Zip", &["zip"])
+                                                .save_file()
+                                                .await;
+                                            if let Some(file) = picked {
+                                                let target = file.path().to_path_buf();
+                                                let result = std::fs::copy(&source, &target);
+                                                let _ = view.update(cx, |this, cx| {
+                                                    if result.is_ok() {
+                                                        this.toast("ok", "Đã lưu bản sao lưu", target.to_string_lossy(), cx);
+                                                    } else {
+                                                        this.toast("bad", "Không lưu được bản sao lưu", "", cx);
+                                                    }
+                                                });
+                                            }
+                                        })
+                                        .detach();
+                                    }
+                                }))
                                 .child(widgets::ghost_button("srv-backup-restore", "Khôi phục", &theme, move |_, _, cx| {
                                     let backup_id = id_restore.clone();
                                     let _ = view_restore.update(cx, |this, cx| {

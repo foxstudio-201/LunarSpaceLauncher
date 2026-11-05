@@ -978,7 +978,7 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                         div()
                             .text_size(px(11.0))
                             .font_family(MONO)
-                            .text_color(console_color(line, &theme))
+                            .text_color(crate::ui::logs::color(line, &theme))
                             .truncate()
                             .child(crate::util::strip_minecraft_codes(line)),
                     );
@@ -1104,78 +1104,19 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
             let hidden = app.instance_ui.console_hidden.min(logs_all.len());
             let console_height = (f32::from(window.viewport_size().height) - 390.0).clamp(220.0, 900.0);
 
-            let mut text = String::new();
-            let mut runs: Vec<(std::ops::Range<usize>, gpui::HighlightStyle)> = Vec::new();
-            let mut shown = 0usize;
+            let mut shown_lines: Vec<String> = Vec::new();
             for line in &logs_all[hidden..] {
                 let clean = crate::util::strip_minecraft_codes(&crate::util::strip_ansi(line));
-                let line_level = console_level_of(&clean);
+                let line_level = crate::ui::logs::level_of(&clean);
                 if !level.is_empty() && line_level != level {
                     continue;
                 }
                 if !filter.is_empty() && !clean.to_lowercase().contains(&filter) {
                     continue;
                 }
-                if shown > 0 {
-                    text.push('\n');
-                }
-                let base = text.len();
-                let pieces = console_pieces(&clean, &theme);
-                let mut line_text = String::new();
-                let mut spans = Vec::new();
-                for piece in &pieces {
-                    let start = line_text.len();
-                    line_text.push_str(&piece.text);
-                    spans.push((start, line_text.len(), piece));
-                }
-                let lowered = line_text.to_lowercase();
-                let matches: Vec<(usize, usize)> = if !search.is_empty() && lowered.len() == line_text.len() {
-                    lowered
-                        .match_indices(&search)
-                        .map(|(start, hit)| (start, start + hit.len()))
-                        .collect()
-                } else {
-                    Vec::new()
-                };
-                for (start, end, piece) in spans {
-                    let mut bounds = vec![start, end];
-                    for (match_start, match_end) in &matches {
-                        if *match_end <= start || *match_start >= end {
-                            continue;
-                        }
-                        bounds.push((*match_start).clamp(start, end));
-                        bounds.push((*match_end).clamp(start, end));
-                    }
-                    bounds.sort_unstable();
-                    bounds.dedup();
-                    for pair in bounds.windows(2) {
-                        let (from, to) = (pair[0], pair[1]);
-                        if from >= to {
-                            continue;
-                        }
-                        let hit = matches
-                            .iter()
-                            .any(|(match_start, match_end)| from >= *match_start && to <= *match_end);
-                        runs.push((
-                            base + from..base + to,
-                            gpui::HighlightStyle {
-                                color: Some(piece.color.into()),
-                                font_weight: if piece.bold { Some(FontWeight::BOLD) } else { None },
-                                background_color: if hit { Some(gpui::rgba(0xE9B87240).into()) } else { None },
-                                ..Default::default()
-                            },
-                        ));
-                    }
-                }
-                text.push_str(&line_text);
-                shown += 1;
+                shown_lines.push(line.clone());
             }
-
-            let mut style = gpui::TextStyle::default();
-            style.color = theme.text.into();
-            style.font_family = MONO.into();
-            style.font_size = px(font).into();
-            style.line_height = px(font * 1.45).into();
+            let shown = shown_lines.len();
 
             let mut terminal = div()
                 .w_full()
@@ -1183,7 +1124,7 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                 .bg(if theme.dark { gpui::rgb(0x07090c) } else { gpui::rgb(0xf7f8fa) })
                 .border_1()
                 .border_color(theme.border_soft);
-            if text.is_empty() {
+            if shown_lines.is_empty() {
                 terminal = terminal.child(
                     div()
                         .h(px(console_height - 22.0))
@@ -1202,13 +1143,8 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                                 }),
                         ),
                 );
-            } else {
-                terminal = terminal.child(
-                    div()
-                        .w_full()
-                        .p(px(10.0))
-                        .child(gpui::StyledText::new(text).with_default_highlights(&style, runs)),
-                );
+            } else if let Some(content) = crate::ui::logs::styled(&shown_lines, &search, font, &theme) {
+                terminal = terminal.child(content);
             }
 
             let view_search_btn = view.clone();
@@ -2772,94 +2708,7 @@ fn render_editor(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<L
 
 
 
-struct ConsolePiece {
-    text: String,
-    color: gpui::Rgba,
-    bold: bool,
-}
 
-fn console_logger_color(theme: &Theme) -> gpui::Rgba {
-    if theme.dark { gpui::rgb(0x7d8796) } else { gpui::rgb(0x55606f) }
-}
-
-fn console_parse(clean: &str) -> Option<(String, String, String, String, String)> {
-    static RE: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
-        regex::Regex::new(r"^\[([^\]]+)\]\s+\[([^\]]+)\]\s+\[([^\]]+)\]:?\s?(.*)$").unwrap()
-    });
-    let caps = RE.captures(clean)?;
-    let stamp = caps.get(1)?.as_str().to_string();
-    let thread_level = caps.get(2)?.as_str();
-    let logger = caps.get(3)?.as_str().to_string();
-    let message = caps.get(4).map(|m| m.as_str()).unwrap_or("").to_string();
-    let (thread, level) = thread_level.rsplit_once('/').unwrap_or(("", thread_level));
-    Some((stamp, thread.to_string(), level.to_string(), logger, message))
-}
-
-fn console_level_of(clean: &str) -> &'static str {
-    if let Some((_, _, level, _, _)) = console_parse(clean) {
-        let level = level.to_uppercase();
-        if level.starts_with("ERROR") || level == "FATAL" {
-            "ERROR"
-        } else if level.starts_with("WARN") {
-            "WARN"
-        } else if level == "DEBUG" || level == "TRACE" {
-            "DEBUG"
-        } else {
-            "INFO"
-        }
-    } else {
-        let lower = clean.to_lowercase();
-        if lower.contains("error") || lower.contains("exception") || lower.contains("fatal") {
-            "ERROR"
-        } else if lower.contains("warn") {
-            "WARN"
-        } else {
-            "INFO"
-        }
-    }
-}
-
-fn console_pieces(clean: &str, theme: &Theme) -> Vec<ConsolePiece> {
-    if let Some((stamp, thread, level, logger, message)) = console_parse(clean) {
-        let upper = level.to_uppercase();
-        let (color, bold) = match upper.as_str() {
-            "ERROR" | "FATAL" => (theme.bad, true),
-            "WARN" | "WARNING" => (theme.warn, true),
-            "DEBUG" | "TRACE" => (theme.faint, false),
-            _ => (theme.ok, false),
-        };
-        let message_color = if bold { color } else { theme.text };
-        vec![
-            ConsolePiece { text: format!("[{stamp}] "), color: theme.faint, bold: false },
-            ConsolePiece { text: format!("{thread}/"), color: theme.faint, bold: false },
-            ConsolePiece { text: level, color, bold },
-            ConsolePiece { text: "] ".into(), color: theme.faint, bold: false },
-            ConsolePiece { text: format!("{logger} "), color: console_logger_color(theme), bold: false },
-            ConsolePiece { text: message, color: message_color, bold: false },
-        ]
-    } else {
-        vec![ConsolePiece { text: clean.to_string(), color: console_color(clean, theme), bold: false }]
-    }
-}
-
-fn console_color(line: &str, theme: &Theme) -> gpui::Rgba {
-    let text = line.to_lowercase();
-    if text.contains("error") || text.contains("exception") || text.contains("fatal") {
-        theme.bad
-    } else if text.contains("warn") {
-        theme.warn
-    } else if text.contains("[xyolauncher]") {
-        theme.accent_soft
-    } else if text.contains("done (") || text.contains("server started") {
-        theme.ok
-    } else if text.contains("starting") || text.contains("loading") || text.contains("connecting") {
-        theme.info
-    } else if text.contains("<") && text.contains(">") && text.contains("chat") {
-        theme.ok
-    } else {
-        theme.muted
-    }
-}
 
 
 impl LauncherApp {

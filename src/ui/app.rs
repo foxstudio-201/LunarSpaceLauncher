@@ -246,6 +246,7 @@ pub struct ServerUi {
     pub difficulty: String,
     pub online: bool,
     pub pvp: bool,
+    pub console_level: String,
     pub schedules: Vec<Value>,
     pub users_whitelist: Vec<Value>,
     pub users_ops: Vec<Value>,
@@ -366,10 +367,12 @@ pub struct LauncherApp {
     pub file_search: Entity<TextField>,
     pub console_filter: Entity<TextField>,
     pub console_search_input: Entity<TextField>,
+    pub server_filter: Entity<TextField>,
     pub editor_input: Entity<TextField>,
     pub file_name_input: Entity<TextField>,
     pub console_scroll: gpui::ScrollHandle,
     pub page_scroll: gpui::ScrollHandle,
+    pub server_scroll: gpui::ScrollHandle,
     pub server_cmd: Entity<TextField>,
     pub server_motd: Entity<TextField>,
     pub server_port: Entity<TextField>,
@@ -433,6 +436,7 @@ impl LauncherApp {
         let file_search = cx.new(|cx| TextField::new(cx, "Tìm tệp…").on_change(notify_change.clone()));
         let console_filter = cx.new(|cx| TextField::new(cx, "Lọc log…").on_change(notify_change.clone()));
         let console_search_input = cx.new(|cx| TextField::new(cx, "Tìm trong console…").on_change(notify_change.clone()));
+        let server_filter = cx.new(|cx| TextField::new(cx, "Lọc log server…").on_change(notify_change.clone()));
         let editor_input = cx.new(|cx| TextField::new(cx, "Nội dung tệp…").multiline(true));
         let file_name_input = cx.new(|cx| TextField::new(cx, "Tên tệp hoặc thư mục…"));
         let server_motd = cx.new(|cx| TextField::new(cx, "XyoLauncher Server"));
@@ -558,10 +562,12 @@ impl LauncherApp {
             file_search,
             console_filter,
             console_search_input,
+            server_filter,
             editor_input,
             file_name_input,
             console_scroll: gpui::ScrollHandle::new(),
             page_scroll: gpui::ScrollHandle::new(),
+            server_scroll: gpui::ScrollHandle::new(),
             server_cmd,
             server_motd,
             server_port,
@@ -1500,6 +1506,9 @@ impl LauncherApp {
                     if self.server_ui.console.len() > 2000 {
                         let overflow = self.server_ui.console.len() - 2000;
                         self.server_ui.console.drain(0..overflow);
+                    }
+                    if self.server_ui.tab == "console" {
+                        self.server_scroll.scroll_to_bottom();
                     }
                 }
             }
