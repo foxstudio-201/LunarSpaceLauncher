@@ -2406,10 +2406,7 @@ impl LauncherApp {
             .py(px(9.0))
             .child(mid_inner);
 
-        let mut bottom_inner = div().relative().flex().flex_col().gap(px(4.0)).w_full();
-        if self.account_menu_open {
-            bottom_inner = bottom_inner.child(self.account_menu(cx));
-        }
+        let bottom_inner = div().relative().flex().flex_col().gap(px(4.0)).w_full();
 
         let view_acc = entity.clone();
         let menu_open = self.account_menu_open;
@@ -3214,16 +3211,27 @@ impl LauncherApp {
             .into_any_element()
     }
 
+    fn account_menu_layer(&self, cx: &Context<Self>) -> AnyElement {
+        let width = if self.rail_collapsed {
+            240.0
+        } else {
+            (self.rail_width - 20.0).max(160.0)
+        };
+        div()
+            .absolute()
+            .left(px(18.0))
+            .bottom(px(78.0))
+            .w(px(width))
+            .child(self.account_menu(cx))
+            .into_any_element()
+    }
+
     fn account_menu(&self, cx: &Context<Self>) -> AnyElement {
         use gpui::AnimationExt;
         let theme = self.theme.clone();
         let view = cx.entity().downgrade();
         let mut menu = div()
-            .absolute()
-            .left(px(0.0))
-            .bottom(px(58.0))
-            .when(!self.rail_collapsed, |el| el.right(px(0.0)))
-            .when(self.rail_collapsed, |el| el.w(px(240.0)))
+            .w_full()
             .rounded(px(18.0))
             .bg(theme.surface)
             .border_1()
@@ -3599,6 +3607,9 @@ impl Render for LauncherApp {
                     }),
             )
             .child(self.toast_layer());
+        if self.account_menu_open {
+            root = root.child(self.account_menu_layer(cx));
+        }
         if self.sync_open {
             root = root.child(self.sync_layer(cx));
         }
