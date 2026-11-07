@@ -718,13 +718,24 @@ impl Backend {
         progress: crate::net::ProgressFn,
     ) -> Result<String> {
         let mut url = format!(
-            "https://lunarspace.site/api-v2/latest?mc={}",
+            "{}/api-v2/latest?mc={}",
+            meta::LUNAR_API,
             urlencode(&entry.version)
         );
-        if let Some(version) = entry.loader_version.as_deref() {
-            url.push_str(&format!("&version={}", urlencode(version)));
+        if let Some(requested) = entry.loader_version.as_deref().filter(|v| !v.trim().is_empty()) {
+            let version = resolve_lunar_build(&entry.version, requested).await;
+            url.push_str(&format!("&version={}", urlencode(&version)));
         }
-        let manifest = crate::net::fetch_json(&url).await?;
+        let manifest = crate::net::fetch_json(&url).await.map_err(|err| {
+            if err.to_string().contains("HTTP 404") {
+                anyhow!(
+                    "LunarLoader chưa có bản cho Minecraft {} với bản build đã chọn.",
+                    entry.version
+                )
+            } else {
+                err
+            }
+        })?;
         let version_id = manifest
             .pointer("/install/version_id")
             .and_then(Value::as_str)
@@ -4372,6 +4383,27 @@ fn unique_name(parent: &Path, name: &str) -> String {
         }
     }
     format!("{base}-{}{ext}", chrono::Utc::now().timestamp())
+}
+
+pub(crate) async fn resolve_lunar_build(game: &str, requested: &str) -> String {
+    if !requested.starts_with("lunarloader-") {
+        return requested.to_string();
+    }
+    let url = format!("{}/api-v2/versions?mc={}", meta::LUNAR_API, urlencode(game));
+    let Ok(list) = crate::net::fetch_json(&url).await else {
+        return requested.to_string();
+    };
+    list.get("versions")
+        .and_then(Value::as_array)
+        .and_then(|rows| {
+            rows.iter().find(|row| {
+                row.get("id").and_then(Value::as_str) == Some(requested)
+                    || row.get("version").and_then(Value::as_str) == Some(requested)
+            })
+        })
+        .and_then(|row| row.get("version").and_then(Value::as_str))
+        .map(str::to_string)
+        .unwrap_or_else(|| requested.to_string())
 }
 
 pub fn analyze_crash(lines: &[String]) -> Value {
