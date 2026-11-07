@@ -295,7 +295,7 @@ fn empty_text(theme: &Theme, title: &str, hint: &str) -> AnyElement {
         .into_any_element()
 }
 
-pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<LauncherApp>) -> AnyElement {
+pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<LauncherApp>) -> AnyElement {
     ensure_loaders(app, cx);
     let theme = app.theme.clone();
     let view = cx.entity().downgrade();
@@ -1394,10 +1394,11 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
         }
     }
 
+    let root_height = (f32::from(window.bounds().size.height) - 44.0).max(240.0);
     div()
         .flex()
         .flex_col()
-        .h_full()
+        .h(px(root_height))
         .min_h(px(0.0))
         .w_full()
         .child(header)
@@ -1408,6 +1409,7 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                 .flex_1()
                 .min_h(px(0.0))
                 .overflow_y_scroll()
+                .track_scroll(&app.home_scroll)
                 .p(px(24.0))
                 .child(div().max_w(px(1024.0)).mx_auto().w_full().child(content)),
         )
