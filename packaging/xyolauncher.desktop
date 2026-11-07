@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=XyoLauncher
+GenericName=Minecraft Launcher
+Comment=Launch and manage Minecraft instances
+Exec=xyolauncher
+Icon=xyolauncher
+Terminal=false
+Categories=Game;
+StartupNotify=true
+StartupWMClass=XyoLauncher

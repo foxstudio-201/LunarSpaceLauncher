@@ -58,7 +58,8 @@ winresource = "0.1"
 
 [profile.release]
 opt-level = 3
-lto = "thin"
+# thin LTO drops ring's asm symbols on rustc 1.99
+lto = false
 codegen-units = 1
 strip = true
 panic = "abort"

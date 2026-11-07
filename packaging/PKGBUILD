@@ -1,0 +1,51 @@
+# Maintainer: foxstudio-201
+pkgname=xyolauncher
+pkgver=2.0.0
+_pkgdir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_repo="$(realpath "$_pkgdir/..")"
+pkgrel=$(( $(git -C "$_repo" rev-list --count v2.0.0..HEAD 2>/dev/null || echo 0) + 1 ))
+pkgdesc="XyoLauncher - Minecraft launcher client built with GPUI"
+arch=('x86_64')
+url="https://github.com/foxstudio-201/LunarSpaceLauncher"
+license=('custom')
+depends=(
+  'glibc'
+  'gcc-libs'
+  'fontconfig'
+  'freetype2'
+  'libxkbcommon'
+  'wayland'
+  'vulkan-icd-loader'
+  'gtk3'
+  'webkit2gtk-4.1'
+  'libsoup3'
+  'libxcb'
+  'xcb-util'
+  'alsa-lib'
+  'xdg-utils'
+)
+makedepends=('git' 'rust' 'cmake' 'clang' 'pkgconf' 'wayland-protocols')
+optdepends=(
+  'jre-openjdk: run Minecraft'
+  'xdg-desktop-portal: native file dialogs'
+)
+provides=('xyolauncher')
+options=('!debug')
+source=("$pkgname::git+file://${_repo}/.git#branch=rust-gpui")
+sha256sums=('SKIP')
+
+build() {
+  cd "$srcdir/$pkgname"
+  # distro CFLAGS break ring's asm symbols in the final link
+  env -u CFLAGS -u CXXFLAGS -u LDFLAGS -u MAKEFLAGS -u LTOFLAGS \
+    CARGO_TARGET_DIR="$_repo/target" cargo build --release --locked
+}
+
+package() {
+  install -Dm755 "$_repo/target/release/XyoLauncher" "$pkgdir/usr/lib/xyolauncher/XyoLauncher"
+  cp -a "$srcdir/$pkgname/assets" "$pkgdir/usr/lib/xyolauncher/assets"
+  install -d "$pkgdir/usr/bin"
+  ln -s /usr/lib/xyolauncher/XyoLauncher "$pkgdir/usr/bin/xyolauncher"
+  install -Dm644 "$_pkgdir/xyolauncher.desktop" "$pkgdir/usr/share/applications/xyolauncher.desktop"
+  install -Dm644 "$srcdir/$pkgname/xyolauncher-icon.png" "$pkgdir/usr/share/icons/hicolor/512x512/apps/xyolauncher.png"
+}
