@@ -2728,11 +2728,14 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                                 let id = instance.id.clone();
                                 let name = instance.name.clone();
                                 let _ = view_delete.update(cx, |this, cx| {
+                                    this.delete_name = name.clone();
+                                    this.delete_text.clear();
+                                    this.delete_shake = 0;
+                                    let input = this.delete_input.clone();
+                                    input.update(cx, |input, cx| input.clear(cx));
                                     this.modal = Modal::Confirm {
                                         title: "Xoá phiên bản?".into(),
-                                        message: format!(
-                                            "\"{name}\" sẽ bị xoá khỏi launcher. Tệp game trong thư mục vẫn được giữ lại."
-                                        ),
+                                        message: format!("\"{name}\" và toàn bộ tệp sẽ bị xoá vĩnh viễn."),
                                         action: ConfirmAction::DeleteInstance(id.clone()),
                                     };
                                     cx.notify();

@@ -478,6 +478,10 @@ pub struct LauncherApp {
     pub sync_error: String,
     pub account_menu_open: bool,
     pub account_menu_hover: Option<usize>,
+    pub delete_input: Entity<TextField>,
+    pub delete_name: String,
+    pub delete_text: String,
+    pub delete_shake: u64,
 }
 
 impl LauncherApp {
@@ -553,6 +557,21 @@ impl LauncherApp {
         let host_token = cx.new(|cx| TextField::new(cx, "ngrok authtoken…"));
         let host_listen = cx.new(|cx| TextField::new(cx, "25565"));
         let instance_search = cx.new(|cx| TextField::new(cx, "Tìm phiên bản…").on_change(notify_change));
+        let delete_input = {
+            let view = view.clone();
+            cx.new(|cx| {
+                TextField::new(cx, "Nhập tên phiên bản…").on_change(move |text, _w, app| {
+                    let text = text.to_string();
+                    let _ = view.update(app, |this, cx| {
+                        this.delete_text = text.clone();
+                        if !this.delete_name.is_empty() && !this.delete_name.starts_with(&text) {
+                            this.delete_shake = this.delete_shake.wrapping_add(1);
+                        }
+                        cx.notify();
+                    });
+                })
+            })
+        };
 
         let splash_dir = crate::ui::assets::assets_root().join("splash");
         let mut splash_frames: Vec<std::path::PathBuf> = std::fs::read_dir(&splash_dir)
@@ -707,6 +726,10 @@ impl LauncherApp {
             sync_error: String::new(),
             account_menu_open: false,
             account_menu_hover: None,
+            delete_input,
+            delete_name: String::new(),
+            delete_text: String::new(),
+            delete_shake: 0,
         };
         app.refresh_settings();
         app.refresh_instances();
@@ -3641,7 +3664,7 @@ fn bezier_axis(t: f32, p1: f32, p2: f32) -> f32 {
     3.0 * it * it * t * p1 + 3.0 * it * t * t * p2 + t * t * t
 }
 
-fn spring_ease(x: f32) -> f32 {
+pub(crate) fn spring_ease(x: f32) -> f32 {
     if x <= 0.0 {
         return 0.0;
     }

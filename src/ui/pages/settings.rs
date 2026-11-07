@@ -197,6 +197,157 @@ fn icon_action(
         .on_click(on_click)
 }
 
+
+fn theme_switch(theme: &Theme, is_night: bool, view: gpui::WeakEntity<LauncherApp>) -> impl IntoElement {
+    use gpui::AnimationExt;
+    let view_click = view;
+    let spring = |t: f32| crate::ui::app::spring_ease(t.clamp(0.0, 1.0));
+    let knob_left = move |t: f32| -> f32 {
+        let k = spring(t);
+        if is_night {
+            6.0 + 98.0 * k
+        } else {
+            6.0 + 98.0 * (1.0 - k)
+        }
+    };
+    let stars = [
+        (26.0, 14.0, 3.0),
+        (52.0, 26.0, 2.0),
+        (90.0, 12.0, 2.5),
+        (118.0, 32.0, 2.0),
+        (140.0, 16.0, 3.0),
+        (76.0, 40.0, 2.0),
+    ];
+    let mut star_layer = div().absolute().inset_0();
+    for (i, (x, y, s)) in stars.into_iter().enumerate() {
+        let tile = div()
+            .absolute()
+            .left(px(x))
+            .top(px(y))
+            .w(px(s))
+            .h(px(s))
+            .rounded_full()
+            .bg(gpui::rgb(0xFFFFFF))
+            .with_animation(
+                gpui::SharedString::from(format!("star-{i}")),
+                gpui::Animation::new(std::time::Duration::from_millis(2400)).repeat(),
+                move |el, t| {
+                    let o = if is_night {
+                        0.35 + 0.65 * ((t * std::f32::consts::TAU).sin() * 0.5 + 0.5)
+                    } else {
+                        0.0
+                    };
+                    el.opacity(o)
+                },
+            );
+        star_layer = star_layer.child(tile);
+    }
+    let clouds = div()
+        .absolute()
+        .inset_0()
+        .child(div().absolute().right(px(-8.0)).bottom(px(-14.0)).w(px(96.0)).h(px(42.0)).rounded_full().bg(gpui::rgb(0xFFFFFF)))
+        .child(div().absolute().right(px(30.0)).bottom(px(-22.0)).w(px(74.0)).h(px(38.0)).rounded_full().bg(gpui::rgb(0xE3F1FF)))
+        .child(div().absolute().right(px(64.0)).bottom(px(-16.0)).w(px(58.0)).h(px(32.0)).rounded_full().bg(gpui::rgb(0xFFFFFF)))
+        .with_animation(
+            "tsw-clouds",
+            gpui::Animation::new(std::time::Duration::from_millis(700)),
+            move |el, t| {
+                let n = if is_night { t } else { 1.0 - t };
+                el.top(px(26.0 * n)).opacity(1.0 - n)
+            },
+        );
+    div()
+        .id("theme-switch")
+        .relative()
+        .w(px(168.0))
+        .h(px(70.0))
+        .rounded_full()
+        .overflow_hidden()
+        .bg(gpui::linear_gradient(
+            180.0,
+            gpui::linear_color_stop(gpui::rgb(0x5DB7FF), 0.0),
+            gpui::linear_color_stop(gpui::rgb(0x9ED8FF), 1.0),
+        ))
+        .cursor_pointer()
+        .on_click(move |_, _, cx| {
+            let target = if is_night { "light" } else { "dark" };
+            let _ = view_click.update(cx, |this, cx| {
+                this.backend.settings_set(json!({ "theme": target }));
+                this.refresh_settings();
+                cx.notify();
+            });
+        })
+        .child(
+            div()
+                .absolute()
+                .inset_0()
+                .bg(gpui::linear_gradient(
+                    180.0,
+                    gpui::linear_color_stop(gpui::rgb(0x141A3A), 0.0),
+                    gpui::linear_color_stop(gpui::rgb(0x232C5C), 1.0),
+                ))
+                .with_animation(
+                    "tsw-night",
+                    gpui::Animation::new(std::time::Duration::from_millis(800)),
+                    move |el, t| el.opacity(if is_night { t } else { 1.0 - t }),
+                ),
+        )
+        .child(star_layer)
+        .child(
+            div()
+                .absolute()
+                .left(px(28.0))
+                .top(px(32.0))
+                .w(px(10.0))
+                .h(px(10.0))
+                .rounded_full()
+                .bg(gpui::rgba(0xffffff22))
+                .with_animation(
+                    "tsw-halo",
+                    gpui::Animation::new(std::time::Duration::from_millis(700)),
+                    move |el, t| {
+                        let n = if is_night { t } else { 1.0 - t };
+                        el.w(px(10.0 + 96.0 * n)).h(px(10.0 + 96.0 * n)).opacity(n)
+                    },
+                ),
+        )
+        .child(clouds)
+        .child({
+            let moon = div()
+                .absolute()
+                .inset_0()
+                .rounded_full()
+                .bg(gpui::linear_gradient(
+                    140.0,
+                    gpui::linear_color_stop(gpui::rgb(0xF4F6FB), 0.0),
+                    gpui::linear_color_stop(gpui::rgb(0xA9B0C2), 1.0),
+                ))
+                .child(gpui::svg().path(widgets::icon_source("moon")).size(px(30.0)).text_color(gpui::rgb(0xE8ECF5)))
+                .with_animation(
+                    "tsw-moon",
+                    gpui::Animation::new(std::time::Duration::from_millis(700)),
+                    move |el, t| el.opacity(if is_night { t } else { 1.0 - t }),
+                );
+            div()
+                .absolute()
+                .w(px(58.0))
+                .h(px(58.0))
+                .rounded_full()
+                .overflow_hidden()
+                .bg(gpui::linear_gradient(
+                    140.0,
+                    gpui::linear_color_stop(gpui::rgb(0xFFF1A8), 0.0),
+                    gpui::linear_color_stop(gpui::rgb(0xF8A91E), 1.0),
+                ))
+                .child(moon)
+                .with_animation(
+                    "tsw-knob",
+                    gpui::Animation::new(std::time::Duration::from_millis(900)),
+                    move |el, t| el.left(px(knob_left(t))).top(px(6.0)),
+                )
+        })
+}
+
 fn setting_chip(
     theme: &Theme,
     value: &str,
@@ -492,6 +643,7 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
     let view_rpc = view.clone();
     let view_auto = view.clone();
     let view_refresh = view.clone();
+    let view_sync = view.clone();
     let view_save = view.clone();
     let view_check = view.clone();
     let view_whats_new = view.clone();
@@ -503,12 +655,7 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
         .child(setting_chip(&theme, "vi", "Tiếng Việt", &lang, view.clone(), "language"))
         .child(setting_chip(&theme, "en", "English", &lang, view.clone(), "language"));
 
-    let theme_row = div()
-        .flex()
-        .items_center()
-        .gap_1()
-        .child(setting_chip(&theme, "dark", &tr(en, "Tối", "Dark"), &theme_key, view.clone(), "theme"))
-        .child(setting_chip(&theme, "light", &tr(en, "Sáng", "Light"), &theme_key, view.clone(), "theme"));
+    let theme_row = theme_switch(&theme, theme_key == "dark", view.clone());
 
     let page = page_body()
         .max_w(px(860.0))
@@ -520,6 +667,19 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                 .flex()
                 .items_center()
                 .gap_2()
+                .child(widgets::ghost_button("settings-test-sync", tr(en, "Thử đồng bộ", "Test sync"), &theme, move |_, _, cx| {
+                    let _ = view_sync.update(cx, |this, cx| {
+                        this.sync_open = true;
+                        this.sync_done = false;
+                        this.sync_running = false;
+                        this.sync_error.clear();
+                        this.sync_files = 0;
+                        this.sync_total = 0;
+                        this.sync_bytes = 0;
+                        this.sync_bytes_total = 0;
+                        cx.notify();
+                    });
+                }))
                 .child(widgets::ghost_button("settings-refresh", tr(en, "Quét lại Java", "Refresh Java"), &theme, move |_, _, cx| {
                     let _ = view_refresh.update(cx, |this, cx| this.load_java(cx));
                 }))

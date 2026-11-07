@@ -1217,7 +1217,222 @@ pub fn modpack_update_modal(app: &mut LauncherApp, _window: &mut Window, cx: &mu
     })
 }
 
-pub fn confirm_modal(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<LauncherApp>) -> impl IntoElement {
+
+fn delete_instance_content(
+    app: &mut LauncherApp,
+    theme: &Theme,
+    id: String,
+    cx: &mut Context<LauncherApp>,
+) -> AnyElement {
+    use gpui::AnimationExt;
+    let instance = app.instances.iter().find(|item| item.id == id).cloned();
+    let name = if app.delete_name.is_empty() {
+        instance.as_ref().map(|item| item.name.clone()).unwrap_or_default()
+    } else {
+        app.delete_name.clone()
+    };
+    let meta = instance
+        .map(|item| format!("{} · {}", item.version, item.loader))
+        .unwrap_or_default();
+    let typed = app.delete_text.clone();
+    let matches = !name.is_empty() && typed == name;
+    let typed_len = typed.chars().count();
+    let mut letters = div().flex().gap(px(1.0));
+    for (index, ch) in name.chars().enumerate() {
+        let ok = index < typed_len && typed.chars().nth(index) == Some(ch);
+        letters = letters.child(
+            div()
+                .text_size(px(15.0))
+                .font_weight(FontWeight::BOLD)
+                .text_color(if ok { theme.bad } else { theme.faint })
+                .child(ch.to_string()),
+        );
+    }
+    let input_box = widgets::text_input_box(theme).child(app.delete_input.clone());
+    let shake = app.delete_shake;
+    let input_el: AnyElement = if shake > 0 {
+        input_box
+            .with_animation(
+                gpui::SharedString::from(format!("del-shake-{shake}")),
+                gpui::Animation::new(std::time::Duration::from_millis(350)),
+                |el, t| {
+                    let dx = (t * std::f32::consts::TAU * 2.0).sin() * 4.0 * (1.0 - t);
+                    el.left(px(dx))
+                },
+            )
+            .into_any_element()
+    } else {
+        input_box.into_any_element()
+    };
+    let view = cx.entity().downgrade();
+    let cancel_view = view.clone();
+    let delete_view = view.clone();
+    let confirm: AnyElement = if matches {
+        div()
+            .id("delete-confirm")
+            .h(px(36.0))
+            .px(px(14.0))
+            .rounded(px(8.0))
+            .bg(theme.bad)
+            .text_color(gpui::rgb(0xffffff))
+            .text_size(px(12.0))
+            .font_weight(FontWeight::BOLD)
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_pointer()
+            .on_click(move |_, _, cx| {
+                let id = id.clone();
+                let _ = delete_view.update(cx, |this, cx| {
+                    let value = this.backend.remove_instance(&id, true);
+                    this.modal = Modal::None;
+                    this.delete_text.clear();
+                    this.delete_name.clear();
+                    this.delete_shake = 0;
+                    let input = this.delete_input.clone();
+                    input.update(cx, |input, cx| input.clear(cx));
+                    if value
+                        .get("ok")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false)
+                    {
+                        this.refresh_instances();
+                        this.toast(
+                            "ok",
+                            "Đã xoá hoàn toàn",
+                            "Toàn bộ tệp game đã bị xoá khỏi đĩa.",
+                            cx,
+                        );
+                    } else {
+                        this.toast("bad", "Xoá thất bại", "Không xoá được phiên bản.", cx);
+                    }
+                    cx.notify();
+                });
+            })
+            .child("Xoá vĩnh viễn")
+            .into_any_element()
+    } else {
+        div()
+            .h(px(36.0))
+            .px(px(14.0))
+            .rounded(px(8.0))
+            .bg(theme.elevated)
+            .text_color(theme.faint)
+            .text_size(px(12.0))
+            .font_weight(FontWeight::BOLD)
+            .flex()
+            .items_center()
+            .justify_center()
+            .child("Xoá vĩnh viễn")
+            .into_any_element()
+    };
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(10.0))
+        .child(
+            div()
+                .text_size(px(16.0))
+                .font_weight(FontWeight::BOLD)
+                .text_color(theme.text)
+                .child("Xoá phiên bản"),
+        )
+        .child(
+            div()
+                .text_size(px(11.5))
+                .text_color(theme.muted)
+                .child("Phiên bản này và toàn bộ tệp game sẽ bị xoá khỏi đĩa. Không thể hoàn tác."),
+        )
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(10.0))
+                .p(px(10.0))
+                .rounded(px(14.0))
+                .bg(theme.elevated)
+                .border_1()
+                .border_color(theme.border_soft)
+                .child(
+                    div()
+                        .size(px(38.0))
+                        .rounded(px(10.0))
+                        .bg(theme.surface_active)
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(widgets::icon("cube", 20.0, theme.accent_soft)),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .min_w(px(0.0))
+                        .child(
+                            div()
+                                .text_size(px(13.0))
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(theme.text)
+                                .truncate()
+                                .child(name.clone()),
+                        )
+                        .child(div().text_size(px(10.0)).text_color(theme.faint).child(meta)),
+                ),
+        )
+        .child(
+            div()
+                .p(px(10.0))
+                .rounded(px(14.0))
+                .border_1()
+                .border_color(theme.bad)
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(6.0))
+                        .child(widgets::icon("warning", 13.0, theme.bad))
+                        .child(
+                            div()
+                                .text_size(px(11.5))
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(theme.bad)
+                                .child("Vùng nguy hiểm"),
+                        ),
+                )
+                .child(
+                    div()
+                        .mt(px(4.0))
+                        .text_size(px(10.5))
+                        .text_color(theme.muted)
+                        .child("Nhập chính xác tên bên dưới để xác nhận."),
+                ),
+        )
+        .child(letters)
+        .child(input_el)
+        .child(
+            div()
+                .flex()
+                .justify_end()
+                .gap(px(8.0))
+                .child(widgets::ghost_button(
+                    "delete-cancel",
+                    "Huỷ",
+                    theme,
+                    move |_, _, cx| {
+                        let _ = cancel_view.update(cx, |this, cx| {
+                            this.modal = Modal::None;
+                            this.delete_text.clear();
+                            this.delete_name.clear();
+                            cx.notify();
+                        });
+                    },
+                ))
+                .child(confirm),
+        )
+        .into_any_element()
+}
+
+pub fn confirm_modal(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<LauncherApp>) -> AnyElement {
     let theme = app.theme.clone();
     let (title, message) = match &app.modal {
         Modal::Confirm { title, message, .. } => (title.clone(), message.clone()),
@@ -1226,6 +1441,23 @@ pub fn confirm_modal(app: &mut LauncherApp, _window: &mut Window, cx: &mut Conte
     let view = cx.entity().downgrade();
     let close_view = view.clone();
     let backdrop_view = view.clone();
+    let delete_id = match &app.modal {
+        Modal::Confirm {
+            action: ConfirmAction::DeleteInstance(id),
+            ..
+        } => Some(id.clone()),
+        _ => None,
+    };
+    if let Some(id) = delete_id {
+        let content = delete_instance_content(app, &theme, id, cx);
+        return modal_overlay(theme.clone(), 440.0, content, move |_, _, cx| {
+            let _ = backdrop_view.update(cx, |this, cx| {
+                this.modal = Modal::None;
+                cx.notify();
+            });
+        })
+        .into_any_element();
+    }
     let content = div()
         .flex()
         .flex_col()
@@ -1264,6 +1496,7 @@ pub fn confirm_modal(app: &mut LauncherApp, _window: &mut Window, cx: &mut Conte
             cx.notify();
         });
     })
+    .into_any_element()
 }
 
 pub fn hide_launcher_window() {
@@ -1311,10 +1544,10 @@ impl LauncherApp {
         };
         match action {
             ConfirmAction::DeleteInstance(id) => {
-                let value = self.backend.remove_instance(&id, false);
+                let value = self.backend.remove_instance(&id, true);
                 if value.get("ok").and_then(serde_json::Value::as_bool).unwrap_or(false) {
                     self.refresh_instances();
-                    self.toast("ok", "Đã xoá phiên bản", "Tệp game vẫn được giữ trong thư mục.", cx);
+                    self.toast("ok", "Đã xoá phiên bản", "Toàn bộ tệp game đã bị xoá khỏi đĩa.", cx);
                 }
             }
             ConfirmAction::TrashFile(id, rel) => {

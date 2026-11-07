@@ -1111,14 +1111,7 @@ impl Backend {
         self.store.write_launcher_profiles();
         if delete_files {
             let dir = PathBuf::from(&entry.dir);
-            let trash_dir = self.store.data_dir.join("trash-instances");
-            let _ = std::fs::create_dir_all(&trash_dir);
-            let target = trash_dir.join(format!(
-                "{}-{}",
-                safe_name(&entry.name),
-                chrono::Utc::now().timestamp()
-            ));
-            if std::fs::rename(&dir, &target).is_err() {
+            if !dir.as_os_str().is_empty() && dir.exists() {
                 let _ = std::fs::remove_dir_all(&dir);
             }
         }
