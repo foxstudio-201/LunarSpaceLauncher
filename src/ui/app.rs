@@ -420,7 +420,7 @@ pub struct LauncherApp {
     pub settings_ui: SettingsUi,
     pub instance_ui: InstanceUi,
     pub server_ui: ServerUi,
-    pub icon_cache: HashMap<String, String>,
+    pub icon_cache: HashMap<String, std::path::PathBuf>,
     pub icon_pending: HashSet<String>,
     pub search: Entity<TextField>,
     pub version_search: Entity<TextField>,
@@ -1874,17 +1874,18 @@ impl LauncherApp {
         cx.notify();
     }
 
-    pub fn instance_icon_path(&self, instance: &Instance) -> Option<String> {
+    pub fn instance_icon_path(&self, instance: &Instance) -> Option<std::path::PathBuf> {
         if let Some(icon) = instance.icon.as_deref() {
             if icon.starts_with("http") {
                 return self.icon_cache.get(icon).cloned();
             }
-            if std::path::Path::new(icon).is_file() {
-                return Some(icon.to_string());
+            let local = std::path::Path::new(icon);
+            if local.is_file() {
+                return Some(local.to_path_buf());
             }
         }
         let local = std::path::Path::new(&instance.dir).join("icon.png");
-        local.is_file().then(|| local.to_string_lossy().into_owned())
+        local.is_file().then_some(local)
     }
 
     pub fn cache_icons(&mut self, urls: Vec<String>, cx: &mut Context<Self>) {
@@ -1897,7 +1898,7 @@ impl LauncherApp {
             self.on_result(cx, rx, move |this, value, cx| {
                 this.icon_pending.remove(&url);
                 if let Some(path) = value.get("path").and_then(Value::as_str) {
-                    this.icon_cache.insert(url.clone(), path.to_string());
+                    this.icon_cache.insert(url.clone(), path.into());
                     cx.notify();
                 }
             });

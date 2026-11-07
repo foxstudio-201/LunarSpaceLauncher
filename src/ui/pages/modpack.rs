@@ -953,7 +953,7 @@ pub fn detail_modal(app: &mut LauncherApp, _window: &mut Window, cx: &mut Contex
                 .child(label.to_string()),
         );
     }
-    let gallery_rows: Vec<(String, Option<String>)> = detail
+    let gallery_rows: Vec<(String, Option<std::path::PathBuf>)> = detail
         .get("gallery")
         .and_then(Value::as_array)
         .map(|rows| {
