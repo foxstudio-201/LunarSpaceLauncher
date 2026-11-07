@@ -2608,26 +2608,6 @@ impl LauncherApp {
                             .size(px(28.0))
                             .rounded(px(7.0))
                             .object_fit(gpui::ObjectFit::Cover),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .justify_center()
-                            .child(
-                                div()
-                                    .text_size(px(13.0))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(theme.text)
-                                    .child("XyoLauncher"),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(8.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.faint)
-                                    .child("LAUNCHER"),
-                            ),
                     ),
             )
             .child(
