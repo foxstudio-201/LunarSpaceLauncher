@@ -468,6 +468,16 @@ pub struct LauncherApp {
     pub select_open: Option<String>,
     pub instance_search: Entity<TextField>,
     pub uptime: u64,
+    pub sync_open: bool,
+    pub sync_running: bool,
+    pub sync_done: bool,
+    pub sync_files: u64,
+    pub sync_total: u64,
+    pub sync_bytes: u64,
+    pub sync_bytes_total: u64,
+    pub sync_error: String,
+    pub account_menu_open: bool,
+    pub account_menu_hover: Option<usize>,
 }
 
 impl LauncherApp {
@@ -561,6 +571,7 @@ impl LauncherApp {
             .unwrap_or_default();
         splash_frames.sort();
         let splash_image = None;
+        let sync_pending = backend.store.sync_pending;
         let mut app = Self {
             backend,
             root_focus: cx.focus_handle(),
@@ -686,6 +697,16 @@ impl LauncherApp {
             select_open: None,
             instance_search,
             uptime: 0,
+            sync_open: sync_pending,
+            sync_running: false,
+            sync_done: false,
+            sync_files: 0,
+            sync_total: 0,
+            sync_bytes: 0,
+            sync_bytes_total: 0,
+            sync_error: String::new(),
+            account_menu_open: false,
+            account_menu_hover: None,
         };
         app.refresh_settings();
         app.refresh_instances();
@@ -1550,6 +1571,33 @@ impl LauncherApp {
     fn handle_event(&mut self, event: Value, cx: &mut Context<Self>) {
         let kind = event.get("type").and_then(Value::as_str).unwrap_or("");
         match kind {
+            "sync-progress" => {
+                self.sync_files = event.get("files").and_then(Value::as_u64).unwrap_or(0);
+                self.sync_total = event.get("total").and_then(Value::as_u64).unwrap_or(0);
+                self.sync_bytes = event.get("bytes").and_then(Value::as_u64).unwrap_or(0);
+                self.sync_bytes_total = event.get("bytesTotal").and_then(Value::as_u64).unwrap_or(0);
+                cx.notify();
+            }
+            "sync-done" => {
+                self.sync_running = false;
+                self.sync_done = true;
+                self.sync_files = event.get("files").and_then(Value::as_u64).unwrap_or(self.sync_total);
+                self.sync_total = event.get("total").and_then(Value::as_u64).unwrap_or(self.sync_total);
+                self.sync_bytes = event.get("bytes").and_then(Value::as_u64).unwrap_or(0);
+                self.sync_bytes_total = event.get("bytesTotal").and_then(Value::as_u64).unwrap_or(0);
+                cx.notify();
+            }
+            "sync-error" => {
+                self.sync_running = false;
+                self.sync_error = event.get("error").and_then(Value::as_str).unwrap_or("Không rõ lỗi").to_string();
+                let msg = self.sync_error.clone();
+                self.toast("bad", "Đồng bộ thất bại", msg, cx);
+                cx.notify();
+            }
+            "sync-cancelled" => {
+                self.sync_running = false;
+                cx.notify();
+            }
             "progress" => {
                 let id = event.get("id").and_then(Value::as_str).unwrap_or("").to_string();
                 let phase = event.get("phase").and_then(Value::as_str).unwrap_or("");
@@ -1823,6 +1871,7 @@ impl LauncherApp {
     }
 
     pub fn set_page(&mut self, page: Page, cx: &mut Context<Self>) {
+        self.account_menu_open = false;
         if page == Page::Instance {
             if self.selected_instance.is_none() {
                 if let Some(first) = self.instances.first() {
@@ -2027,11 +2076,7 @@ impl LauncherApp {
         } else {
             (0.0, false)
         };
-        let (bottom_y, bottom_visible) = if self.page == Page::Settings {
-            (0.0, true)
-        } else {
-            (0.0, false)
-        };
+        let (bottom_y, bottom_visible) = (0.0, false);
         self.set_rail_highlight(0, top_y, top_visible, cx);
         self.set_rail_highlight(1, mid_y, mid_visible, cx);
         self.set_rail_highlight(2, bottom_y, bottom_visible, cx);
@@ -2362,20 +2407,12 @@ impl LauncherApp {
             .child(mid_inner);
 
         let mut bottom_inner = div().relative().flex().flex_col().gap(px(4.0)).w_full();
-        if self.rail_hl_visible[2] {
-            bottom_inner = bottom_inner.child(highlight(self.rail_hl_y[2]));
+        if self.account_menu_open {
+            bottom_inner = bottom_inner.child(self.account_menu(cx));
         }
-        bottom_inner = bottom_inner.child(nav(
-            "nav-settings",
-            "gear",
-            "Hệ thống".into(),
-            "Cấu hình launcher, Java và cập nhật",
-            self.page == Page::Settings,
-            0.0,
-            Box::new(|this, cx| this.set_page(Page::Settings, cx)),
-        ));
 
         let view_acc = entity.clone();
+        let menu_open = self.account_menu_open;
         let account_label = account
             .as_ref()
             .map(|a| a.name.clone())
@@ -2393,14 +2430,18 @@ impl LauncherApp {
             .pr(px(8.0))
             .rounded(px(16.0))
             .cursor_pointer()
-            .bg(if self.page == Page::Accounts {
+            .bg(if self.page == Page::Accounts || self.account_menu_open {
                 theme.surface_active
             } else {
                 gpui::Rgba { a: 0.08, ..theme.text }
             })
             .hover(|st| st.bg(theme.surface_hover))
             .on_click(move |_, _, cx| {
-                let _ = view_acc.update(cx, |this, cx| this.set_page(Page::Accounts, cx));
+                let _ = view_acc.update(cx, |this, cx| {
+                    this.account_menu_open = !this.account_menu_open;
+                    this.account_menu_hover = None;
+                    cx.notify();
+                });
             })
             .when_some(head, |el, path| {
                 el.child(
@@ -2455,6 +2496,26 @@ impl LauncherApp {
                             .text_color(theme.muted)
                             .truncate()
                             .child("Tài khoản · v2.0.0"),
+                    ),
+            )
+            .child(
+                gpui::svg()
+                    .path(widgets::icon_source("caret-up"))
+                    .size(px(16.0))
+                    .text_color(theme.muted)
+                    .with_animation(
+                        gpui::SharedString::from(format!("acct-car-{}", menu_open)),
+                        gpui::Animation::new(std::time::Duration::from_millis(220)),
+                        move |el, t| {
+                            let angle = if menu_open {
+                                std::f32::consts::PI * (1.0 - t)
+                            } else {
+                                std::f32::consts::PI
+                            };
+                            el.with_transformation(gpui::Transformation::rotate(gpui::radians(
+                                angle,
+                            )))
+                        },
                     ),
             );
         let me = if collapsed {
@@ -2758,6 +2819,608 @@ impl LauncherApp {
             Modal::WhatsNew { .. } => Some(pages::settings::whats_new_modal(self, window, cx).into_any_element()),
         }
     }
+
+    fn sync_keep_legacy(&mut self, cx: &mut Context<Self>) {
+        if let Err(err) = self.backend.store.choose_legacy_dir() {
+            self.toast("bad", "Không lưu được lựa chọn", err.to_string(), cx);
+        } else {
+            self.sync_open = false;
+            self.toast(
+                "ok",
+                "Giữ dữ liệu cũ",
+                "Launcher sẽ tiếp tục dùng thư mục LunarSpaceLauncher.",
+                cx,
+            );
+        }
+        cx.notify();
+    }
+
+    fn sync_start(&mut self, cx: &mut Context<Self>) {
+        self.sync_running = true;
+        self.sync_done = false;
+        self.sync_error.clear();
+        self.sync_files = 0;
+        self.sync_total = 0;
+        self.sync_bytes = 0;
+        self.sync_bytes_total = 0;
+        self.backend.legacy_sync_start();
+        cx.notify();
+    }
+
+    fn sync_cancel(&mut self, cx: &mut Context<Self>) {
+        self.backend.legacy_sync_cancel();
+        cx.notify();
+    }
+
+    fn sync_restart(&mut self, cx: &mut Context<Self>) {
+        if let Ok(exe) = std::env::current_exe() {
+            let _ = std::process::Command::new(exe).spawn();
+        }
+        cx.quit();
+    }
+
+    fn orbit_spinner(&self, theme: &Theme) -> AnyElement {
+        use gpui::AnimationExt;
+        let done = self.sync_done;
+        let mut root = div().relative().w(px(230.0)).h(px(200.0));
+        for d in [210.0f32, 150.0, 100.0] {
+            root = root.child(
+                div()
+                    .absolute()
+                    .left(px(115.0 - d / 2.0))
+                    .top(px(100.0 - (d * 0.38) / 2.0))
+                    .w(px(d))
+                    .h(px(d * 0.38))
+                    .rounded_full()
+                    .border_1()
+                    .border_color(gpui::Rgba { a: 0.16, ..theme.text }),
+            );
+        }
+        if !done {
+            let planets = [
+                (105.0f32, -18.0f32, 5.5f32, 12.0f32, gpui::rgb(0x22c3a6)),
+                (105.0, -18.0, 5.5, 8.0, gpui::rgb(0x22c3a6)),
+                (75.0, 24.0, 3.6, 10.0, gpui::rgb(0xff6b8b)),
+                (75.0, 24.0, 3.6, 7.0, gpui::rgb(0xff6b8b)),
+                (50.0, -58.0, 2.2, 9.0, gpui::rgb(0xffb547)),
+                (50.0, -58.0, 2.2, 6.0, gpui::rgb(0xffb547)),
+            ];
+            for (i, (r, tilt, period, size, color)) in planets.into_iter().enumerate() {
+                let phase = if i % 2 == 1 { std::f32::consts::PI } else { 0.0 };
+                let tilt = tilt.to_radians();
+                root = root.child(
+                    div()
+                        .absolute()
+                        .w(px(size))
+                        .h(px(size))
+                        .rounded_full()
+                        .bg(color)
+                        .with_animation(
+                            gpui::SharedString::from(format!("orbit-{i}")),
+                            gpui::Animation::new(std::time::Duration::from_secs_f32(period))
+                                .repeat(),
+                            move |el, t| {
+                                let a = phase + t * std::f32::consts::TAU;
+                                let x = a.cos() * r;
+                                let y = a.sin() * r * 0.38;
+                                let rx = x * tilt.cos() - y * tilt.sin();
+                                let ry = x * tilt.sin() + y * tilt.cos();
+                                el.left(px(115.0 + rx - size / 2.0))
+                                    .top(px(100.0 + ry - size / 2.0))
+                            },
+                        ),
+                );
+            }
+        }
+        let core_size = if done { 84.0 } else { 56.0 };
+        let core = div()
+            .absolute()
+            .w(px(core_size))
+            .h(px(core_size))
+            .rounded_full()
+            .bg(if done {
+                gpui::linear_gradient(
+                    0.0,
+                    gpui::linear_color_stop(theme.ok, 0.0),
+                    gpui::linear_color_stop(theme.ok, 1.0),
+                )
+            } else {
+                gpui::linear_gradient(
+                    140.0,
+                    gpui::linear_color_stop(theme.accent, 0.0),
+                    gpui::linear_color_stop(theme.accent_hover, 1.0),
+                )
+            })
+            .flex()
+            .items_center()
+            .justify_center()
+            .when(done, |el| el.child(widgets::icon("check", 34.0, gpui::rgb(0xffffff))));
+        root = root.child(core.with_animation(
+            "core-breath",
+            gpui::Animation::new(std::time::Duration::from_millis(2200)).repeat(),
+            move |el, t| {
+                let s = if done {
+                    1.0
+                } else {
+                    1.0 + 0.07 * ((t * std::f32::consts::TAU).sin() * 0.5 + 0.5)
+                };
+                let size = core_size * s;
+                el.w(px(size))
+                    .h(px(size))
+                    .left(px(115.0 - size / 2.0))
+                    .top(px(100.0 - size / 2.0))
+            },
+        ));
+        if done {
+            root = root.child(
+                div()
+                    .absolute()
+                    .rounded_full()
+                    .border_2()
+                    .border_color(theme.ok)
+                    .with_animation(
+                        "sync-ripple",
+                        gpui::Animation::new(std::time::Duration::from_millis(1100)).repeat(),
+                        move |el, t| {
+                            let size = 84.0 + 116.0 * t;
+                            el.w(px(size))
+                                .h(px(size))
+                                .left(px(115.0 - size / 2.0))
+                                .top(px(100.0 - size / 2.0))
+                                .opacity(0.7 * (1.0 - t))
+                        },
+                    ),
+            );
+        }
+        root.into_any_element()
+    }
+
+    fn sync_layer(&self, cx: &Context<Self>) -> AnyElement {
+        use gpui::AnimationExt;
+        let theme = self.theme.clone();
+        let view = cx.entity().downgrade();
+        let button = |id: &'static str,
+                      label: &str,
+                      primary: bool,
+                      action: Box<
+            dyn Fn(&mut LauncherApp, &mut Context<LauncherApp>),
+        >|
+         -> AnyElement {
+            let view = view.clone();
+            let theme = theme.clone();
+            div()
+                .id(id)
+                .h(px(40.0))
+                .px(px(16.0))
+                .rounded(px(10.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .bg(if primary {
+                    theme.accent
+                } else {
+                    theme.surface_hover
+                })
+                .text_color(if primary {
+                    theme.on_accent
+                } else {
+                    theme.text
+                })
+                .text_size(px(13.0))
+                .font_weight(FontWeight::SEMIBOLD)
+                .cursor_pointer()
+                .hover(|st| st.opacity(0.9))
+                .on_click(move |_, _, cx| {
+                    let _ = view.update(cx, |this, cx| action(this, cx));
+                })
+                .child(label.to_string())
+                .into_any_element()
+        };
+        let legacy_path = self.backend.store.legacy_dir.display().to_string();
+        let (title, subtitle) = if !self.sync_error.is_empty() {
+            ("Đồng bộ thất bại".to_string(), self.sync_error.clone())
+        } else if self.sync_done {
+            (
+                "Đồng bộ hoàn tất".to_string(),
+                format!(
+                    "{} tệp · {:.1} MB",
+                    self.sync_total,
+                    self.sync_bytes_total as f64 / 1_048_576.0
+                ),
+            )
+        } else if self.sync_running {
+            (
+                "Đang đồng bộ".to_string(),
+                format!("{} / {} tệp", self.sync_files, self.sync_total),
+            )
+        } else {
+            (
+                "Chuyển dữ liệu sang XyoLauncher".to_string(),
+                "Tìm thấy dữ liệu của LunarSpaceLauncher trên máy. Bạn có thể giữ nguyên hoặc sao chép toàn bộ sang thư mục XyoLauncher.".to_string(),
+            )
+        };
+        let ratio = if self.sync_total > 0 {
+            (self.sync_files as f32 / self.sync_total as f32).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let mut card = div()
+            .w(px(460.0))
+            .rounded(px(22.0))
+            .bg(theme.surface)
+            .border_1()
+            .border_color(theme.border)
+            .p(px(22.0))
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap(px(10.0))
+            .child(
+                div()
+                    .text_size(px(17.0))
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(theme.text)
+                    .child(title),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .text_size(px(12.0))
+                    .text_color(theme.muted)
+                    .child(subtitle),
+            );
+        if self.sync_running || self.sync_done || !self.sync_error.is_empty() {
+            card = card
+                .child(self.orbit_spinner(&theme))
+                .child(
+                    div()
+                        .w(px(400.0))
+                        .h(px(6.0))
+                        .rounded_full()
+                        .bg(theme.surface_hover)
+                        .child(
+                            div()
+                                .h(px(6.0))
+                                .w(px(400.0 * ratio))
+                                .rounded_full()
+                                .bg(theme.accent),
+                        ),
+                );
+        }
+        card = card.child(
+            div()
+                .text_size(px(11.0))
+                .text_color(theme.faint)
+                .child(format!("Dữ liệu cũ: {legacy_path}")),
+        );
+        let actions: Vec<AnyElement> = if !self.sync_error.is_empty() {
+            vec![
+                button(
+                    "sync-retry",
+                    "Thử lại",
+                    true,
+                    Box::new(|this, cx| this.sync_start(cx)),
+                ),
+                button(
+                    "sync-keep",
+                    "Giữ dữ liệu cũ",
+                    false,
+                    Box::new(|this, cx| this.sync_keep_legacy(cx)),
+                ),
+            ]
+        } else if self.sync_done {
+            vec![
+                button(
+                    "sync-restart",
+                    "Khởi động lại",
+                    true,
+                    Box::new(|this, cx| this.sync_restart(cx)),
+                ),
+                button(
+                    "sync-close",
+                    "Đóng",
+                    false,
+                    Box::new(|this, cx| {
+                        this.sync_open = false;
+                        cx.notify();
+                    }),
+                ),
+            ]
+        } else if self.sync_running {
+            vec![button(
+                "sync-cancel",
+                "Huỷ",
+                false,
+                Box::new(|this, cx| this.sync_cancel(cx)),
+            )]
+        } else {
+            vec![
+                button(
+                    "sync-keep",
+                    "Giữ dữ liệu cũ",
+                    false,
+                    Box::new(|this, cx| this.sync_keep_legacy(cx)),
+                ),
+                button(
+                    "sync-start",
+                    "Đồng bộ ngay",
+                    true,
+                    Box::new(|this, cx| this.sync_start(cx)),
+                ),
+            ]
+        };
+        card = card.child(div().flex().gap(px(8.0)).mt(px(4.0)).children(actions));
+        let card = card.with_animation(
+            "sync-card",
+            gpui::Animation::new(std::time::Duration::from_millis(240)),
+            |el, t| el.opacity(t),
+        );
+        div()
+            .absolute()
+            .inset_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(gpui::rgba(0x000000a6))
+            .child(card)
+            .into_any_element()
+    }
+
+    fn account_avatar(&self, account: &Account, size: f32, theme: &Theme) -> AnyElement {
+        if account.kind == "offline" {
+            let skin = self.backend.skin_read(&account.uuid);
+            if let Some(path) = skin.get("skinPath").and_then(Value::as_str) {
+                if let Some(head) = crate::mc::skins::head_png(
+                    &self.backend.store,
+                    std::path::Path::new(path),
+                    &account.uuid,
+                ) {
+                    return gpui::img(head)
+                        .size(px(size))
+                        .rounded_full()
+                        .object_fit(gpui::ObjectFit::Cover)
+                        .into_any_element();
+                }
+            }
+        }
+        let color = if account.kind == "microsoft" {
+            gpui::rgb(0x2f8fe0)
+        } else {
+            theme.accent
+        };
+        div()
+            .size(px(size))
+            .rounded_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(gpui::linear_gradient(
+                140.0,
+                gpui::linear_color_stop(color, 0.0),
+                gpui::linear_color_stop(theme.accent_hover, 1.0),
+            ))
+            .text_color(theme.on_accent)
+            .text_size(px(size * 0.42))
+            .font_weight(FontWeight::BOLD)
+            .child(
+                account
+                    .name
+                    .chars()
+                    .next()
+                    .unwrap_or('?')
+                    .to_uppercase()
+                    .to_string(),
+            )
+            .into_any_element()
+    }
+
+    fn account_menu(&self, cx: &Context<Self>) -> AnyElement {
+        use gpui::AnimationExt;
+        let theme = self.theme.clone();
+        let view = cx.entity().downgrade();
+        let mut menu = div()
+            .absolute()
+            .left(px(0.0))
+            .bottom(px(58.0))
+            .when(!self.rail_collapsed, |el| el.right(px(0.0)))
+            .when(self.rail_collapsed, |el| el.w(px(240.0)))
+            .rounded(px(18.0))
+            .bg(theme.surface)
+            .border_1()
+            .border_color(theme.border)
+            .p(px(6.0))
+            .flex()
+            .flex_col()
+            .gap(px(2.0));
+        if let Some(index) = self.account_menu_hover {
+            menu = menu.child(
+                div()
+                    .absolute()
+                    .left(px(6.0))
+                    .right(px(6.0))
+                    .top(px(30.0 + index as f32 * 46.0))
+                    .h(px(42.0))
+                    .rounded(px(12.0))
+                    .bg(theme.surface_hover),
+            );
+        }
+        menu = menu.child(
+            div()
+                .h(px(24.0))
+                .px(px(10.0))
+                .flex()
+                .items_center()
+                .text_size(px(10.5))
+                .font_weight(FontWeight::BOLD)
+                .text_color(theme.faint)
+                .child("TÀI KHOẢN"),
+        );
+        let mut index = 0usize;
+        for account in self.accounts.iter() {
+            let active = Some(&account.id) == self.active_account.as_ref();
+            let index_now = index;
+            let view_click = view.clone();
+            let id_owned = account.id.clone();
+            let name_owned = account.name.clone();
+            let avatar = self.account_avatar(account, 30.0, &theme);
+            let kind = if account.kind == "microsoft" {
+                "Microsoft"
+            } else {
+                "Offline"
+            };
+            menu = menu.child(
+                div()
+                    .id(gpui::SharedString::from(format!("acct-{}", account.id)))
+                    .h(px(46.0))
+                    .px(px(8.0))
+                    .rounded(px(12.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(10.0))
+                    .cursor_pointer()
+                    .on_hover({
+                        let view = view.clone();
+                        move |hovered, _, cx| {
+                            let view = view.clone();
+                            let _ = view.update(cx, |this, cx| {
+                                this.account_menu_hover = if *hovered {
+                                    Some(index_now)
+                                } else if this.account_menu_hover == Some(index_now) {
+                                    None
+                                } else {
+                                    this.account_menu_hover
+                                };
+                                cx.notify();
+                            });
+                        }
+                    })
+                    .on_click(move |_, _, cx| {
+                        let view = view_click.clone();
+                        let id = id_owned.clone();
+                        let name = name_owned.clone();
+                        let _ = view.update(cx, |this, cx| {
+                            this.backend.account_set_active(&id);
+                            this.refresh_accounts();
+                            this.account_menu_open = false;
+                            this.toast("ok", "Đã chuyển tài khoản", name, cx);
+                            cx.notify();
+                        });
+                    })
+                    .child(avatar)
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .flex()
+                            .flex_col()
+                            .child(
+                                div()
+                                    .text_size(px(13.0))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(theme.text)
+                                    .truncate()
+                                    .child(account.name.clone()),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(10.5))
+                                    .text_color(theme.muted)
+                                    .child(kind),
+                            ),
+                    )
+                    .when(active, |el| {
+                        el.child(widgets::icon("check", 16.0, theme.accent))
+                    }),
+            );
+            index += 1;
+        }
+        if self.accounts.is_empty() {
+            menu = menu.child(
+                div()
+                    .h(px(40.0))
+                    .px(px(10.0))
+                    .flex()
+                    .items_center()
+                    .text_size(px(12.0))
+                    .text_color(theme.muted)
+                    .child("Chưa có tài khoản"),
+            );
+        }
+        menu = menu.child(
+            div()
+                .h(px(1.0))
+                .mx(px(8.0))
+                .my(px(4.0))
+                .bg(theme.border_soft),
+        );
+        let actions = [
+            ("acct-manage", "user", "Quản lý tài khoản", Page::Accounts),
+            ("acct-settings", "gear", "Cài đặt hệ thống", Page::Settings),
+        ];
+        for (id, icon, label, page) in actions {
+            let index_now = index;
+            let view_click = view.clone();
+            let page = page.clone();
+            menu = menu.child(
+                div()
+                    .id(id)
+                    .h(px(46.0))
+                    .px(px(8.0))
+                    .rounded(px(12.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(10.0))
+                    .cursor_pointer()
+                    .on_hover({
+                        let view = view.clone();
+                        move |hovered, _, cx| {
+                            let view = view.clone();
+                            let _ = view.update(cx, |this, cx| {
+                                this.account_menu_hover = if *hovered {
+                                    Some(index_now)
+                                } else if this.account_menu_hover == Some(index_now) {
+                                    None
+                                } else {
+                                    this.account_menu_hover
+                                };
+                                cx.notify();
+                            });
+                        }
+                    })
+                    .on_click(move |_, _, cx| {
+                        let view = view_click.clone();
+                        let page = page.clone();
+                        let _ = view.update(cx, |this, cx| {
+                            this.account_menu_open = false;
+                            this.set_page(page, cx);
+                        });
+                    })
+                    .child(
+                        div()
+                            .size(px(30.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(widgets::icon(icon, 17.0, theme.muted)),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .text_size(px(13.0))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(label),
+                    ),
+            );
+            index += 1;
+        }
+        menu.with_animation(
+            "acct-menu",
+            gpui::Animation::new(std::time::Duration::from_millis(200)),
+            |el, t| el.opacity(t),
+        )
+        .into_any_element()
+    }
 }
 
 impl Render for LauncherApp {
@@ -2870,6 +3533,9 @@ impl Render for LauncherApp {
                     }),
             )
             .child(self.toast_layer());
+        if self.sync_open {
+            root = root.child(self.sync_layer(cx));
+        }
         if self.boot_splash {
             root = root.child(pages::splash(self, window, cx));
         }

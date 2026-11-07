@@ -7,6 +7,9 @@ use std::sync::RwLock;
 
 pub struct Store {
     pub data_dir: PathBuf,
+    pub brand_dir: PathBuf,
+    pub legacy_dir: PathBuf,
+    pub sync_pending: bool,
     settings: RwLock<Settings>,
     instances: RwLock<Vec<Instance>>,
     tokens: RwLock<Map<String, Value>>,
@@ -39,6 +42,9 @@ impl Store {
             .unwrap_or_default();
         Self {
             data_dir,
+            brand_dir: brand_dir(),
+            legacy_dir: legacy_dir(),
+            sync_pending: sync_pending(),
             settings: RwLock::new(settings),
             instances: RwLock::new(instances),
             tokens: RwLock::new(tokens),
@@ -47,6 +53,18 @@ impl Store {
 
     pub fn settings(&self) -> Settings {
         self.settings.read().unwrap().clone()
+    }
+
+    pub fn choose_legacy_dir(&self) -> Result<()> {
+        std::fs::create_dir_all(&self.brand_dir)?;
+        std::fs::write(self.brand_dir.join("use-legacy"), b"")?;
+        Ok(())
+    }
+
+    pub fn mark_synced(&self) -> Result<()> {
+        std::fs::create_dir_all(&self.brand_dir)?;
+        std::fs::write(self.brand_dir.join("use-brand"), b"")?;
+        Ok(())
     }
 
     pub fn settings_value(&self) -> Value {
@@ -351,20 +369,46 @@ impl Store {
     }
 }
 
-pub fn data_dir() -> PathBuf {
-    let base = std::env::var("APPDATA")
+pub fn base_dir() -> PathBuf {
+    std::env::var("APPDATA")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| dirs::data_dir().unwrap_or_else(|| PathBuf::from(".")));
-    let brand = base.join("XyoLauncher");
-    if brand.exists() {
+        .unwrap_or_else(|_| dirs::data_dir().unwrap_or_else(|| PathBuf::from(".")))
+}
+
+pub fn brand_dir() -> PathBuf {
+    base_dir().join("XyoLauncher")
+}
+
+pub fn legacy_dir() -> PathBuf {
+    base_dir().join("lunaspace-launcher")
+}
+
+fn brand_has_data(brand: &Path) -> bool {
+    brand.join("use-brand").exists()
+        || brand.join("instances.json").exists()
+        || brand.join("settings.json").exists()
+        || brand.join("tokens.json").exists()
+}
+
+pub fn data_dir() -> PathBuf {
+    let brand = brand_dir();
+    if brand.join("use-legacy").exists() {
+        return legacy_dir();
+    }
+    if brand_has_data(&brand) {
         return brand;
     }
     // Keep existing installs readable after the rename.
-    let legacy = base.join("lunaspace-launcher");
+    let legacy = legacy_dir();
     if legacy.exists() {
         return legacy;
     }
     brand
+}
+
+pub fn sync_pending() -> bool {
+    let brand = brand_dir();
+    legacy_dir().exists() && !brand.join("use-legacy").exists() && !brand_has_data(&brand)
 }
 
 pub fn merge_object(target: &mut Value, patch: &Value) {

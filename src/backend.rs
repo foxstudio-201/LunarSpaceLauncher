@@ -53,6 +53,7 @@ pub struct Backend {
     schedule_marks: Mutex<HashMap<String, String>>,
     discord_pending: Mutex<Option<DiscordPending>>,
     discord_stop: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+    sync_cancel: Arc<AtomicBool>,
 }
 
 #[derive(Clone, Debug)]
@@ -62,6 +63,20 @@ struct DiscordPending {
     account_id: String,
     link_id: String,
     force: bool,
+}
+
+fn collect_sync_files(dir: &Path, out: &mut Vec<(PathBuf, u64)>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_sync_files(&path, out);
+        } else if let Ok(meta) = entry.metadata() {
+            out.push((path, meta.len()));
+        }
+    }
 }
 
 fn ok(mut value: Value) -> Value {
@@ -146,6 +161,7 @@ impl Backend {
             schedule_marks: Mutex::new(HashMap::new()),
             discord_pending: Mutex::new(None),
             discord_stop: Mutex::new(None),
+            sync_cancel: Arc::new(AtomicBool::new(false)),
         });
         backend.start_scheduler();
         backend
@@ -162,6 +178,68 @@ impl Backend {
 
     pub fn emit(&self, value: Value) {
         let _ = self.events.try_send(value);
+    }
+
+    pub fn legacy_sync_cancel(&self) {
+        self.sync_cancel.store(true, Ordering::SeqCst);
+    }
+
+    pub fn legacy_sync_start(&self) {
+        let src = self.store.legacy_dir.clone();
+        let dst = self.store.brand_dir.clone();
+        let events = self.events.clone();
+        let cancel = self.sync_cancel.clone();
+        cancel.store(false, Ordering::SeqCst);
+        std::thread::spawn(move || {
+            let mut files: Vec<(PathBuf, u64)> = Vec::new();
+            collect_sync_files(&src, &mut files);
+            let total = files.len() as u64;
+            let total_bytes: u64 = files.iter().map(|(_, size)| *size).sum();
+            let mut done = 0u64;
+            let mut bytes = 0u64;
+            for (path, size) in files {
+                if cancel.load(Ordering::SeqCst) {
+                    let _ = events.try_send(json!({"type": "sync-cancelled"}));
+                    return;
+                }
+                let Ok(rel) = path.strip_prefix(&src) else {
+                    continue;
+                };
+                let out = dst.join(rel);
+                if let Some(parent) = out.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                if let Err(err) = std::fs::copy(&path, &out) {
+                    let _ = events.try_send(json!({
+                        "type": "sync-error",
+                        "error": format!("{}: {err}", rel.display()),
+                    }));
+                    return;
+                }
+                done += 1;
+                bytes += size;
+                if done % 8 == 0 || done == total {
+                    let _ = events.try_send(json!({
+                        "type": "sync-progress",
+                        "files": done,
+                        "total": total,
+                        "bytes": bytes,
+                        "bytesTotal": total_bytes,
+                    }));
+                }
+            }
+            if let Err(err) = std::fs::write(dst.join("use-brand"), b"") {
+                let _ = events.try_send(json!({"type": "sync-error", "error": err.to_string()}));
+                return;
+            }
+            let _ = events.try_send(json!({
+                "type": "sync-done",
+                "files": done,
+                "total": total,
+                "bytes": bytes,
+                "bytesTotal": total_bytes,
+            }));
+        });
     }
 
     pub fn spawn<F>(self: &Arc<Self>, future: F)
