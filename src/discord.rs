@@ -1,9 +1,19 @@
 use discord_rich_presence::activity::{Activity, Assets, Timestamps};
 use discord_rich_presence::{DiscordIpc, DiscordIpcClient};
+use parking_lot::Mutex;
 use std::sync::mpsc::{channel, Sender};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 pub const CLIENT_ID: &str = "1556839052102209596";
+pub const DEFAULT_INVITE: &str = "https://discord.gg/8UQZTKR5Qp";
+
+#[derive(Clone, Debug, Default)]
+pub struct PresenceState {
+    pub connected: bool,
+    pub details: String,
+    pub state: String,
+}
 
 #[derive(Clone, Debug)]
 pub struct PresenceActivity {
@@ -21,11 +31,14 @@ enum Command {
 
 pub struct Discord {
     tx: Sender<Command>,
+    state: Arc<Mutex<PresenceState>>,
 }
 
 impl Discord {
     pub fn start() -> Self {
         let (tx, rx) = channel::<Command>();
+        let state = Arc::new(Mutex::new(PresenceState::default()));
+        let shared = state.clone();
         std::thread::spawn(move || {
             let mut client: Option<DiscordIpcClient> = DiscordIpcClient::new(CLIENT_ID).ok();
             let mut connected = false;
@@ -51,6 +64,7 @@ impl Discord {
                         if client_ref.connect().is_ok() {
                             connected = true;
                             last_key.clear();
+                            shared.lock().connected = true;
                         }
                     }
                 }
@@ -85,8 +99,16 @@ impl Discord {
                             .assets(assets);
                         if client_ref.set_activity(payload).is_ok() {
                             last_key = key;
+                            let mut status = shared.lock();
+                            status.connected = true;
+                            status.details = activity.details.clone();
+                            status.state = activity.state.clone();
                         } else {
                             connected = false;
+                            let mut status = shared.lock();
+                            status.connected = false;
+                            status.details.clear();
+                            status.state.clear();
                         }
                     }
                     None => {
@@ -94,11 +116,18 @@ impl Discord {
                             let _ = client_ref.clear_activity();
                             last_key = "clear".into();
                         }
+                        let mut status = shared.lock();
+                        status.details.clear();
+                        status.state.clear();
                     }
                 }
             }
         });
-        Self { tx }
+        Self { tx, state }
+    }
+
+    pub fn status(&self) -> PresenceState {
+        self.state.lock().clone()
     }
 
     pub fn set(&self, activity: PresenceActivity) {

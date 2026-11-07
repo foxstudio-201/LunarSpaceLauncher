@@ -205,6 +205,32 @@ impl Backend {
         ok(json!({"settings": value}))
     }
 
+    pub fn discord_status(&self) -> Value {
+        let settings = self.store.settings();
+        let invite = settings
+            .discord_invite
+            .clone()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| crate::discord::DEFAULT_INVITE.to_string());
+        let status = self
+            .presence
+            .lock()
+            .as_ref()
+            .map(|client| client.status())
+            .unwrap_or_default();
+        let activity = if status.details.is_empty() && status.state.is_empty() {
+            Value::Null
+        } else {
+            json!({"details": status.details, "state": status.state})
+        };
+        ok(json!({
+            "enabled": settings.discord_rpc,
+            "connected": status.connected,
+            "invite": invite,
+            "activity": activity,
+        }))
+    }
+
     pub fn discord_update(&self, value: Value) {
         let settings = self.store.settings();
         let presence = self.presence.lock();
@@ -1030,9 +1056,42 @@ impl Backend {
         self.request(async move {
             let search = java::find_java(settings.java_path.as_deref(), 8).await;
             let runtimes = java::list_runtimes(&paths).await;
+            let selected = settings
+                .java_path
+                .clone()
+                .filter(|value| !value.trim().is_empty())
+                .or_else(|| search.java.as_ref().map(|j| j.path.to_string_lossy().into_owned()));
+            let managed: Vec<_> = runtimes
+                .iter()
+                .filter(|runtime| runtime.kind.as_deref() != Some("zulu"))
+                .cloned()
+                .collect();
+            let zulu: Vec<_> = runtimes
+                .iter()
+                .filter(|runtime| runtime.kind.as_deref() == Some("zulu"))
+                .cloned()
+                .collect();
+            let managed_paths: std::collections::HashSet<String> =
+                runtimes.iter().map(|runtime| runtime.java_path.clone()).collect();
+            let mut seen = std::collections::HashSet::new();
+            let external: Vec<Value> = search
+                .all
+                .iter()
+                .filter_map(|j| {
+                    let path = j.path.to_string_lossy().into_owned();
+                    if managed_paths.contains(&path) || !seen.insert(path.clone()) {
+                        return None;
+                    }
+                    Some(json!({"path": path, "major": j.major, "raw": j.raw}))
+                })
+                .collect();
             ok(json!({
-                "java": search.java.map(|j| json!({"path": j.path, "major": j.major, "raw": j.raw})),
+                "java": search.java.as_ref().map(|j| json!({"path": j.path, "major": j.major, "raw": j.raw})),
                 "all": search.all.into_iter().map(|j| json!({"path": j.path, "major": j.major, "raw": j.raw})).collect::<Vec<_>>(),
+                "selected": selected,
+                "managed": managed,
+                "zulu": zulu,
+                "external": external,
                 "runtimes": runtimes,
             }))
         })

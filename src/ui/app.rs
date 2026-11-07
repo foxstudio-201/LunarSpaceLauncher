@@ -169,14 +169,49 @@ pub struct ContentState {
     pub instance_id: Option<String>,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct SettingsUi {
     pub runtimes: Vec<Value>,
-    pub java_all: Vec<Value>,
-    pub java_current: Option<String>,
+    pub java_external: Vec<Value>,
+    pub java_selected: Option<String>,
     pub zulu_major: String,
-    pub installing: bool,
+    pub zulu_kind: String,
+    pub zulu_busy: bool,
+    pub busy: String,
+    pub confirming: Option<String>,
+    pub zulu_confirm: Option<String>,
+    pub saved: bool,
     pub message: String,
+    pub discord: Value,
+    pub update_phase: String,
+    pub update_latest: String,
+    pub update_notes: String,
+    pub update_url: String,
+    pub update_error: String,
+}
+
+impl Default for SettingsUi {
+    fn default() -> Self {
+        Self {
+            runtimes: Vec::new(),
+            java_external: Vec::new(),
+            java_selected: None,
+            zulu_major: "21".into(),
+            zulu_kind: "jre".into(),
+            zulu_busy: false,
+            busy: String::new(),
+            confirming: None,
+            zulu_confirm: None,
+            saved: false,
+            message: String::new(),
+            discord: Value::Null,
+            update_phase: "idle".into(),
+            update_latest: String::new(),
+            update_notes: String::new(),
+            update_url: String::new(),
+            update_error: String::new(),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -309,6 +344,11 @@ pub enum Modal {
         builds: Vec<Value>,
         selected: Option<String>,
     },
+    WhatsNew {
+        title: String,
+        notes: String,
+        url: String,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -380,6 +420,8 @@ pub struct LauncherApp {
     pub discord_name_input: Entity<TextField>,
     pub memory_input: Entity<TextField>,
     pub jvm_input: Entity<TextField>,
+    pub settings_memory_input: Entity<TextField>,
+    pub settings_java_input: Entity<TextField>,
     pub ely_user: Entity<TextField>,
     pub ely_pass: Entity<TextField>,
     pub file_search: Entity<TextField>,
@@ -422,6 +464,10 @@ pub struct LauncherApp {
 impl LauncherApp {
     pub fn new(backend: Arc<Backend>, events: Receiver<Value>, cx: &mut Context<Self>) -> Self {
         let settings = backend.settings();
+        let auto_update = settings
+            .get("autoUpdate")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
         let theme = Theme::from_settings(
             settings
                 .get("theme")
@@ -455,6 +501,8 @@ impl LauncherApp {
         let discord_name_input = cx.new(|cx| TextField::new(cx, "Tên tài khoản launcher…"));
         let memory_input = cx.new(|cx| TextField::new(cx, "4096"));
         let jvm_input = cx.new(|cx| TextField::new(cx, "Ví dụ: -XX:+UseG1GC"));
+        let settings_memory_input = cx.new(|cx| TextField::new(cx, "4096"));
+        let settings_java_input = cx.new(|cx| TextField::new(cx, "Để trống = tự động chọn Java"));
         let ely_user = cx.new(|cx| TextField::new(cx, "Tên đăng nhập hoặc email ely.by"));
         let ely_pass = cx.new(|cx| TextField::new(cx, "Mật khẩu ely.by"));
         let file_search = cx.new(|cx| TextField::new(cx, "Tìm tệp…").on_change(notify_change.clone()));
@@ -585,6 +633,8 @@ impl LauncherApp {
             discord_name_input,
             memory_input,
             jvm_input,
+            settings_memory_input,
+            settings_java_input,
             ely_user,
             ely_pass,
             file_search,
@@ -632,6 +682,10 @@ impl LauncherApp {
         app.listen_events(events, cx);
         app.start_splash(cx);
         app.host_timer(cx);
+        app.settings_timer(cx);
+        if auto_update {
+            app.check_update(false, cx);
+        }
         app
     }
 
@@ -1297,6 +1351,27 @@ impl LauncherApp {
         .detach();
     }
 
+    pub fn settings_timer(&mut self, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_secs(4))
+                    .await;
+                let ok = this
+                    .update(cx, |this, cx| {
+                        if this.page == Page::Settings {
+                            this.load_discord(cx);
+                        }
+                    })
+                    .is_ok();
+                if !ok {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
     pub fn start_splash(&mut self, cx: &mut Context<Self>) {
         let frames = self.splash_frames.clone();
         if frames.len() <= 1 {
@@ -1750,7 +1825,25 @@ impl LauncherApp {
             self.search_content(self.content_search.read(cx).text().to_string(), cx);
         }
         if page == Page::Settings {
+            let memory = self
+                .settings
+                .get("defaultMemory")
+                .and_then(Value::as_u64)
+                .unwrap_or(4096)
+                .to_string();
+            let java = self
+                .settings
+                .get("javaPath")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            let memory_input = self.settings_memory_input.clone();
+            memory_input.update(cx, |input, cx| input.set_text(memory, cx));
+            let java_input = self.settings_java_input.clone();
+            java_input.update(cx, |input, cx| input.set_text(java, cx));
             self.load_java(cx);
+            self.load_discord(cx);
+            self.load_system(cx);
         }
         if page == Page::Host {
             self.refresh_host(cx);
@@ -2476,6 +2569,7 @@ impl LauncherApp {
             Modal::SkinPaint => Some(pages::skin_paint_modal(self, window, cx).into_any_element()),
             Modal::DiscordLink => Some(pages::accounts::discord_link_modal(self, window, cx).into_any_element()),
             Modal::LoaderChange { .. } => Some(pages::loader_change_modal(self, window, cx).into_any_element()),
+            Modal::WhatsNew { .. } => Some(pages::settings::whats_new_modal(self, window, cx).into_any_element()),
         }
     }
 }

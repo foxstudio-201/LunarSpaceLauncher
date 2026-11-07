@@ -237,6 +237,7 @@ pub struct FileEntry {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct JavaRuntime {
     pub component: String,
     pub name: String,

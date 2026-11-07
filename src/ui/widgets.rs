@@ -1017,6 +1017,7 @@ pub fn text_input_box(theme: &Theme) -> Div {
         .bg(theme.elevated)
         .border_1()
         .border_color(theme.border)
+        .overflow_hidden()
         .text_color(theme.text)
         .text_size(px(TEXT_BASE))
 }
