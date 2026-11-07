@@ -442,7 +442,12 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
         .iter()
         .filter(|runtime| runtime.get("installed").and_then(Value::as_bool).unwrap_or(false))
         .collect();
-    let installed_bytes: u64 = installed_runtimes
+    let managed_installed: Vec<&Value> = installed_runtimes
+        .iter()
+        .filter(|runtime| runtime.get("kind").and_then(Value::as_str) != Some("zulu"))
+        .copied()
+        .collect();
+    let managed_bytes: u64 = managed_installed
         .iter()
         .filter_map(|runtime| runtime.get("bytes").and_then(Value::as_u64))
         .sum();
@@ -765,14 +770,14 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                         .child(section_header(
                             &theme,
                             "Java".into(),
-                            if installed_runtimes.is_empty() {
+                            if managed_installed.is_empty() {
                                 tr(en, "chưa tải bản nào", "none installed")
                             } else {
                                 format!(
                                     "{} {} · {}",
-                                    installed_runtimes.len(),
+                                    managed_installed.len(),
                                     tr(en, "bản", "runtimes"),
-                                    crate::util::format_bytes(installed_bytes)
+                                    crate::util::format_bytes(managed_bytes)
                                 )
                             },
                         ))
@@ -1564,9 +1569,9 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                                             tr(en, "Java tải kèm", "Bundled Java"),
                                             format!(
                                                 "{} {} · {}",
-                                                installed_runtimes.len(),
+                                                managed_installed.len(),
                                                 tr(en, "bản", "runtimes"),
-                                                crate::util::format_bytes(installed_bytes)
+                                                crate::util::format_bytes(managed_bytes)
                                             ),
                                         )),
                                 )
