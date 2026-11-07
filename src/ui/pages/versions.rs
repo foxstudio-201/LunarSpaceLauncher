@@ -35,6 +35,8 @@ pub fn open_versions(
     game: Option<String>,
 ) {
     app.set_page(Page::Versions, cx);
+    let dir_input = app.create_dir_input.clone();
+    dir_input.update(cx, |input, cx| input.clear(cx));
     let had_loader = loader.is_some();
     if let Some(loader) = loader {
         app.create.loader = loader;
@@ -54,6 +56,8 @@ pub fn open_versions(
 }
 
 pub fn open_create(app: &mut LauncherApp, cx: &mut Context<LauncherApp>) {
+    let dir_input = app.create_dir_input.clone();
+    dir_input.update(cx, |input, cx| input.clear(cx));
     app.create = CreateState {
         open: true,
         loader: "vanilla".into(),
@@ -189,12 +193,36 @@ fn loader_name(id: &str) -> &'static str {
         .unwrap_or("Vanilla")
 }
 
-fn update_name(app: &mut LauncherApp, cx: &mut Context<LauncherApp>) {
-    let name = format!("{} {}", loader_name(&app.create.loader), app.create.game);
+pub(crate) fn resolve_create_dir(
+    default_dir: &std::path::Path,
+    typed: &str,
+    name: &str,
+) -> std::path::PathBuf {
+    let typed = typed.trim();
+    if typed.is_empty() || typed == default_dir.to_string_lossy() {
+        crate::store::instance_dir_for(name, default_dir)
+    } else {
+        std::path::PathBuf::from(typed)
+    }
+}
+
+pub(crate) fn update_name(app: &mut LauncherApp, cx: &mut Context<LauncherApp>) {
+    let name = format!("{} {}", loader_name(&app.create.loader), app.create.game)
+        .trim()
+        .to_string();
     let entity = app.name_input.clone();
     entity.update(cx, |input, cx| {
-        input.set_text(name, cx);
+        input.set_text(name.clone(), cx);
     });
+    let default_dir = app.backend.store.default_instance_dir();
+    let current = app.create_dir_input.read(cx).text().trim().to_string();
+    let target = resolve_create_dir(&default_dir, &current, &name);
+    if target.to_string_lossy() != current {
+        let input = app.create_dir_input.clone();
+        input.update(cx, |input, cx| {
+            input.set_text(target.to_string_lossy().into_owned(), cx)
+        });
+    }
 }
 
 fn create_instance(app: &mut LauncherApp, cx: &mut Context<LauncherApp>) {
@@ -281,9 +309,8 @@ fn pick_loader(app: &mut LauncherApp, kind: String, cx: &mut Context<LauncherApp
     app.create.step = 1;
     app.create.error.clear();
     app.create.demo = false;
-    let dir = app.backend.store.default_instance_dir().to_string_lossy().into_owned();
-    let dir_input = app.file_name_input.clone();
-    dir_input.update(cx, |input, cx| input.set_text(dir, cx));
+    let dir_input = app.create_dir_input.clone();
+    dir_input.update(cx, |input, cx| input.clear(cx));
     let memory_input = app.memory_input.clone();
     let memory = app
         .settings
@@ -297,7 +324,7 @@ fn pick_loader(app: &mut LauncherApp, kind: String, cx: &mut Context<LauncherApp
 
 fn submit_create(app: &mut LauncherApp, cx: &mut Context<LauncherApp>) {
     let name = app.name_input.read(cx).text().trim().to_string();
-    let dir = app.file_name_input.read(cx).text().trim().to_string();
+    let dir_text = app.create_dir_input.read(cx).text().trim().to_string();
     let memory = app
         .memory_input
         .read(cx)
@@ -322,19 +349,24 @@ fn submit_create(app: &mut LauncherApp, cx: &mut Context<LauncherApp>) {
         .find(|a| Some(&a.id) == app.active_account.as_ref())
         .map(|a| a.name.clone())
         .unwrap_or_else(|| "Player".into());
+    let display_name = if name.is_empty() {
+        format!("{} {}", loader_name(&app.create.loader), app.create.game)
+    } else {
+        name
+    };
+    let default_dir = app.backend.store.default_instance_dir();
+    let dir = resolve_create_dir(&default_dir, &dir_text, &display_name)
+        .to_string_lossy()
+        .into_owned();
     let payload = json!({
-        "name": if name.is_empty() {
-            format!("{} {}", loader_name(&app.create.loader), app.create.game)
-        } else {
-            name
-        },
+        "name": display_name,
         "version": app.create.game,
         "loader": app.create.loader,
         "loaderVersion": app.create.loader_version,
         "memoryMb": memory,
         "username": username,
         "demo": app.create.demo,
-        "dir": if dir.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(dir) },
+        "dir": dir,
     });
     let rx = app.backend.create_instance(payload);
     app.on_result(cx, rx, |this, value, cx| {
@@ -758,7 +790,6 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
         );
     }
 
-    let dir = app.file_name_input.read(cx).text().to_string();
     let memory_steps = [1024u32, 2048, 3072, 4096, 6144, 8192, 12288, 16384];
     let current_memory = app.memory_input.read(cx).text().trim().parse::<u32>().unwrap_or(4096);
     let mut memory_row = div().flex().gap(px(4.0)).flex_wrap();
@@ -865,7 +896,7 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                         .flex()
                         .items_center()
                         .gap_2()
-                        .child(div().flex_1().min_w(px(0.0)).child(widgets::text_input_box(&theme).child(app.file_name_input.clone())))
+                        .child(div().flex_1().min_w(px(0.0)).child(widgets::text_input_box(&theme).child(app.create_dir_input.clone())))
                         .child(widgets::icon_button("ver-browse", "folder-open", &theme, move |_, _, cx| {
                             let view = view_browse.clone();
                             cx.spawn(async move |cx| {
@@ -873,7 +904,7 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                                 if let Some(folder) = picked {
                                     let path = folder.path().to_string_lossy().into_owned();
                                     let _ = view.update(cx, |this, cx| {
-                                        let input = this.file_name_input.clone();
+                                        let input = this.create_dir_input.clone();
                                         input.update(cx, |input, cx| input.set_text(path, cx));
                                         cx.notify();
                                     });
@@ -1398,4 +1429,27 @@ pub fn create_modal(app: &mut LauncherApp, _window: &mut Window, cx: &mut Contex
         });
     })
     .into_any_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_create_dir;
+    use std::path::Path;
+
+    #[test]
+    fn create_dir_defaults_to_instance_subfolder() {
+        let root = Path::new("/docs/XyoLauncher/instances");
+        assert_eq!(
+            resolve_create_dir(root, "", "Vanilla 1.20.1"),
+            root.join("Vanilla-1.20.1")
+        );
+        assert_eq!(
+            resolve_create_dir(root, "/docs/XyoLauncher/instances", "LunarLoader 1.20.1"),
+            root.join("LunarLoader-1.20.1")
+        );
+        assert_eq!(
+            resolve_create_dir(root, "/custom/dir", "Anything"),
+            Path::new("/custom/dir")
+        );
+    }
 }

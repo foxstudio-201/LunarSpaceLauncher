@@ -440,6 +440,7 @@ pub struct LauncherApp {
     pub server_filter: Entity<TextField>,
     pub editor_input: Entity<TextField>,
     pub file_name_input: Entity<TextField>,
+    pub create_dir_input: Entity<TextField>,
     pub console_scroll: gpui::ScrollHandle,
     pub page_scroll: gpui::ScrollHandle,
     pub home_scroll: gpui::ScrollHandle,
@@ -535,6 +536,7 @@ impl LauncherApp {
         let server_filter = cx.new(|cx| TextField::new(cx, "Lọc log server…").on_change(notify_change.clone()));
         let editor_input = cx.new(|cx| TextField::new(cx, "Nội dung tệp…").multiline(true));
         let file_name_input = cx.new(|cx| TextField::new(cx, "Tên tệp hoặc thư mục…"));
+        let create_dir_input = cx.new(|cx| TextField::new(cx, "Tự động: <thư mục instances>/<tên phiên bản>"));
         let server_motd = cx.new(|cx| TextField::new(cx, "XyoLauncher Server"));
         let server_port = cx.new(|cx| TextField::new(cx, "25565"));
         let server_jvm = cx.new(|cx| TextField::new(cx, "Ví dụ: -XX:+UseG1GC"));
@@ -689,6 +691,7 @@ impl LauncherApp {
             server_filter,
             editor_input,
             file_name_input,
+            create_dir_input,
             console_scroll: gpui::ScrollHandle::new(),
             page_scroll: gpui::ScrollHandle::new(),
             home_scroll: gpui::ScrollHandle::new(),
