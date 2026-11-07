@@ -48,21 +48,57 @@ impl Paths {
     }
 }
 
+#[cfg(target_os = "windows")]
 pub const OS_NAME: &str = "windows";
+#[cfg(target_os = "macos")]
+pub const OS_NAME: &str = "osx";
+#[cfg(all(unix, not(target_os = "macos")))]
+pub const OS_NAME: &str = "linux";
+
+#[cfg(target_arch = "aarch64")]
+pub const OS_ARCH: &str = "arm64";
+#[cfg(target_arch = "x86")]
+pub const OS_ARCH: &str = "x86";
+#[cfg(target_arch = "x86_64")]
 pub const OS_ARCH: &str = "x86_64";
 
 pub fn platform_key() -> &'static str {
-    if cfg!(target_arch = "aarch64") {
-        "windows-arm64"
-    } else if cfg!(target_arch = "x86") {
-        "windows-x86"
-    } else {
-        "windows-x64"
+    #[cfg(target_os = "windows")]
+    {
+        if cfg!(target_arch = "aarch64") {
+            "windows-arm64"
+        } else if cfg!(target_arch = "x86") {
+            "windows-x86"
+        } else {
+            "windows-x64"
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if cfg!(target_arch = "aarch64") {
+            "mac-os-arm64"
+        } else {
+            "mac-os"
+        }
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        if cfg!(target_arch = "aarch64") {
+            "linux-arm64"
+        } else if cfg!(target_arch = "x86") {
+            "linux-i386"
+        } else {
+            "linux"
+        }
     }
 }
 
 pub fn java_exe() -> &'static str {
-    "java.exe"
+    if cfg!(windows) {
+        "java.exe"
+    } else {
+        "java"
+    }
 }
 
 pub fn maven_rel(name: &str) -> Option<String> {

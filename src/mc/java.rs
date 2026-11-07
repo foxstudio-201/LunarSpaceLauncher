@@ -202,7 +202,7 @@ pub async fn install_runtime(
     let mut executables = Vec::new();
     let mut expected_bytes = 0u64;
     for (rel, info) in &files {
-        let dest = dir.join(rel.replace('/', "\\"));
+        let dest = dir.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR));
         match info.get("type").and_then(Value::as_str).unwrap_or("") {
             "directory" => {
                 let _ = tokio::fs::create_dir_all(&dest).await;
@@ -253,6 +253,18 @@ pub async fn install_runtime(
         "installedAt": crate::util::now_iso(),
     });
     crate::store::write_json_atomic(&dir.join(MARKER), &marker);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        for path in &executables {
+            if let Ok(meta) = std::fs::metadata(path) {
+                let mut perms = meta.permissions();
+                perms.set_mode(perms.mode() | 0o111);
+                let _ = std::fs::set_permissions(path, perms);
+            }
+        }
+    }
+    #[cfg(not(unix))]
     let _ = executables;
     Ok(InstalledRuntime {
         java_path: java_path_for(&dir),
@@ -514,7 +526,7 @@ fn scan_java_dirs() -> Vec<PathBuf> {
     ));
     out.push(PathBuf::from("C:/ProgramData/Oracle/Java/javapath/java.exe"));
     if let Ok(path) = std::env::var("PATH") {
-        for dir in path.split(';') {
+        for dir in path.split(if cfg!(windows) { ';' } else { ':' }) {
             if !dir.trim().is_empty() {
                 out.push(PathBuf::from(dir).join(java_exe()));
             }
@@ -591,8 +603,23 @@ pub struct ZuluPackage {
 }
 
 pub async fn zulu_packages(major: u32, kind: &str) -> Result<Vec<ZuluPackage>> {
+    let os = if cfg!(windows) {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else {
+        "linux"
+    };
+    let arch = if cfg!(target_arch = "aarch64") {
+        "aarch64"
+    } else if cfg!(target_arch = "x86") {
+        "x86"
+    } else {
+        "x64"
+    };
+    let archive_type = if cfg!(windows) { "zip" } else { "tar.gz" };
     let url = format!(
-        "{ZULU_API}?java_version={major}&os=windows&arch=x64&archive_type=zip&java_package_type={}&release_status=ga&availability_types=CA&latest=true&page_size=40",
+        "{ZULU_API}?java_version={major}&os={os}&arch={arch}&archive_type={archive_type}&java_package_type={}&release_status=ga&availability_types=CA&latest=true&page_size=40",
         if kind == "jdk" { "jdk" } else { "jre" }
     );
     let rows = crate::net::fetch_json(&url).await?;
@@ -680,7 +707,10 @@ pub async fn install_zulu(
         }),
     )
     .await?;
+    #[cfg(windows)]
     extract_zip(&archive, &dir)?;
+    #[cfg(not(windows))]
+    extract_tar_gz(&archive, &dir)?;
     let _ = std::fs::remove_file(&archive);
     let java_path =
         find_java_in_tree(&dir, 3).ok_or_else(|| anyhow!("Không tìm thấy java trong gói Zulu vừa tải."))?;
@@ -709,6 +739,14 @@ pub async fn install_zulu(
         kind: Some("zulu".into()),
     };
     Ok((java_path, info))
+}
+
+#[cfg(not(windows))]
+fn extract_tar_gz(archive: &Path, dest: &Path) -> Result<()> {
+    let file = std::fs::File::open(archive)?;
+    let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(file));
+    tar.unpack(dest)?;
+    Ok(())
 }
 
 fn find_java_in_tree(root: &Path, depth: u32) -> Option<PathBuf> {

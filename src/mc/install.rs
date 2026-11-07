@@ -237,7 +237,7 @@ fn library_tasks(version: &Value, paths: &Paths) -> LibTasks {
         if let Some(artifact) = downloads.get("artifact") {
             if let Some(url) = artifact.get("url").and_then(Value::as_str) {
                 if let Some(path) = artifact.get("path").and_then(Value::as_str) {
-                    let dest = paths.libraries.join(path.replace('/', "\\"));
+                    let dest = paths.libraries.join(path.replace('/', std::path::MAIN_SEPARATOR_STR));
                     artifacts.push(DownloadTask {
                         url: url.to_string(),
                         dest: dest.clone(),
@@ -263,7 +263,7 @@ fn library_tasks(version: &Value, paths: &Paths) -> LibTasks {
                         entry.get("url").and_then(Value::as_str),
                         entry.get("path").and_then(Value::as_str),
                     ) {
-                        let dest = paths.libraries.join(path.replace('/', "\\"));
+                        let dest = paths.libraries.join(path.replace('/', std::path::MAIN_SEPARATOR_STR));
                         artifacts.push(DownloadTask {
                             url: url.to_string(),
                             dest: dest.clone(),
@@ -282,7 +282,7 @@ fn library_tasks(version: &Value, paths: &Paths) -> LibTasks {
                             .unwrap_or("https://libraries.minecraft.net/")
                             .trim_end_matches('/')
                             .to_string();
-                        let dest = paths.libraries.join(rel.replace('/', "\\"));
+                        let dest = paths.libraries.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR));
                         artifacts.push(DownloadTask {
                             url: format!("{base}/{rel}"),
                             dest: dest.clone(),
@@ -309,7 +309,7 @@ fn library_tasks(version: &Value, paths: &Paths) -> LibTasks {
                     .to_string();
                 artifacts.push(DownloadTask {
                     url: format!("{base}/{rel}"),
-                    dest: paths.libraries.join(rel.replace('/', "\\")),
+                    dest: paths.libraries.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR)),
                     sha1: None,
                     size: 0,
                     skip_hash: true,
@@ -669,7 +669,7 @@ pub fn library_classpath_entries(chain: &Value, paths: &Paths) -> Vec<PathBuf> {
         }
         let downloads = lib.get("downloads").cloned().unwrap_or(Value::Null);
         if let Some(path) = downloads.pointer("/artifact/path").and_then(Value::as_str) {
-            out.push(paths.libraries.join(path.replace('/', "\\")));
+            out.push(paths.libraries.join(path.replace('/', std::path::MAIN_SEPARATOR_STR)));
             continue;
         }
         if lib.get("natives").is_some() || downloads.get("classifiers").is_some() {
@@ -677,7 +677,7 @@ pub fn library_classpath_entries(chain: &Value, paths: &Paths) -> Vec<PathBuf> {
         }
         if let Some(name) = lib.get("name").and_then(Value::as_str) {
             if let Some(rel) = maven_rel(name) {
-                out.push(paths.libraries.join(rel.replace('/', "\\")));
+                out.push(paths.libraries.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR)));
             }
         }
     }

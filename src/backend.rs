@@ -674,7 +674,7 @@ impl Backend {
             };
             tasks.push(crate::net::DownloadTask {
                 url: url.to_string(),
-                dest: paths.libraries.join(path.replace('/', "\\")),
+                dest: paths.libraries.join(path.replace('/', std::path::MAIN_SEPARATOR_STR)),
                 sha1: lib.get("sha1").and_then(Value::as_str).map(str::to_string),
                 size: lib.get("size").and_then(Value::as_u64).unwrap_or(0),
                 skip_hash: lib.get("sha1").is_none(),
@@ -883,7 +883,7 @@ impl Backend {
                 let rel = format!(
                     "net/minecraftforge/forge/{full_id}/forge-{full_id}-universal.jar"
                 );
-                let dest = paths.libraries.join(rel.replace('/', "\\"));
+                let dest = paths.libraries.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR));
                 if !dest.is_file() {
                     let data = {
                         let file = std::fs::File::open(installer)?;

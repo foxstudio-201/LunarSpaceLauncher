@@ -400,7 +400,7 @@ pub fn write_text_atomic(file: &Path, text: &str) -> Result<()> {
 }
 
 pub fn comparable_path(path: &Path) -> String {
-    path.to_string_lossy().replace('/', "\\").to_ascii_lowercase()
+    path.to_string_lossy().replace('\\', "/").to_ascii_lowercase()
 }
 
 pub fn new_instance_id(loader: &str, version: &str) -> String {

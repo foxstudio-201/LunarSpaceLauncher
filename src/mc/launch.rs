@@ -208,7 +208,7 @@ pub fn build_launch(options: LaunchOptions<'_>) -> Result<LaunchPlan> {
         .filter(|p| p.is_file() || *p == &natives_dir)
         .map(|p| p.to_string_lossy().into_owned())
         .collect::<Vec<_>>()
-        .join(";");
+        .join(if cfg!(windows) { ";" } else { ":" });
 
     let auth = options.auth;
     let uuid = auth

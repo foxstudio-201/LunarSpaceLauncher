@@ -917,7 +917,7 @@ fn mr_file_task(kind: Kind, version: &Value, root: &Path) -> Option<InstallTask>
     let rel = format!("{}/{filename}", kind.folder());
     Some(InstallTask {
         url,
-        dest: root.join(rel.replace('/', "\\")),
+        dest: root.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR)),
         sha1: file.get("sha1").and_then(Value::as_str).map(str::to_string),
         size: file.get("size").and_then(Value::as_u64).unwrap_or(0),
         alts: Vec::new(),
