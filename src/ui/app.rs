@@ -2520,25 +2520,7 @@ impl LauncherApp {
             );
         let toggle = widgets::with_tooltip(toggle, toggle_title, toggle_hint);
 
-        let header = div()
-            .flex()
-            .items_center()
-            .gap(px(10.0))
-            .h(px(44.0))
-            .pl(px(20.0))
-            .pr(px(10.0))
-            .flex_shrink_0()
-            .child(
-                div()
-                    .size(px(36.0))
-                    .flex_shrink_0()
-                    .rounded(px(12.0))
-                    .bg(gpui::linear_gradient(120.0, gpui::linear_color_stop(theme.accent, 0.0), gpui::linear_color_stop(theme.accent_hover, 1.0)))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(widgets::icon("cube", 20.0, theme.on_accent)),
-            );
+        let header = div().h(px(44.0)).w_full().flex_shrink_0();
 
         div()
             .relative()
@@ -2608,6 +2590,26 @@ impl LauncherApp {
                             .size(px(28.0))
                             .rounded(px(7.0))
                             .object_fit(gpui::ObjectFit::Cover),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .justify_center()
+                            .child(
+                                div()
+                                    .text_size(px(13.0))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(theme.text)
+                                    .child("XyoLauncher"),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(8.5))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.faint)
+                                    .child("LAUNCHER"),
+                            ),
                     ),
             )
             .child(
