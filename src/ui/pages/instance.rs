@@ -88,6 +88,22 @@ fn reload_files(app: &mut LauncherApp, cx: &mut Context<LauncherApp>) {
     let _ = cx;
 }
 
+
+fn list_hint(theme: &Theme, shown: usize, total: usize) -> AnyElement {
+    if total <= shown {
+        return div().into_any_element();
+    }
+    div()
+        .w_full()
+        .py(px(10.0))
+        .flex()
+        .justify_center()
+        .text_size(px(10.5))
+        .text_color(theme.faint)
+        .child(format!("Đang hiển thị {shown}/{total} · cuộn xuống để tải thêm"))
+        .into_any_element()
+}
+
 fn render_file_list(app: &mut LauncherApp, cx: &mut Context<LauncherApp>, theme: &Theme) -> AnyElement {
     let filter = app.file_search.read(cx).text().to_lowercase();
     let mut rows = div().flex().flex_col().gap(px(1.0)).w_full();
@@ -115,7 +131,9 @@ fn render_file_list(app: &mut LauncherApp, cx: &mut Context<LauncherApp>, theme:
         ));
     }
     let view = cx.entity().downgrade();
-    for entry in entries {
+    let total_entries = entries.len();
+    let shown_entries = total_entries.min(app.instance_ui.list_limit);
+    for entry in entries.into_iter().take(shown_entries) {
         let name = entry
             .get("name")
             .and_then(Value::as_str)
@@ -480,7 +498,8 @@ fn render_file_list(app: &mut LauncherApp, cx: &mut Context<LauncherApp>, theme:
                 .border_1()
                 .border_color(theme.border_soft)
                 .truncate()
-                .child(rows),
+                .child(rows)
+                .child(list_hint(theme, shown_entries, total_entries)),
         )
         .into_any_element()
 }
@@ -499,6 +518,22 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
     };
     let view = cx.entity().downgrade();
     let id = instance.id.clone();
+
+    let list_total = match app.instance_tab {
+        InstanceTab::Mods => app.instance_ui.mods.len(),
+        InstanceTab::Files | InstanceTab::Resourcepacks | InstanceTab::Shaderpacks => app.instance_ui.entries.len(),
+        InstanceTab::Trash => app.instance_ui.trash.len(),
+        InstanceTab::Saves => app.instance_ui.worlds.len(),
+        _ => 0,
+    };
+    if list_total > app.instance_ui.list_limit {
+        let offset = f32::from(app.page_scroll.offset().y);
+        let max = f32::from(app.page_scroll.max_offset().height);
+        if -offset + 320.0 >= -max && (app.instance_ui.list_anchor - offset).abs() > 24.0 {
+            app.instance_ui.list_limit = (app.instance_ui.list_limit + 60).min(list_total);
+            app.instance_ui.list_anchor = offset;
+        }
+    }
 
     if app.instance_ui.editor_open {
         return render_editor(app, window, cx).into_any_element();
@@ -1517,7 +1552,9 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                     "Thêm mod bằng nút Nhập tệp hoặc cài modpack.",
                 ));
             }
-            for item in mods {
+            let total_mods = mods.len();
+            let shown = total_mods.min(app.instance_ui.list_limit);
+            for item in mods.into_iter().take(shown) {
                 let name = item
                     .get("name")
                     .and_then(Value::as_str)
@@ -1753,7 +1790,8 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                     .border_1()
                     .border_color(theme.border_soft)
                     .truncate()
-                    .child(rows),
+                    .child(rows)
+                    .child(list_hint(&theme, shown, total_mods)),
             );
         }
         InstanceTab::Files | InstanceTab::Resourcepacks | InstanceTab::Shaderpacks => {
@@ -1770,7 +1808,7 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                     "Tệp bị xoá trong phiên bản này sẽ nằm ở đây và có thể khôi phục.",
                 ));
             }
-            for item in app.instance_ui.trash.iter().cloned().collect::<Vec<_>>() {
+            for item in app.instance_ui.trash.iter().cloned().take(app.instance_ui.list_limit).collect::<Vec<_>>() {
                 let entry_id = item
                     .get("id")
                     .and_then(Value::as_str)
@@ -1915,7 +1953,7 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                         )),
                 );
             }
-            for world in app.instance_ui.worlds.iter().cloned().collect::<Vec<_>>() {
+            for world in app.instance_ui.worlds.iter().cloned().take(app.instance_ui.list_limit).collect::<Vec<_>>() {
                 let folder = world
                     .get("folder")
                     .and_then(Value::as_str)

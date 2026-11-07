@@ -241,6 +241,8 @@ pub struct InstanceUi {
     pub world_difficulty: i64,
     pub world_hardcore: bool,
     pub world_cheats: bool,
+    pub list_limit: usize,
+    pub list_anchor: f32,
 }
 
 impl Default for InstanceUi {
@@ -271,6 +273,8 @@ impl Default for InstanceUi {
             world_difficulty: 2,
             world_hardcore: false,
             world_cheats: false,
+            list_limit: 60,
+            list_anchor: 0.0,
         }
     }
 }
@@ -2228,6 +2232,8 @@ impl LauncherApp {
                     index as f32,
                     Box::new(move |this, cx| {
                         this.instance_tab = tab;
+                        this.instance_ui.list_limit = 60;
+                        this.instance_ui.list_anchor = 0.0;
                         this.load_instance_tab(cx);
                         this.sync_rail_highlights(cx);
                         cx.notify();
