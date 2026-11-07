@@ -269,6 +269,92 @@ pub async fn search(
     category: Option<&str>,
     environment: Option<&str>,
 ) -> Result<SearchResult> {
+    if source == "lunar" {
+        if kind != Kind::Modpacks {
+            return Err(anyhow!("LunarModpack chỉ hỗ trợ modpack."));
+        }
+        let sort = match sort {
+            "downloads" => "downloads",
+            "name" => "name",
+            _ => "newest",
+        };
+        let mut url = format!(
+            "{}/api/lunar-modpacks?q={}&sort={sort}&offset={offset}&limit={limit}",
+            crate::mc::meta::LUNAR_API,
+            urlencode(query)
+        );
+        if let Some(game) = game.filter(|v| !v.is_empty()) {
+            url.push_str(&format!("&game={}", urlencode(game)));
+        }
+        if let Some(loader) = loader.filter(|v| !v.is_empty()) {
+            url.push_str(&format!("&loader={}", urlencode(loader)));
+        }
+        let data = crate::net::fetch_json(&url).await?;
+        let total = data.get("total").and_then(Value::as_u64).unwrap_or(0);
+        let hits = data
+            .get("hits")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .map(|row| {
+                let id = row
+                    .get("packId")
+                    .and_then(Value::as_str)
+                    .or_else(|| row.get("id").and_then(Value::as_str))
+                    .unwrap_or("")
+                    .to_string();
+                ContentHit {
+                    id,
+                    slug: row
+                        .get("slug")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string(),
+                    name: row
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or("Modpack")
+                        .to_string(),
+                    summary: row
+                        .get("summary")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string(),
+                    icon: row
+                        .get("icon")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string(),
+                    downloads: row.get("downloads").and_then(Value::as_u64).unwrap_or(0),
+                    follows: 0,
+                    author: row
+                        .get("author")
+                        .and_then(Value::as_str)
+                        .unwrap_or("LunarSpace")
+                        .to_string(),
+                    tags: Vec::new(),
+                    source: "lunar".into(),
+                    kind: kind.folder().into(),
+                    updated: iso(&row.get("updated_at").cloned().unwrap_or(Value::Null)),
+                    env: None,
+                    loaders: row
+                        .get("loader")
+                        .and_then(Value::as_str)
+                        .filter(|v| !v.is_empty())
+                        .map(|v| vec![v.to_string()])
+                        .unwrap_or_default(),
+                    game_versions: row
+                        .get("minecraft")
+                        .and_then(Value::as_str)
+                        .filter(|v| !v.is_empty())
+                        .map(|v| vec![v.to_string()])
+                        .unwrap_or_default(),
+                }
+            })
+            .collect();
+        return Ok(SearchResult { total, hits });
+    }
     if source == "curseforge" {
         let sort_field = match sort {
             "downloads" => 6,
@@ -507,6 +593,95 @@ pub fn pick_file(files: &Value) -> Option<Value> {
 }
 
 pub async fn versions(kind: Kind, source: &str, id: &str) -> Result<Vec<ContentVersion>> {
+    if source == "lunar" {
+        let data = crate::net::fetch_json(&format!(
+            "{}/api/lunar-modpacks/{}/versions",
+            crate::mc::meta::LUNAR_API,
+            urlencode(id)
+        ))
+        .await?;
+        let mut out = Vec::new();
+        for row in data
+            .get("versions")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+        {
+            let version_id = row
+                .get("id")
+                .map(|v| v.to_string().trim_matches('"').to_string())
+                .unwrap_or_default();
+            let version_number = row
+                .get("versionNumber")
+                .and_then(Value::as_str)
+                .or_else(|| row.get("name").and_then(Value::as_str))
+                .unwrap_or("1.0.0")
+                .to_string();
+            let game_versions = row
+                .get("gameVersions")
+                .and_then(Value::as_array)
+                .map(|list| {
+                    list.iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect::<Vec<_>>()
+                })
+                .filter(|list| !list.is_empty())
+                .or_else(|| {
+                    row.get("minecraft")
+                        .and_then(Value::as_str)
+                        .map(|v| vec![v.to_string()])
+                })
+                .unwrap_or_default();
+            let loaders = row
+                .get("loaders")
+                .and_then(Value::as_array)
+                .map(|list| {
+                    list.iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect::<Vec<_>>()
+                })
+                .filter(|list| !list.is_empty())
+                .or_else(|| {
+                    row.get("loader")
+                        .and_then(Value::as_str)
+                        .map(|v| vec![v.to_string()])
+                })
+                .unwrap_or_default();
+            out.push(ContentVersion {
+                id: version_id.clone(),
+                name: version_number.clone(),
+                version_number,
+                game_versions,
+                loaders,
+                downloads: row.get("downloads").and_then(Value::as_u64).unwrap_or(0),
+                date_published: iso(&row.get("datePublished").cloned().unwrap_or(Value::Null)),
+                changelog: row
+                    .get("changelog")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+                file_name: format!("{version_id}.zip"),
+                file_url: format!(
+                    "{}/api/lunar-modpacks/{}/download",
+                    crate::mc::meta::LUNAR_API,
+                    urlencode(&version_id)
+                ),
+                file_size: row
+                    .get("size")
+                    .and_then(Value::as_u64)
+                    .or_else(|| {
+                        row.get("files")
+                            .and_then(Value::as_array)
+                            .and_then(|list| list.first())
+                            .and_then(|file| file.get("size"))
+                            .and_then(Value::as_u64)
+                    })
+                    .unwrap_or(0),
+                dependencies: Vec::new(),
+            });
+        }
+        return Ok(out);
+    }
     if source == "curseforge" {
         let data = cf_json(&format!(
             "{CF}/mods/{}/files?pageSize=50",
@@ -632,6 +807,38 @@ pub async fn versions(kind: Kind, source: &str, id: &str) -> Result<Vec<ContentV
 }
 
 pub async fn project(source: &str, id: &str, kind: Kind) -> Result<Value> {
+    if source == "lunar" {
+        let data = crate::net::fetch_json(&format!(
+            "{}/api/lunar-modpacks/{}",
+            crate::mc::meta::LUNAR_API,
+            urlencode(id)
+        ))
+        .await?;
+        let row = data.get("project").cloned().unwrap_or(Value::Null);
+        let description = row
+            .get("description_html")
+            .and_then(Value::as_str)
+            .map(crate::util::html_to_text)
+            .or_else(|| {
+                row.get("description")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+            .unwrap_or_default();
+        return Ok(serde_json::json!({
+            "id": id,
+            "source": "lunar",
+            "name": row.get("name"),
+            "summary": row.get("summary"),
+            "description": description,
+            "icon": row.get("icon"),
+            "downloads": row.get("downloads"),
+            "website": row.get("page"),
+            "author": row.get("author"),
+            "gallery": row.get("gallery").cloned().unwrap_or_else(|| serde_json::json!([])),
+            "kind": kind.folder(),
+        }));
+    }
     if source == "curseforge" {
         let data = cf_json(&format!("{CF}/mods/{}/description", urlencode(id))).await?;
         let description = crate::util::html_to_text(

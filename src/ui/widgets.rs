@@ -1,10 +1,10 @@
 use crate::ui::assets::icon_path;
 use crate::ui::theme::*;
 use gpui::{
-    App, Bounds, ClipboardItem, Context, CursorStyle, Div, Element, ElementId,
+    AnyView, App, Bounds, ClipboardItem, Context, CursorStyle, Div, Element, ElementId,
     ElementInputHandler, Entity, EntityInputHandler, FocusHandle, Focusable, FontWeight,
     GlobalElementId, InspectorElementId, IntoElement, KeyBinding, LayoutId, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point, ShapedLine,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point, Render, ShapedLine,
     SharedString, Style, TextRun, UTF16Selection, UnderlineStyle, Window, actions, div, fill,
     point, prelude::*, px, relative, rgba, size,
 };
@@ -34,81 +34,132 @@ actions!(
     ]
 );
 
-static TIP_CONTEXT: once_cell::sync::Lazy<
-    parking_lot::Mutex<Option<gpui::WeakEntity<crate::ui::app::LauncherApp>>>,
-> = once_cell::sync::Lazy::new(|| parking_lot::Mutex::new(None));
-
-pub fn set_tooltip_context(view: gpui::WeakEntity<crate::ui::app::LauncherApp>) {
-    *TIP_CONTEXT.lock() = Some(view);
-}
-
-pub fn set_tooltip_position(position: gpui::Point<gpui::Pixels>, cx: &mut App) {
-    let view = TIP_CONTEXT.lock().clone();
-    if let Some(view) = view {
-        let _ = view.update(cx, |this, cx| {
-            this.mouse_pos = position;
-            if this.tip.is_some() {
-                cx.notify();
-            }
-        });
-    }
-}
-
-pub fn set_tooltip(text: Option<String>, cx: &mut App) {
-    let view = TIP_CONTEXT.lock().clone();
-    if let Some(view) = view {
-        let _ = view.update(cx, |this, cx| {
-            this.tip = text;
-            cx.notify();
-        });
-    }
-}
-
-fn tooltip_for_icon(name: &str) -> Option<&'static str> {
+fn tooltip_for_icon(name: &str) -> Option<(&'static str, &'static str)> {
     Some(match name {
-        "x" => "Đóng",
-        "minus" => "Thu nhỏ",
-        "square" => "Phóng to",
-        "gear" | "gear-six" => "Cài đặt",
-        "trash" => "Xoá",
-        "play" | "play-fill" => "Chơi",
-        "stop" | "stop-fill" => "Dừng",
-        "plus" => "Thêm",
-        "arrow-left" => "Quay lại",
-        "arrow-right" => "Tiếp tục",
-        "folder" | "folder-open" => "Mở thư mục",
-        "arrows-clockwise" | "arrow-clockwise" => "Làm mới",
-        "download" | "download-simple" => "Tải xuống",
-        "copy" => "Sao chép",
-        "eye" => "Xem",
-        "magnifying-glass" => "Tìm kiếm",
-        "sidebar-simple" => "Thu gọn / mở rộng",
-        "terminal" => "Console",
-        "files" => "Tệp tin",
-        "puzzle-piece" => "Mods",
-        "image" => "Gói tài nguyên",
-        "paint-brush" => "Shader",
-        "archive" => "Bản lưu",
-        "map-trifold" => "Bản đồ",
-        "cloud" => "Host",
-        "hard-drives" => "Server",
-        "stack" => "Modpack",
-        "cube" => "Phiên bản",
-        "house" => "Trang chủ",
-        "user" => "Tài khoản",
-        "check-circle" => "Đã xong",
-        "warning-circle" | "warning" => "Cảnh báo",
-        "info" => "Thông tin",
-        "coffee" => "Java",
-        "memory" => "RAM",
-        "package" => "Gói",
-        "share-network" => "Chia sẻ",
-        "link-simple" => "Liên kết",
-        "floppy-disk" => "Lưu",
-        "file-arrow-up" => "Gửi log",
-        "arrow-square-out" => "Mở ra ngoài",
+        "x" => ("Đóng", "Đóng cửa sổ hoặc hộp thoại hiện tại"),
+        "minus" => ("Thu nhỏ", "Thu nhỏ launcher xuống thanh tác vụ"),
+        "square" => ("Phóng to", "Phóng to hoặc thu hồi cửa sổ launcher"),
+        "gear" | "gear-six" => ("Cài đặt", "Mở cấu hình cho mục này"),
+        "trash" => ("Xoá", "Chuyển mục vào thùng rác để có thể khôi phục"),
+        "play" | "play-fill" => ("Chơi", "Khởi chạy Minecraft với phiên bản đã chọn"),
+        "stop" | "stop-fill" => ("Dừng", "Dừng tiến trình Minecraft đang chạy"),
+        "plus" => ("Thêm", "Tạo mới một mục"),
+        "arrow-left" => ("Quay lại", "Quay về màn hình trước"),
+        "arrow-right" => ("Tiếp tục", "Đi tới bước tiếp theo"),
+        "folder" | "folder-open" => ("Mở thư mục", "Mở thư mục này trong File Explorer"),
+        "arrows-clockwise" | "arrow-clockwise" | "arrows-clockwise-fill" => ("Làm mới", "Tải lại dữ liệu mới nhất"),
+        "download" | "download-simple" => ("Tải xuống", "Tải tệp hoặc gói này về máy"),
+        "copy" => ("Sao chép", "Sao chép nội dung vào clipboard"),
+        "eye" => ("Xem", "Xem trước nội dung"),
+        "magnifying-glass" => ("Tìm kiếm", "Tìm theo tên hoặc mã dự án"),
+        "sidebar-simple" => ("Thanh bên", "Thu gọn hoặc mở rộng thanh điều hướng"),
+        "terminal" => ("Console", "Xem nhật ký và gửi lệnh tới game"),
+        "files" => ("Tệp tin", "Duyệt và chỉnh sửa tệp trong phiên bản"),
+        "puzzle-piece" => ("Mods", "Quản lý mod và gói hỗ trợ"),
+        "image" => ("Gói tài nguyên", "Quản lý resource pack"),
+        "paint-brush" => ("Shader", "Quản lý shader pack"),
+        "archive" => ("Bản lưu", "Quản lý thế giới và bản lưu"),
+        "map-trifold" => ("Bản đồ", "Xem bản đồ địa hình của thế giới"),
+        "cloud" => ("Host", "Chia sẻ server Minecraft qua đường hầm"),
+        "hard-drives" => ("Server", "Quản lý server chạy trên máy"),
+        "stack" => ("Modpack", "Khám phá Modrinth, CurseForge và LunarModpack"),
+        "cube" => ("Phiên bản", "Tạo và quản lý phiên bản Minecraft"),
+        "house" => ("Trang chủ", "Về trang tổng quan của launcher"),
+        "user" | "user-circle" => ("Tài khoản", "Quản lý tài khoản đăng nhập"),
+        "check-circle" => ("Đã xong", "Thao tác đã hoàn tất"),
+        "warning-circle" | "warning" => ("Cảnh báo", "Cần chú ý trước khi tiếp tục"),
+        "info" => ("Thông tin", "Xem thông tin chi tiết"),
+        "coffee" => ("Java", "Quản lý bản Java cho Minecraft"),
+        "memory" => ("RAM", "Bộ nhớ cấp cho phiên bản"),
+        "package" => ("Gói", "Thông tin gói nội dung"),
+        "share-network" => ("Chia sẻ", "Chia sẻ nội dung này với người khác"),
+        "link-simple" => ("Liên kết", "Mở liên kết bằng trình duyệt"),
+        "floppy-disk" => ("Lưu", "Lưu các thay đổi hiện tại"),
+        "file-arrow-up" => ("Gửi log", "Tải nhật ký lên để được hỗ trợ"),
+        "arrow-square-out" => ("Mở ra ngoài", "Mở trong cửa sổ hoặc ứng dụng khác"),
         _ => return None,
     })
+}
+
+struct TipView {
+    title: String,
+    hint: String,
+}
+
+impl Render for TipView {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(2.0))
+            .max_w(px(300.0))
+            .px(px(10.0))
+            .py(px(7.0))
+            .rounded(px(8.0))
+            .bg(rgba(0x1a1725f2))
+            .border_1()
+            .border_color(rgba(0xffffff14))
+            .shadow_lg()
+            .text_color(gpui::rgb(0xf5f3fa))
+            .child(
+                div()
+                    .text_size(px(11.5))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(self.title.clone()),
+            )
+            .when(!self.hint.is_empty(), |el| {
+                el.child(
+                    div()
+                        .text_size(px(10.5))
+                        .line_height(px(15.0))
+                        .text_color(rgba(0xffffffb0))
+                        .child(self.hint.clone()),
+                )
+            })
+    }
+}
+
+pub fn with_tooltip(
+    element: gpui::Stateful<Div>,
+    title: impl Into<SharedString>,
+    hint: impl Into<SharedString>,
+) -> gpui::Stateful<Div> {
+    let title: SharedString = title.into();
+    let hint: SharedString = hint.into();
+    element.tooltip(move |_window, cx| {
+        let title = title.to_string();
+        let hint = hint.to_string();
+        AnyView::from(cx.new(|_| TipView { title, hint }))
+    })
+}
+
+pub fn icon_source(name: &str) -> String {
+    let duotone = format!("icons/duotone/{name}.svg");
+    if crate::ui::assets::exists(&duotone) {
+        duotone
+    } else {
+        icon_path(name)
+    }
+}
+
+pub fn tip_detailed(
+    id: impl Into<ElementId>,
+    title: impl Into<SharedString>,
+    hint: impl Into<SharedString>,
+    element: impl IntoElement,
+) -> gpui::AnyElement {
+    let title: SharedString = title.into();
+    let hint: SharedString = hint.into();
+    div()
+        .id(id)
+        .flex_shrink_0()
+        .tooltip(move |_window, cx| {
+            let title = title.to_string();
+            let hint = hint.to_string();
+            AnyView::from(cx.new(|_| TipView { title, hint }))
+        })
+        .child(element)
+        .into_any_element()
 }
 
 pub fn bind_text_keys(cx: &mut App) {
@@ -845,7 +896,7 @@ impl Render for TextField {
 
 pub fn icon(name: &str, size: f32, color: gpui::Rgba) -> impl IntoElement {
     gpui::svg()
-        .path(icon_path(name))
+        .path(icon_source(name))
         .size(px(size))
         .text_color(color)
         .flex_shrink_0()
@@ -857,18 +908,15 @@ pub fn icon_button(
     theme: &Theme,
     on_click: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
-    let tip = tooltip_for_icon(name);
+    let (title, hint) = tooltip_for_icon(name).unwrap_or(("", ""));
+    let title: SharedString = title.into();
+    let hint: SharedString = hint.into();
     div()
         .id(id)
-        .when_some(tip, |el, tip| {
-            el.on_hover(move |hovered, _window, cx| {
-                if *hovered {
-                    set_tooltip(Some(tip.to_string()), cx);
-                } else {
-                    set_tooltip(None, cx);
-                }
-            })
-            .on_mouse_move(|event, _window, cx| set_tooltip_position(event.position, cx))
+        .tooltip(move |_window, cx| {
+            let title = title.to_string();
+            let hint = hint.to_string();
+            AnyView::from(cx.new(|_| TipView { title, hint }))
         })
         .flex()
         .items_center()
@@ -1026,24 +1074,8 @@ pub fn text_input_box(theme: &Theme) -> Div {
 pub fn tip(
     id: impl Into<ElementId>,
     text: impl Into<SharedString>,
-    view: gpui::WeakEntity<crate::ui::app::LauncherApp>,
+    _view: gpui::WeakEntity<crate::ui::app::LauncherApp>,
     element: impl IntoElement,
 ) -> gpui::AnyElement {
-    let text: SharedString = text.into();
-    div()
-        .id(id)
-        .on_hover(move |hovered, _window, cx| {
-            let text = text.clone();
-            let _ = view.update(cx, |this, cx| {
-                if *hovered {
-                    this.tip = Some(text.to_string());
-                } else if this.tip.as_deref() == Some(text.as_str()) {
-                    this.tip = None;
-                }
-                cx.notify();
-            });
-        })
-        .on_mouse_move(|event, _window, cx| set_tooltip_position(event.position, cx))
-        .child(element)
-        .into_any_element()
+    tip_detailed(id, text, "", element)
 }

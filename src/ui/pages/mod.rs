@@ -231,6 +231,7 @@ pub fn modal_overlay(
                 .w(px(width))
                 .max_h(px(760.0))
                 .overflow_y_scroll()
+                .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
                 .rounded(px(RADIUS_LG))
                 .bg(theme.elevated)
                 .border_1()
@@ -262,7 +263,8 @@ pub fn loader_change_modal(app: &mut LauncherApp, _window: &mut Window, cx: &mut
     let view_close = cx.entity().downgrade();
     let view_pick = cx.entity().downgrade();
     let view_save = cx.entity().downgrade();
-    let mut rows = div().id("loader-builds").flex().flex_col().gap(px(3.0)).max_h(px(340.0)).overflow_y_scroll();
+    let mut rows = div().id("loader-builds").flex().flex_col().gap(px(3.0)).max_h(px(340.0)).overflow_y_scroll()
+        .on_scroll_wheel(|_, _, cx| cx.stop_propagation());
     if builds.is_empty() {
         rows = rows.child(
             div().p(px(12.0)).text_size(px(TEXT_SM)).text_color(theme.faint).child("Không có bản loader nào cho phiên bản này."),
@@ -1043,7 +1045,8 @@ pub fn modpack_update_modal(app: &mut LauncherApp, _window: &mut Window, cx: &mu
     let view_pick = cx.entity().downgrade();
     let view_install = cx.entity().downgrade();
 
-    let mut rows = div().id("update-versions").flex().flex_col().gap(px(3.0)).max_h(px(360.0)).overflow_y_scroll();
+    let mut rows = div().id("update-versions").flex().flex_col().gap(px(3.0)).max_h(px(360.0)).overflow_y_scroll()
+        .on_scroll_wheel(|_, _, cx| cx.stop_propagation());
     if versions.is_empty() {
         rows = rows.child(
             div().p(px(12.0)).text_size(px(TEXT_SM)).text_color(theme.faint).child("Không có phiên bản nào."),
@@ -1751,6 +1754,7 @@ pub fn crash_modal(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context
                     .id("crash-cause")
                     .max_h(px(160.0))
                     .overflow_y_scroll()
+                    .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
                     .p(px(10.0))
                     .rounded(px(RADIUS_SM))
                     .bg(if theme.dark { gpui::rgb(0x07090c) } else { gpui::rgb(0xf7f8fa) })

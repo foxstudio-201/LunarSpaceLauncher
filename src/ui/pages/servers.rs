@@ -355,6 +355,7 @@ fn render_detail(app: &mut LauncherApp, cx: &mut Context<LauncherApp>, server: &
                 )
                 .child(
                     div().id("server-console").h(px(460.0)).overflow_y_scroll().track_scroll(&app.server_scroll).rounded(px(RADIUS))
+                        .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
                         .bg(if theme.dark { gpui::rgb(0x07090c) } else { gpui::rgb(0xf7f8fa) })
                         .border_1().border_color(theme.border_soft)
                         .when_some(colored, |el, content| el.child(content))

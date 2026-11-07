@@ -312,14 +312,23 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
         .border_1()
         .border_color(theme.border_soft)
         .child(source_button(&theme, "modrinth", "Modrinth", &active_source, view_source.clone()))
-        .child(source_button(&theme, "curseforge", "CurseForge", &active_source, view_source.clone()));
+        .child(source_button(&theme, "curseforge", "CurseForge", &active_source, view_source.clone()))
+        .child(source_button(&theme, "lunar", "LunarModpack", &active_source, view_source.clone()));
 
-    let sorts = [
-        ("relevance", "Liên quan"),
-        ("downloads", "Tải nhiều"),
-        ("newest", "Mới nhất"),
-        ("updated", "Cập nhật"),
-    ];
+    let sorts: Vec<(&str, &str)> = if active_source == "lunar" {
+        vec![
+            ("downloads", "Tải nhiều"),
+            ("newest", "Mới nhất"),
+            ("name", "Tên A-Z"),
+        ]
+    } else {
+        vec![
+            ("relevance", "Liên quan"),
+            ("downloads", "Tải nhiều"),
+            ("newest", "Mới nhất"),
+            ("updated", "Cập nhật"),
+        ]
+    };
     let mut sort_row = div().flex().items_center().gap(px(4.0));
     for (key, label) in sorts {
         let active = app.content.sort == key;
@@ -631,7 +640,7 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
         .child(page_header(
             &theme,
             "Modpack",
-            "Cài modpack từ Modrinth hoặc CurseForge chỉ với một cú nhấp",
+            "Cài modpack từ Modrinth, CurseForge hoặc LunarModpack chỉ với một cú nhấp",
             div()
                 .flex()
                 .items_center()
@@ -676,8 +685,25 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                                     });
                                 })
                                 .child(widgets::icon("magnifying-glass", 16.0, theme.on_accent)),
-                        )
-                        .child(source_toggle),
+                        ),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap_3()
+                        .child(source_toggle)
+                        .child(
+                            div()
+                                .text_size(px(TEXT_XS))
+                                .text_color(theme.faint)
+                                .child(match active_source.as_str() {
+                                    "lunar" => "Cộng đồng LunarSpace",
+                                    "curseforge" => "CurseForge",
+                                    _ => "Modrinth",
+                                }),
+                        ),
                 )
                 .child(
                     div()
@@ -737,7 +763,12 @@ fn source_button(
             let source = source.clone();
             let _ = view.update(cx, |this, cx| {
                 if this.content.source != source {
-                    this.content.source = source;
+                    this.content.source = source.clone();
+                    if source == "lunar"
+                        && !matches!(this.content.sort.as_str(), "downloads" | "newest" | "name")
+                    {
+                        this.content.sort = "newest".into();
+                    }
                     let query = this.content_search.read(cx).text().to_string();
                     search_content(this, query, cx);
                 }
@@ -805,6 +836,7 @@ pub fn detail_modal(app: &mut LauncherApp, _window: &mut Window, cx: &mut Contex
         .gap(px(2.0))
         .h(px(190.0))
         .overflow_y_scroll()
+        .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
         .p(px(4.0))
         .rounded(px(RADIUS_SM))
         .bg(theme.surface)
@@ -1068,6 +1100,7 @@ pub fn detail_modal(app: &mut LauncherApp, _window: &mut Window, cx: &mut Contex
                 .id("pack-desc")
                 .max_h(px(170.0))
                 .overflow_y_scroll()
+        .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
                 .child(detail_body),
         )
         .child(
@@ -1336,6 +1369,7 @@ pub fn browser_modal(app: &mut LauncherApp, _window: &mut Window, cx: &mut Conte
         .gap(px(2.0))
         .h(px(430.0))
         .overflow_y_scroll()
+        .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
         .p(px(4.0))
         .rounded(px(RADIUS_SM))
         .bg(theme.surface)

@@ -1325,6 +1325,7 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                         .h(px(console_height))
                         .overflow_y_scroll()
                         .track_scroll(&app.console_scroll)
+                        .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
                         .child(terminal),
                 )
                 .child(

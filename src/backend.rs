@@ -539,16 +539,16 @@ impl Backend {
         let progress = self.progress_fn(id.to_string(), "download".into());
         let result: Result<Value> = async {
             let mut version_id = entry.version_id.clone();
-            if version_id.is_none() {
+            if entry.loader == "lunar" {
+                let installed = self.install_lunar(&entry, &paths, progress.clone()).await?;
+                version_id = Some(installed);
+                self.store
+                    .update_instance(id, json!({"versionId": version_id}));
+            } else if version_id.is_none() {
                 version_id = Some(
                     self.install_forge_or_neoforge(&entry, &paths, progress.clone())
                         .await?,
                 );
-                self.store
-                    .update_instance(id, json!({"versionId": version_id}));
-            } else if entry.loader == "lunar" {
-                let installed = self.install_lunar(&entry, &paths, progress.clone()).await?;
-                version_id = Some(installed);
                 self.store
                     .update_instance(id, json!({"versionId": version_id}));
             }
@@ -2228,7 +2228,9 @@ impl Backend {
             };
             let source = marker.get("source").and_then(Value::as_str).unwrap_or("").to_string();
             let project_id = marker.get("projectId").and_then(Value::as_str).unwrap_or("").to_string();
-            if project_id.is_empty() || !matches!(source.as_str(), "modrinth" | "curseforge") {
+            if project_id.is_empty()
+                || !matches!(source.as_str(), "modrinth" | "curseforge" | "lunar")
+            {
                 return fail("Modpack này không hỗ trợ cập nhật tự động.");
             }
             match crate::mc::content::versions(crate::mc::content::Kind::Modpacks, &source, &project_id).await {
@@ -2272,7 +2274,9 @@ impl Backend {
             };
             let source = marker.get("source").and_then(Value::as_str).unwrap_or("").to_string();
             let project_id = marker.get("projectId").and_then(Value::as_str).unwrap_or("").to_string();
-            if project_id.is_empty() || !matches!(source.as_str(), "modrinth" | "curseforge") {
+            if project_id.is_empty()
+                || !matches!(source.as_str(), "modrinth" | "curseforge" | "lunar")
+            {
                 return fail("Modpack này không hỗ trợ cập nhật tự động.");
             }
             let version_id = if version_id.is_empty() {
@@ -2322,7 +2326,20 @@ impl Backend {
             plan.version_id = target.id.clone();
             plan.slug = marker.get("slug").and_then(Value::as_str).unwrap_or("").to_string();
             plan.project_url = marker.get("projectUrl").and_then(Value::as_str).unwrap_or("").to_string();
-            let keep: Vec<String> = plan.files.iter().map(|file| file.rel.clone()).collect();
+            let keep: Vec<String> = if source == "lunar" {
+                marker
+                    .get("files")
+                    .and_then(Value::as_array)
+                    .map(|rows| {
+                        rows.iter()
+                            .filter_map(|row| row.get("rel").and_then(Value::as_str))
+                            .map(str::to_string)
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            } else {
+                plan.files.iter().map(|file| file.rel.clone()).collect()
+            };
             let removed = modpack::remove_unowned(&dir, &keep).await;
             let applied = match modpack::apply(&plan, &dir, None, |_| {}).await {
                 Ok(applied) => applied,
@@ -2525,7 +2542,7 @@ impl Backend {
             }
             let version_id = if plan.loader == "vanilla" {
                 Some(plan.mc.clone())
-            } else if plan.loader == "forge" || plan.loader == "neoforge" {
+            } else if matches!(plan.loader.as_str(), "forge" | "neoforge" | "lunar") {
                 None
             } else {
                 let loader_version = plan.loader_version.clone().unwrap_or_default();
@@ -2626,7 +2643,7 @@ impl Backend {
             }
             let version_id = if plan.loader == "vanilla" {
                 Some(plan.mc.clone())
-            } else if plan.loader == "forge" || plan.loader == "neoforge" {
+            } else if matches!(plan.loader.as_str(), "forge" | "neoforge" | "lunar") {
                 None
             } else {
                 this.resolve_version_id(&plan.mc, &plan.loader, plan.loader_version.as_deref().unwrap_or("")).await.ok().flatten()

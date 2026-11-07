@@ -379,6 +379,9 @@ pub struct LauncherApp {
     pub instance_tab: InstanceTab,
     pub selected_instance: Option<String>,
     pub rail_collapsed: bool,
+    pub rail_width: f32,
+    pub rail_gen: u64,
+    pub scroll_gen: u64,
     pub pill_y: f32,
     pub pill_gen: u64,
     pub pill_visible: bool,
@@ -448,8 +451,6 @@ pub struct LauncherApp {
     pub host_listen: Entity<TextField>,
     pub host_status: Value,
     pub host_instance: Option<String>,
-    pub tip: Option<String>,
-    pub mouse_pos: gpui::Point<gpui::Pixels>,
     pub home_tab: String,
     pub accounts_tab: String,
     pub home_loaders: Value,
@@ -570,6 +571,9 @@ impl LauncherApp {
             instance_tab: InstanceTab::Overview,
             selected_instance: None,
             rail_collapsed: false,
+            rail_width: 196.0,
+            rail_gen: 0,
+            scroll_gen: 0,
             pill_y: 40.0,
             pill_gen: 0,
             pill_visible: true,
@@ -661,8 +665,6 @@ impl LauncherApp {
             host_listen,
             host_status: Value::Null,
             host_instance: None,
-            tip: None,
-            mouse_pos: gpui::point(px(0.0), px(0.0)),
             home_tab: "overview".into(),
             accounts_tab: "list".into(),
             home_loaders: Value::Null,
@@ -673,7 +675,6 @@ impl LauncherApp {
             instance_search,
             uptime: 0,
         };
-        widgets::set_tooltip_context(cx.entity().downgrade());
         app.refresh_settings();
         app.refresh_instances();
         app.refresh_accounts();
@@ -1916,52 +1917,99 @@ impl LauncherApp {
     }
 
 
-    fn sidebar_item(
-        &self,
-        id: &'static str,
-        page: Page,
-        icon_name: &'static str,
-        label: &'static str,
-        cx: &Context<Self>,
-    ) -> impl IntoElement {
-        let active = self.page == page;
-        let theme = self.theme.clone();
-        let collapsed = self.rail_collapsed;
-        let entity = cx.entity().downgrade();
-        let row = div()
-            .id(id)
-            .flex()
-            .items_center()
-            .gap(px(11.0))
-            .h(px(38.0))
-            .px(px(if collapsed { 0.0 } else { 12.0 }))
-            .when(collapsed, |el| el.justify_center())
-            .rounded(px(RADIUS_SM))
-            .cursor_pointer()
-            .text_size(px(TEXT_BASE))
-            .font_weight(if active {
-                FontWeight::SEMIBOLD
-            } else {
-                FontWeight::MEDIUM
-            })
-            .text_color(if active { theme.text } else { theme.muted })
-            .when(active, |el| el.bg(theme.surface_active))
-            .when(!active, |el| el.hover(|s| s.bg(theme.surface_hover).text_color(theme.text)))
-            .on_click(move |_, _, app| {
-                let _ = entity.update(app, |this, cx| this.set_page(page, cx));
-            })
-            .child(widgets::icon(icon_name, 17.0, if active { theme.accent_soft } else { theme.faint }));
-        if collapsed {
-            row
-        } else {
-            row.child(label)
+    fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
+        self.rail_collapsed = !self.rail_collapsed;
+        let from = self.rail_width;
+        let to = if self.rail_collapsed { 64.0 } else { 196.0 };
+        self.rail_gen = self.rail_gen.wrapping_add(1);
+        let generation = self.rail_gen;
+        let start = std::time::Instant::now();
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(16))
+                    .await;
+                let done = this
+                    .update(cx, |this, cx| {
+                        if this.rail_gen != generation {
+                            return true;
+                        }
+                        let t = (start.elapsed().as_secs_f32() / 0.28).min(1.0);
+                        let eased = 1.0 - (1.0 - t).powi(3);
+                        this.rail_width = from + (to - from) * eased;
+                        cx.notify();
+                        t >= 1.0
+                    })
+                    .unwrap_or(true);
+                if done {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn smooth_page_scroll(
+        &mut self,
+        delta: gpui::ScrollDelta,
+        line_height: gpui::Pixels,
+        cx: &mut Context<Self>,
+    ) {
+        let native_dy = f32::from(delta.pixel_delta(line_height).y);
+        if native_dy.abs() < 0.01 {
+            return;
         }
+        let current = f32::from(self.page_scroll.offset().y);
+        let max = f32::from(self.page_scroll.max_offset().height);
+        let at_top = current >= -0.5;
+        let at_bottom = current <= -max + 0.5;
+        let mut from = current - native_dy;
+        if (native_dy < 0.0 && at_bottom) || (native_dy > 0.0 && at_top) {
+            from = current;
+        }
+        let from = from.clamp(-max, 0.0);
+        let target = (from + native_dy).clamp(-max, 0.0);
+        if (target - from).abs() < 0.01 {
+            return;
+        }
+        self.page_scroll.set_offset(gpui::point(px(0.0), px(from)));
+        self.scroll_gen = self.scroll_gen.wrapping_add(1);
+        let generation = self.scroll_gen;
+        let start = std::time::Instant::now();
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(16))
+                    .await;
+                let done = this
+                    .update(cx, |this, cx| {
+                        if this.scroll_gen != generation {
+                            return true;
+                        }
+                        let t = (start.elapsed().as_secs_f32() / 0.2).min(1.0);
+                        let eased = 1.0 - (1.0 - t).powi(3);
+                        let value = from + (target - from) * eased;
+                        this.page_scroll
+                            .set_offset(gpui::point(px(0.0), px(value)));
+                        cx.notify();
+                        t >= 1.0
+                    })
+                    .unwrap_or(true);
+                if done {
+                    break;
+                }
+            }
+        })
+        .detach();
     }
 
     fn sidebar(&self, cx: &Context<Self>) -> impl IntoElement {
+        use gpui::AnimationExt;
         let theme = self.theme.clone();
         let collapsed = self.rail_collapsed;
-        let width = if collapsed { 64.0 } else { 180.0 };
+        let width = self.rail_width;
+        let shrink = ((196.0 - width) / 132.0).clamp(0.0, 1.0);
+        let row_pad = 10.0 + shrink;
         let in_instance = self.page == Page::Instance;
         let account = self
             .accounts
@@ -1978,118 +2026,106 @@ impl LauncherApp {
                 None
             }
         });
-        let entity = cx.entity().downgrade();
         let has_head = head.is_some();
-        let collapse_view = entity.clone();
+        let entity = cx.entity().downgrade();
+
         let nav = |id: &'static str,
                    icon_name: &'static str,
                    label: String,
+                   hint: &'static str,
                    active: bool,
                    on_click: Box<dyn Fn(&mut LauncherApp, &mut Context<LauncherApp>)>|
          -> AnyElement {
             let entity = cx.entity().downgrade();
-            let label = label.clone();
-            let tip_label = label.clone();
-            div()
+            let label_for_tip = label.clone();
+            let row = div()
                 .id(id)
+                .relative()
                 .flex()
                 .items_center()
-                .gap(px(12.0))
-                .h(px(36.0))
-                .px(px(if collapsed { 0.0 } else { 10.0 }))
-                .when(collapsed, |el| {
-                    el.justify_center()
-                        .on_hover(move |hovered, _window, cx| {
-                            widgets::set_tooltip(if *hovered { Some(tip_label.clone()) } else { None }, cx);
-                        })
-                        .on_mouse_move(|event, _window, cx| widgets::set_tooltip_position(event.position, cx))
-                })
-                .rounded(px(8.0))
+                .gap(px(11.0))
+                .h(px(42.0))
+                .flex_shrink_0()
+                .pl(px(row_pad))
+                .pr(px(10.0))
+                .rounded(px(9.0))
+                .overflow_hidden()
                 .cursor_pointer()
+                .group("side-row")
                 .text_size(px(12.0))
                 .font_weight(if active { FontWeight::SEMIBOLD } else { FontWeight::MEDIUM })
                 .text_color(if active { theme.accent_soft } else { theme.muted })
-                .when(!active, |el| el.hover(|st| st.text_color(theme.text).bg(theme.surface_hover)))
+                .when(active, |el| el.bg(theme.surface_active))
+                .when(!active, |el| el.hover(|st| st.bg(theme.surface_hover).text_color(theme.text)))
                 .on_click(move |_, _, cx| {
                     let _ = entity.update(cx, |this, cx| on_click(this, cx));
                 })
-                .child(widgets::icon(icon_name, 17.0, if active { theme.accent_soft } else { theme.faint }))
-                .when(!collapsed, |el| el.child(label))
-                .into_any_element()
-        };
-
-        let mut rail = div()
-            .flex()
-            .flex_col()
-            .w(px(width))
-            .h_full()
-            .flex_shrink_0()
-            .relative()
-            .bg(theme.sidebar)
-            .border_r_1()
-            .border_color(theme.border_soft)
-            .pt(px(10.0))
-            .pb(px(8.0))
-            .px(px(8.0))
-            .gap(px(6.0));
-
-        rail = rail.child(
-            div()
-                .flex()
-                .items_center()
-                .justify_end()
-                .h(px(24.0))
-                .child(widgets::tip("tip-rail", if collapsed { "Mở rộng" } else { "Thu gọn" }, cx.entity().downgrade(), div()
-                        .id("rail-toggle")
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .size(px(24.0))
-                        .rounded(px(6.0))
-                        .bg(theme.elevated)
-                        .border_1()
-                        .border_color(theme.border)
-                        .cursor_pointer()
-                        .hover(|st| st.bg(theme.surface_hover))
-                        .on_click(move |_, _, cx| {
-                            let _ = collapse_view.update(cx, |this, cx| {
-                                this.rail_collapsed = !this.rail_collapsed;
-                                cx.notify();
-                            });
-                        })
-                        .child(widgets::icon("sidebar-simple", 13.0, theme.faint)))),
-        );
-
-        if self.pill_visible {
-            rail = rail.child(
-                div()
-                    .id("nav-pill")
-                    .absolute()
-                    .left(px(8.0))
-                    .right(px(8.0))
-                    .top(px(self.pill_y))
-                    .h(px(36.0))
-                    .rounded(px(8.0))
-                    .bg(theme.surface_active)
-                    .child(
+                .when(active, |el| {
+                    el.child(
                         div()
                             .absolute()
                             .left(px(0.0))
-                            .top(px(7.0))
-                            .bottom(px(7.0))
-                            .w(px(2.0))
+                            .top(px(12.0))
+                            .bottom(px(12.0))
+                            .w(px(3.0))
                             .rounded_full()
                             .bg(theme.accent),
-                    ),
-            );
-        }
+                    )
+                })
+                .when(!active, |el| {
+                    el.child(
+                        div()
+                            .absolute()
+                            .left(px(3.0))
+                            .top(px(12.0))
+                            .h(px(18.0))
+                            .w(px(3.0))
+                            .rounded_full()
+                            .bg(theme.accent)
+                            .opacity(0.0)
+                            .group_hover("side-row", |st| st.opacity(1.0)),
+                    )
+                })
+                .child(
+                    div()
+                        .size(px(26.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .flex_shrink_0()
+                        .child(widgets::icon(
+                            icon_name,
+                            20.0,
+                            if active { theme.accent_soft } else { theme.faint },
+                        )),
+                )
+                .child(div().flex_1().min_w(px(0.0)).truncate().child(label));
+            if collapsed {
+                widgets::tip_detailed(
+                    SharedString::from(format!("tip-{id}")),
+                    label_for_tip,
+                    hint,
+                    row,
+                )
+                .into_any_element()
+            } else {
+                row.into_any_element()
+            }
+        };
 
-        // Top group: instance mode shows Home/back; otherwise the main pages.
+        let mut top = div()
+            .flex()
+            .flex_col()
+            .gap(px(4.0))
+            .px(px(8.0))
+            .pt(px(2.0))
+            .pb(px(9.0));
         if in_instance {
-            rail = rail.child(nav(
+            top = top.child(nav(
                 "nav-back",
                 "arrow-left",
                 "Trang chủ".into(),
+                "Quay về danh sách phiên bản",
                 false,
                 Box::new(|this, cx| {
                     this.selected_instance = None;
@@ -2097,63 +2133,73 @@ impl LauncherApp {
                 }),
             ));
         } else {
-            rail = rail
-                .child(nav("nav-home", "house", "Trang chủ".into(), self.page == Page::Home, Box::new(|this, cx| this.set_page(Page::Home, cx))))
-                .child(nav("nav-host", "cloud", "Host".into(), self.page == Page::Host, Box::new(|this, cx| this.set_page(Page::Host, cx))))
+            top = top
+                .child(nav(
+                    "nav-home",
+                    "house",
+                    "Trang chủ".into(),
+                    "Tổng quan launcher và phiên bản đang chơi",
+                    self.page == Page::Home,
+                    Box::new(|this, cx| this.set_page(Page::Home, cx)),
+                ))
+                .child(nav(
+                    "nav-host",
+                    "cloud",
+                    "Host".into(),
+                    "Chia sẻ server Minecraft qua đường hầm",
+                    self.page == Page::Host,
+                    Box::new(|this, cx| this.set_page(Page::Host, cx)),
+                ))
                 .child(nav(
                     "nav-servers",
                     "hard-drives",
                     "ServerLocalHost".into(),
+                    "Quản lý server chạy trên máy",
                     self.page == Page::Servers,
                     Box::new(|this, cx| this.set_page(Page::Servers, cx)),
                 ))
-                .child(nav("nav-modpacks", "stack", "Modpack".into(), self.page == Page::Modpacks, Box::new(|this, cx| this.set_page(Page::Modpacks, cx))));
+                .child(nav(
+                    "nav-modpacks",
+                    "stack",
+                    "Modpack".into(),
+                    "Khám phá Modrinth, CurseForge và LunarModpack",
+                    self.page == Page::Modpacks,
+                    Box::new(|this, cx| this.set_page(Page::Modpacks, cx)),
+                ));
         }
 
-        // Middle group: instance tabs or instance list.
         let mut middle = div()
             .id("sidebar-middle")
             .flex()
             .flex_col()
-            .gap(px(2.0))
+            .gap(px(4.0))
             .flex_1()
             .min_h(px(0.0))
             .overflow_y_scroll()
-            .pt(px(6.0));
+            .px(px(8.0))
+            .py(px(9.0));
         if in_instance {
             let items = [
-                (InstanceTab::Overview, "chart-line", "Tổng quan"),
-                (InstanceTab::Console, "terminal", "Console"),
-                (InstanceTab::Mods, "puzzle-piece", "Mods"),
-                (InstanceTab::Resourcepacks, "image", "Gói tài nguyên"),
-                (InstanceTab::Shaderpacks, "paint-brush", "Shader"),
-                (InstanceTab::Files, "files", "Tệp tin"),
-                (InstanceTab::Trash, "trash", "Thùng rác"),
-                (InstanceTab::Saves, "archive", "Bản lưu"),
-                (InstanceTab::Map, "map-trifold", "Bản đồ"),
-                (InstanceTab::Settings, "gear-six", "Cài đặt"),
+                (InstanceTab::Overview, "itab-overview", "chart-line", "Tổng quan", "Xem thông tin và trạng thái phiên bản"),
+                (InstanceTab::Console, "itab-console", "terminal", "Console", "Nhật ký game và bảng lệnh"),
+                (InstanceTab::Mods, "itab-mods", "puzzle-piece", "Mods", "Quản lý mod đã cài"),
+                (InstanceTab::Resourcepacks, "itab-resourcepacks", "image", "Gói tài nguyên", "Quản lý resource pack"),
+                (InstanceTab::Shaderpacks, "itab-shaderpacks", "paint-brush", "Shader", "Quản lý shader pack"),
+                (InstanceTab::Files, "itab-files", "files", "Tệp tin", "Duyệt và chỉnh sửa tệp"),
+                (InstanceTab::Trash, "itab-trash", "trash", "Thùng rác", "Khôi phục tệp đã xoá"),
+                (InstanceTab::Saves, "itab-saves", "archive", "Bản lưu", "Quản lý thế giới đã lưu"),
+                (InstanceTab::Map, "itab-map", "map-trifold", "Bản đồ", "Xem bản đồ địa hình"),
+                (InstanceTab::Settings, "itab-settings", "gear-six", "Cài đặt", "Bộ nhớ, Java và tham số khởi chạy"),
             ];
-            for (tab, icon_name, label) in items {
+            for (tab, id, icon_name, label, hint) in items {
                 middle = middle.child(nav(
-                    match tab {
-                        InstanceTab::Overview => "itab-overview",
-                        InstanceTab::Console => "itab-console",
-                        InstanceTab::Mods => "itab-mods",
-                        InstanceTab::Resourcepacks => "itab-resourcepacks",
-                        InstanceTab::Shaderpacks => "itab-shaderpacks",
-                        InstanceTab::Files => "itab-files",
-                        InstanceTab::Trash => "itab-trash",
-                        InstanceTab::Saves => "itab-saves",
-                        InstanceTab::Map => "itab-map",
-                        InstanceTab::Settings => "itab-settings",
-                    },
+                    id,
                     icon_name,
                     label.into(),
+                    hint,
                     self.instance_tab == tab,
                     Box::new(move |this, cx| {
                         this.instance_tab = tab;
-                        let target = 78.0 + tab as usize as f32 * 38.0;
-                        this.update_pill(target, true, cx);
                         this.load_instance_tab(cx);
                         cx.notify();
                     }),
@@ -2161,37 +2207,64 @@ impl LauncherApp {
             }
         } else {
             let view_new = entity.clone();
-            middle = middle.child(
-                div()
-                    .id("nav-new-instance")
-                    .flex()
-                    .items_center()
-                    .gap(px(12.0))
-                    .h(px(36.0))
-                    .px(px(if collapsed { 0.0 } else { 10.0 }))
-                    .when(collapsed, |el| {
-                        el.justify_center()
-                            .on_hover(|hovered, _window, cx| {
-                                widgets::set_tooltip(if *hovered { Some("Tạo phiên bản mới".to_string()) } else { None }, cx);
-                            })
-                            .on_mouse_move(|event, _window, cx| widgets::set_tooltip_position(event.position, cx))
-                    })
-                    .rounded(px(8.0))
-                    .cursor_pointer()
-                    .text_size(px(12.0))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(if self.page == Page::Versions { theme.accent_soft } else { theme.muted })
-                    .when(self.page == Page::Versions, |el| el.bg(theme.surface_active))
-                    .hover(|st| st.text_color(theme.text).bg(theme.surface_hover))
-                    .on_click(move |_, _, cx| {
-                        let _ = view_new.update(cx, |this, cx| this.set_page(Page::Versions, cx));
-                    })
-                    .child(widgets::icon("plus", 17.0, theme.faint))
-                    .when(!collapsed, |el| el.child("Tạo phiên bản mới")),
-            );
-            let view_list = entity.clone();
+            let new_row = div()
+                .id("nav-new-instance")
+                .relative()
+                .flex()
+                .items_center()
+                .gap(px(11.0))
+                .h(px(42.0))
+                .flex_shrink_0()
+                .pl(px(row_pad))
+                .pr(px(10.0))
+                .overflow_hidden()
+                .rounded(px(9.0))
+                .cursor_pointer()
+                .text_size(px(12.0))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(theme.muted)
+                .group("side-row")
+                .hover(|st| st.bg(theme.surface_hover).text_color(theme.text))
+                .on_click(move |_, _, cx| {
+                    let _ = view_new.update(cx, |this, cx| this.set_page(Page::Versions, cx));
+                })
+                .child(
+                    div()
+                        .absolute()
+                        .left(px(3.0))
+                        .top(px(12.0))
+                        .h(px(18.0))
+                        .w(px(3.0))
+                        .rounded_full()
+                        .bg(theme.accent)
+                        .opacity(0.0)
+                        .group_hover("side-row", |st| st.opacity(1.0)),
+                )
+                .child(
+                    div()
+                        .size(px(26.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .flex_shrink_0()
+                        .child(widgets::icon("plus", 20.0, theme.faint)),
+                )
+                .child(div().flex_1().min_w(px(0.0)).truncate().child("Tạo phiên bản mới"));
+            middle = middle.child(if collapsed {
+                widgets::tip_detailed(
+                    "tip-new-instance",
+                    "Tạo phiên bản mới",
+                    "Mở trang Phiên bản để tạo bản Minecraft mới",
+                    new_row,
+                )
+                .into_any_element()
+            } else {
+                new_row.into_any_element()
+            });
+
             for instance in self.instances.iter().cloned().collect::<Vec<_>>() {
-                let active = self.selected_instance.as_deref() == Some(instance.id.as_str()) && self.page == Page::Instance;
+                let active = self.selected_instance.as_deref() == Some(instance.id.as_str())
+                    && self.page == Page::Instance;
                 let icon_path = self.instance_icon_path(&instance);
                 let status_color = if instance.running || instance.status == "running" {
                     theme.ok
@@ -2214,146 +2287,298 @@ impl LauncherApp {
                         _ => "vanilla",
                     }
                 ));
-                let view_row = view_list.clone();
+                let view_row = entity.clone();
                 let id = instance.id.clone();
                 let name = instance.name.clone();
-                let status = instance.status.clone();
-                middle = middle.child(
-                    div()
-                        .id(SharedString::from(format!("side-inst-{}", instance.id)))
-                        .flex()
-                        .items_center()
-                        .gap(px(9.0))
-                        .h(px(38.0))
-                        .px(px(if collapsed { 0.0 } else { 6.0 }))
-                        .when(collapsed, {
-                            let tip = name.clone();
-                            move |el| {
-                                el.justify_center()
-                                    .on_hover(move |hovered, _window, cx| {
-                                        widgets::set_tooltip(if *hovered { Some(tip.clone()) } else { None }, cx);
-                                    })
-                                    .on_mouse_move(|event, _window, cx| widgets::set_tooltip_position(event.position, cx))
-                            }
-                        })
-                        .rounded(px(8.0))
-                        .cursor_pointer()
-                        .when(active, |el| el.bg(theme.surface_active))
-                        .hover(|st| st.bg(theme.surface_hover))
-                        .on_click(move |_, _, cx| {
-                            let id = id.clone();
-                            let _ = view_row.update(cx, |this, cx| this.open_instance(id, cx));
-                        })
-                        .when_some(icon_path, |el, path| {
-                            el.child(gpui::img(path).size(px(26.0)).rounded(px(6.0)).object_fit(gpui::ObjectFit::Cover))
-                        })
-                        .when(!has_icon, |el| {
-                            el.child(gpui::img(loader_png).size(px(26.0)).rounded(px(6.0)).object_fit(gpui::ObjectFit::Contain))
-                        })
-                        .when(!collapsed, |el| {
-                            el.child(
-                                div()
-                                    .flex_1()
-                                    .min_w(px(0.0))
-                                    .text_size(px(11.5))
-                                    .font_weight(if active { FontWeight::SEMIBOLD } else { FontWeight::MEDIUM })
-                                    .text_color(if active { theme.text } else { theme.muted })
-                                    .truncate()
-                                    .child(name),
-                            )
-                            .child(div().size(px(6.0)).rounded_full().bg(status_color))
-                        }),
-                );
-                let _ = status;
-            }
-        }
-        rail = rail.child(middle);
-
-        // Bottom group: account, settings, version.
-        let view_acc = entity.clone();
-        let mut bottom = div().flex().flex_col().gap(px(2.0)).pt(px(6.0));
-        bottom = bottom.child(
-            div()
-                .id("side-account")
-                .flex()
-                .items_center()
-                .gap(px(9.0))
-                .h(px(38.0))
-                .px(px(if collapsed { 0.0 } else { 6.0 }))
-                .when(collapsed, {
-                    let tip = account
-                        .as_ref()
-                        .map(|a| a.name.clone())
-                        .unwrap_or_else(|| "Tài khoản".to_string());
-                    move |el| {
-                        el.justify_center()
-                            .on_hover(move |hovered, _window, cx| {
-                                widgets::set_tooltip(if *hovered { Some(tip.clone()) } else { None }, cx);
-                            })
-                            .on_mouse_move(|event, _window, cx| widgets::set_tooltip_position(event.position, cx))
-                    }
-                })
-                .rounded(px(8.0))
-                .cursor_pointer()
-                .when(self.page == Page::Accounts, |el| el.bg(theme.surface_active))
-                .hover(|st| st.bg(theme.surface_hover))
-                .on_click(move |_, _, cx| {
-                    let _ = view_acc.update(cx, |this, cx| this.set_page(Page::Accounts, cx));
-                })
-                .when_some(head, |el, path| {
-                    el.child(gpui::img(path).size(px(26.0)).rounded(px(6.0)).object_fit(gpui::ObjectFit::Cover))
-                })
-                .when(!has_head, |el| {
-                    el.child(
-                        div()
-                            .size(px(26.0))
-                            .rounded(px(6.0))
-                            .bg(theme.accent_dim)
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .text_size(px(11.0))
-                            .font_weight(FontWeight::BOLD)
-                            .text_color(theme.accent_soft)
-                            .child(
-                                account
-                                    .as_ref()
-                                    .map(|a| a.name.chars().next().unwrap_or('?').to_uppercase().to_string())
-                                    .unwrap_or_else(|| "?".into()),
-                            ),
-                    )
-                })
-                .when(!collapsed, |el| {
-                    el.child(
+                let status_hint = match instance.status.as_str() {
+                    "running" => "Đang chạy · mở bảng điều khiển",
+                    "installing" => "Đang cài đặt · bấm để xem tiến độ",
+                    "starting" => "Đang khởi động · bấm để xem nhật ký",
+                    "error" => "Gặp lỗi · bấm để xem chi tiết",
+                    _ => "Sẵn sàng · bấm để mở phiên bản",
+                };
+                let name_for_tip = name.clone();
+                let row = div()
+                    .id(SharedString::from(format!("side-inst-{}", instance.id)))
+                    .relative()
+                    .flex()
+                    .items_center()
+                    .gap(px(10.0))
+                    .h(px(40.0))
+                    .flex_shrink_0()
+                    .pl(px(row_pad))
+                    .pr(px(10.0))
+                    .overflow_hidden()
+                    .rounded(px(8.0))
+                    .cursor_pointer()
+                    .group("side-row")
+                    .when(active, |el| el.bg(theme.surface_active))
+                    .hover(|st| st.bg(theme.surface_hover))
+                    .when(!active, |el| {
+                        el.child(
+                            div()
+                                .absolute()
+                                .left(px(3.0))
+                                .top(px(11.0))
+                                .h(px(18.0))
+                                .w(px(3.0))
+                                .rounded_full()
+                                .bg(theme.accent)
+                                .opacity(0.0)
+                                .group_hover("side-row", |st| st.opacity(1.0)),
+                        )
+                    })
+                    .on_click(move |_, _, cx| {
+                        let id = id.clone();
+                        let _ = view_row.update(cx, |this, cx| this.open_instance(id, cx));
+                    })
+                    .when_some(icon_path, |el, path| {
+                        el.child(
+                            gpui::img(path)
+                                .size(px(26.0))
+                                .rounded(px(6.0))
+                                .flex_shrink_0()
+                                .object_fit(gpui::ObjectFit::Cover),
+                        )
+                    })
+                    .when(!has_icon, |el| {
+                        el.child(
+                            gpui::img(loader_png)
+                                .size(px(26.0))
+                                .rounded(px(6.0))
+                                .flex_shrink_0()
+                                .object_fit(gpui::ObjectFit::Contain),
+                        )
+                    })
+                    .child(
                         div()
                             .flex_1()
                             .min_w(px(0.0))
                             .text_size(px(11.5))
-                            .text_color(theme.muted)
+                            .font_weight(if active { FontWeight::SEMIBOLD } else { FontWeight::MEDIUM })
+                            .text_color(if active { theme.text } else { theme.muted })
                             .truncate()
-                            .child(
-                                account
-                                    .as_ref()
-                                    .map(|a| a.name.clone())
-                                    .unwrap_or_else(|| "Chưa có tài khoản".into()),
-                            ),
+                            .child(name),
                     )
-                }),
-        );
-        bottom = bottom.child(nav("nav-settings", "gear", "Hệ thống".into(), self.page == Page::Settings, Box::new(|this, cx| this.set_page(Page::Settings, cx))));
+                    .child(div().size(px(6.0)).rounded_full().flex_shrink_0().bg(status_color));
+                middle = middle.child(if collapsed {
+                    widgets::tip_detailed(
+                        SharedString::from(format!("tip-inst-{}", instance.id)),
+                        name_for_tip,
+                        status_hint,
+                        row,
+                    )
+                    .into_any_element()
+                } else {
+                    row.into_any_element()
+                });
+            }
+        }
+
+        let view_acc = entity.clone();
+        let mut bottom = div()
+            .flex()
+            .flex_col()
+            .gap(px(4.0))
+            .px(px(8.0))
+            .pt(px(9.0))
+            .pb(px(10.0));
+        let account_label = account
+            .as_ref()
+            .map(|a| a.name.clone())
+            .unwrap_or_else(|| "Chưa có tài khoản".into());
+        let account_tip_name = account_label.clone();
+        let account_row = div()
+            .id("side-account")
+            .relative()
+            .flex()
+            .items_center()
+            .gap(px(10.0))
+            .h(px(42.0))
+            .pl(px(row_pad))
+            .pr(px(10.0))
+            .overflow_hidden()
+            .rounded(px(9.0))
+            .cursor_pointer()
+            .group("side-row")
+            .when(self.page == Page::Accounts, |el| el.bg(theme.surface_active))
+            .hover(|st| st.bg(theme.surface_hover))
+            .when(self.page != Page::Accounts, |el| {
+                el.child(
+                    div()
+                        .absolute()
+                        .left(px(3.0))
+                        .top(px(12.0))
+                        .h(px(18.0))
+                        .w(px(3.0))
+                        .rounded_full()
+                        .bg(theme.accent)
+                        .opacity(0.0)
+                        .group_hover("side-row", |st| st.opacity(1.0)),
+                )
+            })
+            .on_click(move |_, _, cx| {
+                let _ = view_acc.update(cx, |this, cx| this.set_page(Page::Accounts, cx));
+            })
+            .when_some(head, |el, path| {
+                el.child(
+                    gpui::img(path)
+                        .size(px(26.0))
+                        .rounded(px(7.0))
+                        .flex_shrink_0()
+                        .object_fit(gpui::ObjectFit::Cover),
+                )
+            })
+            .when(!has_head, |el| {
+                el.child(
+                    div()
+                        .size(px(26.0))
+                        .rounded(px(7.0))
+                        .flex_shrink_0()
+                        .bg(theme.accent_dim)
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_size(px(11.0))
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(theme.accent_soft)
+                        .child(
+                            account
+                                .as_ref()
+                                .map(|a| a.name.chars().next().unwrap_or('?').to_uppercase().to_string())
+                                .unwrap_or_else(|| "?".into()),
+                        ),
+                )
+            })
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .text_size(px(11.5))
+                    .text_color(theme.muted)
+                    .truncate()
+                    .child(account_label),
+            );
+        bottom = bottom.child(if collapsed {
+            widgets::tip_detailed(
+                "tip-account",
+                account_tip_name,
+                "Quản lý tài khoản đăng nhập vào launcher",
+                account_row,
+            )
+            .into_any_element()
+        } else {
+            account_row.into_any_element()
+        });
+        bottom = bottom.child(nav(
+            "nav-settings",
+            "gear",
+            "Hệ thống".into(),
+            "Cấu hình launcher, Java và cập nhật",
+            self.page == Page::Settings,
+            Box::new(|this, cx| this.set_page(Page::Settings, cx)),
+        ));
         bottom = bottom.child(
             div()
                 .flex()
                 .justify_center()
-                .pt(px(2.0))
+                .pt(px(4.0))
+                .w_full()
+                .overflow_hidden()
                 .text_size(px(9.0))
                 .font_family(MONO)
                 .text_color(theme.faint)
+                .truncate()
                 .when(collapsed, |el| el.hidden())
                 .child("v2.0.0"),
         );
-        rail = rail.child(bottom);
-        rail
+
+        let separator = || div().mx(px(12.0)).h(px(1.0)).bg(theme.border_soft);
+        let collapse_view = entity.clone();
+        let toggle_title = if collapsed {
+            "Mở rộng thanh bên"
+        } else {
+            "Thu gọn thanh bên"
+        };
+        let toggle_hint = if collapsed {
+            "Hiện tên các mục điều hướng"
+        } else {
+            "Ẩn tên để có thêm không gian cho nội dung"
+        };
+        let rotate_from = if collapsed { std::f32::consts::PI } else { 0.0 };
+        let rotate_to = if collapsed { 0.0 } else { std::f32::consts::PI };
+        let icon_box = div()
+            .id(SharedString::from(if collapsed { "rail-toggle-c" } else { "rail-toggle-e" }))
+            .size(px(24.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(7.0))
+            .bg(theme.surface)
+            .border_1()
+            .border_color(theme.border)
+            .shadow_sm()
+            .cursor_pointer()
+            .hover(|st| st.bg(theme.surface_hover))
+            .child(
+                div().child(
+                    gpui::svg()
+                        .path(widgets::icon_source("sidebar-simple"))
+                        .size(px(14.0))
+                        .text_color(if collapsed { theme.accent_soft } else { theme.faint })
+                        .with_animation(
+                            gpui::ElementId::Name(SharedString::from(format!("rail-toggle-{collapsed}"))),
+                            gpui::Animation::new(std::time::Duration::from_millis(280))
+                                .with_easing(|t| 1.0 - (1.0 - t).powi(3)),
+                            move |el, t| {
+                                el.with_transformation(gpui::Transformation::rotate(gpui::radians(
+                                    rotate_from + (rotate_to - rotate_from) * t,
+                                )))
+                            },
+                        ),
+                ),
+            );
+        let icon_box = widgets::with_tooltip(icon_box, toggle_title, toggle_hint);
+        let header = div()
+            .id("rail-header")
+            .flex()
+            .items_center()
+            .justify_end()
+            .h(px(36.0))
+            .px(px(8.0))
+            .pt(px(4.0))
+            .flex_shrink_0()
+            .cursor_pointer()
+            .rounded(px(8.0))
+            .hover(|st| st.bg(theme.surface_hover))
+            .on_click(move |_, _, cx| {
+                let _ = collapse_view.update(cx, |this, cx| this.toggle_sidebar(cx));
+            })
+            .child(icon_box);
+
+        div()
+            .relative()
+            .h_full()
+            .w(px(width))
+            .min_h(px(0.0))
+            .flex_shrink_0()
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .w(px(width))
+                    .h_full()
+                    .rounded(px(14.0))
+                    .bg(theme.sidebar)
+                    .border_1()
+                    .border_color(theme.border)
+                    .child(header)
+                    .child(top)
+                    .child(separator())
+                    .child(middle)
+                    .child(separator())
+                    .child(bottom),
+            )
     }
 
     fn titlebar(&self, cx: &Context<Self>) -> impl IntoElement {
@@ -2447,32 +2672,6 @@ impl LauncherApp {
                         .on_click(|_, window, _| window.remove_window())
                         .child(widgets::icon("x", 13.0, theme.muted)))),
             )
-    }
-
-    fn tooltip_layer(&self, window: &Window) -> impl IntoElement {
-        let theme = self.theme.clone();
-        let viewport = window.viewport_size();
-        let text = self.tip.clone().unwrap_or_default();
-        let x = self.mouse_pos.x + px(14.0);
-        let y = self.mouse_pos.y + px(20.0);
-        let max_x = (viewport.width - px(220.0)).max(px(8.0));
-        let x = x.min(max_x);
-        div()
-            .absolute()
-            .left(x)
-            .top(y)
-            .px(px(8.0))
-            .py(px(5.0))
-            .rounded(px(6.0))
-            .bg(theme.elevated)
-            .border_1()
-            .border_color(theme.border)
-            .shadow_lg()
-            .text_size(px(10.5))
-            .font_weight(FontWeight::MEDIUM)
-            .text_color(theme.text)
-            .when(text.is_empty(), |el| el.hidden())
-            .child(text)
     }
 
     fn toast_layer(&self) -> impl IntoElement {
@@ -2616,12 +2815,6 @@ impl Render for LauncherApp {
             .text_color(theme.text)
             .text_size(px(TEXT_BASE))
             .relative()
-            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                if this.tip.is_some() {
-                    this.tip = None;
-                    cx.notify();
-                }
-            }))
             .when_some(titlebar, |el, bar| el.child(bar))
             .on_action(cx.listener(|this, _: &crate::GoHome, _window, cx| this.set_page(Page::Home, cx)))
             .on_action(cx.listener(|this, _: &crate::GoVersions, _window, cx| {
@@ -2647,7 +2840,15 @@ impl Render for LauncherApp {
                     .flex()
                     .flex_1()
                     .min_h(px(0.0))
-                    .child(self.sidebar(cx))
+                    .child(
+                        div()
+                            .h_full()
+                            .min_h(px(0.0))
+                            .py(px(8.0))
+                            .pl(px(8.0))
+                            .flex_shrink_0()
+                            .child(self.sidebar(cx)),
+                    )
                     .child(
                         div()
                             .id("page-scroll")
@@ -2658,6 +2859,11 @@ impl Render for LauncherApp {
                             .overflow_x_hidden()
                             .overflow_y_scroll()
                             .track_scroll(&self.page_scroll)
+                            .on_scroll_wheel(cx.listener(|this, event: &gpui::ScrollWheelEvent, window, cx| {
+                                cx.stop_propagation();
+                                let line_height = window.line_height();
+                                this.smooth_page_scroll(event.delta, line_height, cx);
+                            }))
                             .child({
                                 use gpui::{AnimationExt, ElementId};
                                 let page_key: SharedString = format!("page-{:?}", self.page).into();
@@ -2671,8 +2877,7 @@ impl Render for LauncherApp {
                             }),
                     ),
             )
-            .child(self.toast_layer())
-            .child(self.tooltip_layer(window));
+            .child(self.toast_layer());
         if self.boot_splash {
             root = root.child(pages::splash(self, window, cx));
         }

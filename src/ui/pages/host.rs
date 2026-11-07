@@ -210,6 +210,7 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                 .child(section_title(&theme, "Nhật ký ngrok", ""))
                 .child(
                     div().id("host-log").h(px(160.0)).overflow_y_scroll().p(px(10.0)).rounded(px(RADIUS_SM))
+                        .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
                         .bg(if theme.dark { gpui::rgb(0x07090c) } else { gpui::rgb(0xf7f8fa) })
                         .border_1().border_color(theme.border_soft)
                         .children(logs.iter().rev().take(80).rev().map(|line| {

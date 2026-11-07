@@ -71,6 +71,7 @@ pub fn export(instance: &Instance, dest: &Path, format: &str) -> Result<Value> {
     let mut zip = zip::ZipWriter::new(out);
     let profile = json!({
         "name": instance.name,
+        "minecraft": instance.version,
         "version": instance.version,
         "loader": instance.loader,
         "loaderVersion": instance.loader_version,
