@@ -439,6 +439,11 @@ pub struct JavaSearch {
 async fn probe(exe: &Path) -> Option<JavaInfo> {
     let mut cmd = Command::new(exe);
     cmd.arg("-version");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
     let output = tokio::time::timeout(std::time::Duration::from_secs(8), cmd.output())
         .await
         .ok()?
