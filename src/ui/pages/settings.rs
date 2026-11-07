@@ -198,19 +198,20 @@ fn icon_action(
 }
 
 
-pub fn theme_switch(
-    theme: &Theme,
+fn theme_switch_sized(
+    _theme: &Theme,
     is_night: bool,
     view: gpui::WeakEntity<LauncherApp>,
+    sw: f32,
+    sh: f32,
 ) -> impl IntoElement {
     use gpui::AnimationExt;
-    const SW: f32 = 104.0;
-    const SH: f32 = 44.0;
-    const KNOB: f32 = 34.0;
-    const PAD: f32 = 5.0;
-    const TRAVEL: f32 = 60.0;
-    let day_cx = PAD + KNOB / 2.0;
-    let night_cx = day_cx + TRAVEL;
+    let pad = (sh * 0.1136).round();
+    let knob_size = sh - pad * 2.0;
+    let travel = sw - pad * 2.0 - knob_size;
+    let s = knob_size / 34.0;
+    let day_cx = pad + knob_size / 2.0;
+    let night_cx = day_cx + travel;
     let start_cx = if is_night { day_cx } else { night_cx };
     let target_cx = if is_night { night_cx } else { day_cx };
     let night_bg = gpui::linear_gradient(
@@ -242,10 +243,10 @@ pub fn theme_switch(
         star_layer = star_layer.child(
             div()
                 .absolute()
-                .left(px(x))
-                .top(px(y))
-                .w(px(size))
-                .h(px(size))
+                .left(px(x * s))
+                .top(px(y * s))
+                .w(px(size * s))
+                .h(px(size * s))
                 .rounded_full()
                 .bg(gpui::rgb(0xFFFFFF))
                 .with_animation(
@@ -261,7 +262,7 @@ pub fn theme_switch(
             gpui::Animation::new(std::time::Duration::from_millis(600)),
             move |el, t| {
                 let n = if is_night { t } else { 1.0 - t };
-                el.top(px(-14.0 * (1.0 - n))).opacity(n)
+                el.top(px(-14.0 * s * (1.0 - n))).opacity(n)
             },
         );
     let halo_circle = |size: f32| {
@@ -276,10 +277,10 @@ pub fn theme_switch(
     };
     let halo = div()
         .absolute()
-        .top(px(SH / 2.0))
-        .child(halo_circle(26.0))
-        .child(halo_circle(32.0))
-        .child(halo_circle(38.0))
+        .top(px(sh / 2.0))
+        .child(halo_circle(26.0 * s))
+        .child(halo_circle(32.0 * s))
+        .child(halo_circle(38.0 * s))
         .with_animation(
             gpui::SharedString::from(format!("tsw-halo-{is_night}")),
             gpui::Animation::new(std::time::Duration::from_millis(900))
@@ -289,25 +290,25 @@ pub fn theme_switch(
     let clouds = div()
         .absolute()
         .inset_0()
-        .child(div().absolute().right(px(6.0)).bottom(px(6.0)).w(px(42.0)).h(px(16.0)).rounded_full().bg(gpui::rgb(0xFFFFFF)))
-        .child(div().absolute().right(px(24.0)).bottom(px(3.0)).w(px(30.0)).h(px(15.0)).rounded_full().bg(gpui::rgb(0xFFFFFF)))
-        .child(div().absolute().right(px(38.0)).bottom(px(9.0)).w(px(24.0)).h(px(13.0)).rounded_full().bg(gpui::rgb(0xFFFFFF)))
-        .child(div().absolute().right(px(16.0)).bottom(px(0.0)).w(px(30.0)).h(px(11.0)).rounded_full().bg(gpui::rgb(0xE3F1FF)))
+        .child(div().absolute().right(px(6.0 * s)).bottom(px(6.0 * s)).w(px(42.0 * s)).h(px(16.0 * s)).rounded_full().bg(gpui::rgb(0xFFFFFF)))
+        .child(div().absolute().right(px(24.0 * s)).bottom(px(3.0 * s)).w(px(30.0 * s)).h(px(15.0 * s)).rounded_full().bg(gpui::rgb(0xFFFFFF)))
+        .child(div().absolute().right(px(38.0 * s)).bottom(px(9.0 * s)).w(px(24.0 * s)).h(px(13.0 * s)).rounded_full().bg(gpui::rgb(0xFFFFFF)))
+        .child(div().absolute().right(px(16.0 * s)).bottom(px(0.0)).w(px(30.0 * s)).h(px(11.0 * s)).rounded_full().bg(gpui::rgb(0xE3F1FF)))
         .with_animation(
             gpui::SharedString::from(format!("tsw-clouds-{is_night}")),
             gpui::Animation::new(std::time::Duration::from_millis(800)),
             move |el, t| {
                 let n = if is_night { t } else { 1.0 - t };
-                el.top(px(36.0 * n)).opacity(1.0 - n)
+                el.top(px(36.0 * s * n)).opacity(1.0 - n)
             },
         );
     let crater = |left: f32, top: f32, size: f32| {
         div()
             .absolute()
-            .left(px(left))
-            .top(px(top))
-            .w(px(size))
-            .h(px(size))
+            .left(px(left * s))
+            .top(px(top * s))
+            .w(px(size * s))
+            .h(px(size * s))
             .rounded_full()
             .bg(gpui::rgb(0xA3AABC))
     };
@@ -327,15 +328,15 @@ pub fn theme_switch(
             gpui::SharedString::from(format!("tsw-moon-{is_night}")),
             gpui::Animation::new(std::time::Duration::from_millis(800)),
             move |el, t| {
-                let left = if is_night { KNOB * (1.0 - t) } else { KNOB * t };
+                let left = if is_night { knob_size * (1.0 - t) } else { knob_size * t };
                 let opacity = if is_night { t } else { 1.0 - t };
                 el.left(px(left)).opacity(opacity)
             },
         );
     let knob = div()
         .absolute()
-        .w(px(KNOB))
-        .h(px(KNOB))
+        .w(px(knob_size))
+        .h(px(knob_size))
         .rounded_full()
         .overflow_hidden()
         .bg(gpui::linear_gradient(
@@ -346,10 +347,10 @@ pub fn theme_switch(
         .child(
             div()
                 .absolute()
-                .left(px(4.0))
-                .top(px(3.0))
-                .w(px(15.0))
-                .h(px(15.0))
+                .left(px(4.0 * s))
+                .top(px(3.0 * s))
+                .w(px(15.0 * s))
+                .h(px(15.0 * s))
                 .rounded_full()
                 .bg(gpui::rgba(0xffffff88)),
         )
@@ -358,13 +359,13 @@ pub fn theme_switch(
             gpui::SharedString::from(format!("tsw-knob-{is_night}")),
             gpui::Animation::new(std::time::Duration::from_millis(900))
                 .with_easing(|x| crate::ui::app::spring_ease(x)),
-            move |el, t| el.left(px(start_cx - KNOB / 2.0 + (target_cx - start_cx) * t)).top(px(PAD)),
+            move |el, t| el.left(px(start_cx - knob_size / 2.0 + (target_cx - start_cx) * t)).top(px(pad)),
         );
     div()
         .id("theme-switch")
         .relative()
-        .w(px(SW))
-        .h(px(SH))
+        .w(px(sw))
+        .h(px(sh))
         .rounded_full()
         .overflow_hidden()
         .bg(gpui::linear_gradient(
@@ -387,6 +388,22 @@ pub fn theme_switch(
         .child(halo)
         .child(clouds)
         .child(knob)
+}
+
+pub fn theme_switch(
+    theme: &Theme,
+    is_night: bool,
+    view: gpui::WeakEntity<LauncherApp>,
+) -> impl IntoElement {
+    theme_switch_sized(theme, is_night, view, 104.0, 44.0)
+}
+
+pub fn theme_switch_small(
+    theme: &Theme,
+    is_night: bool,
+    view: gpui::WeakEntity<LauncherApp>,
+) -> impl IntoElement {
+    theme_switch_sized(theme, is_night, view, 74.0, 30.0)
 }
 
 fn setting_chip(

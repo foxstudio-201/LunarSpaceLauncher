@@ -349,7 +349,7 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
         .child(widgets::icon("cube", 14.0, theme.faint))
         .child("Phiên bản")
         .child(widgets::icon("arrow-right", 11.0, theme.faint));
-    let theme_button = crate::ui::pages::settings::theme_switch(
+    let theme_button = crate::ui::pages::settings::theme_switch_small(
         &theme,
         theme.dark,
         view_theme.clone(),

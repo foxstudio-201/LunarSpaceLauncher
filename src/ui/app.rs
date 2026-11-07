@@ -2881,56 +2881,62 @@ impl LauncherApp {
         cx.quit();
     }
 
-    fn orbit_spinner(&self, theme: &Theme) -> AnyElement {
+    fn orbit_spinner(&self) -> AnyElement {
         use gpui::AnimationExt;
+        const W: f32 = 210.0;
+        const H: f32 = 150.0;
+        const CX: f32 = 105.0;
+        const CY: f32 = 75.0;
+        const RING_A: f32 = 84.0;
+        const RING_B: f32 = 26.25;
+        const TILTS: [f32; 2] = [-18.0, 18.0];
         let done = self.sync_done;
-        let mut root = div().relative().w(px(260.0)).h(px(220.0));
+        let mut root = div().relative().w(px(W)).h(px(H));
+        let glow_rgb = if done { 0x119c72u32 } else { 0x8b6cff };
+        let glow = |size: f32, alpha: u32, blur: f32, spread: f32, shadow_alpha: u32| {
+            div()
+                .absolute()
+                .left(px(CX - size / 2.0))
+                .top(px(CY - size / 2.0))
+                .w(px(size))
+                .h(px(size))
+                .rounded_full()
+                .bg(gpui::rgba((glow_rgb << 8) | alpha))
+                .shadow(vec![gpui::BoxShadow {
+                    color: gpui::rgba((glow_rgb << 8) | shadow_alpha).into(),
+                    offset: gpui::point(px(0.0), px(0.0)),
+                    blur_radius: px(blur),
+                    spread_radius: px(spread),
+                }])
+        };
         root = root
+            .child(glow(92.0, 0x0f, 46.0, 12.0, 0x33))
+            .child(glow(68.0, 0x14, 24.0, 2.0, 0x2e))
             .child(
-                div()
+                gpui::svg()
+                    .path("icons/orbit-rings.svg")
                     .absolute()
-                    .left(px(10.0))
-                    .top(px(0.0))
-                    .w(px(240.0))
-                    .h(px(240.0))
-                    .rounded_full()
-                    .bg(gpui::rgba(0x8b6cff1c)),
-            )
-            .child(
-                div()
-                    .absolute()
-                    .left(px(55.0))
-                    .top(px(45.0))
-                    .w(px(150.0))
-                    .h(px(150.0))
-                    .rounded_full()
-                    .bg(gpui::rgba(0x8b6cff2e)),
+                    .left(px(0.0))
+                    .top(px(CY - 70.0))
+                    .w(px(W))
+                    .h(px(140.0))
+                    .text_color(if done {
+                        gpui::rgba(0x119c724d)
+                    } else {
+                        gpui::rgba(0x8b6cff5c)
+                    }),
             );
-        for (w, h) in [(220.0f32, 76.0f32), (156.0, 54.0), (104.0, 36.0)] {
-            root = root.child(
-                div()
-                    .absolute()
-                    .left(px(130.0 - w / 2.0))
-                    .top(px(110.0 - h / 2.0))
-                    .w(px(w))
-                    .h(px(h))
-                    .rounded_full()
-                    .border_1()
-                    .border_color(gpui::rgba(0x6a57f247)),
-            );
-        }
         if !done {
             let planets = [
-                (110.0f32, -18.0f32, 5.5f32, 11.0f32, gpui::rgb(0xf87171)),
-                (110.0, -18.0, 5.5, 7.0, gpui::rgb(0xf87171)),
-                (78.0, 24.0, 3.6, 9.0, gpui::rgb(0x22c3a6)),
-                (78.0, 24.0, 3.6, 6.0, gpui::rgb(0x22c3a6)),
-                (52.0, -58.0, 2.2, 8.0, gpui::rgb(0xfbbf24)),
-                (52.0, -58.0, 2.2, 5.0, gpui::rgb(0xfbbf24)),
+                (0usize, 3.05f32, 13.0f32, 6.0f32, gpui::rgb(0x2ec4a8)),
+                (0, 0.55, 13.0, 3.4, gpui::rgb(0xf49ac0)),
+                (1, -0.7, 16.0, 5.0, gpui::rgb(0xf5a623)),
+                (1, 0.9, 16.0, 6.0, gpui::rgb(0xf4685f)),
+                (1, 2.9, 16.0, 3.0, gpui::rgb(0xf7c948)),
             ];
-            for (i, (r, tilt, period, size, color)) in planets.into_iter().enumerate() {
-                let phase = if i % 2 == 1 { std::f32::consts::PI } else { 0.0 };
-                let tilt = tilt.to_radians();
+            for (i, (ring, phase, period, size, color)) in planets.into_iter().enumerate() {
+                let rot = TILTS[ring].to_radians();
+                let (sin, cos) = rot.sin_cos();
                 root = root.child(
                     div()
                         .absolute()
@@ -2944,112 +2950,88 @@ impl LauncherApp {
                                 .repeat(),
                             move |el, t| {
                                 let a = phase + t * std::f32::consts::TAU;
-                                let x = a.cos() * r;
-                                let y = a.sin() * r * 0.34;
-                                let rx = x * tilt.cos() - y * tilt.sin();
-                                let ry = x * tilt.sin() + y * tilt.cos();
-                                el.left(px(130.0 + rx - size / 2.0))
-                                    .top(px(110.0 + ry - size / 2.0))
+                                let ex = RING_A * a.cos();
+                                let ey = RING_B * a.sin();
+                                let x = CX + ex * cos - ey * sin;
+                                let y = CY + ex * sin + ey * cos;
+                                el.left(px(x - size / 2.0)).top(px(y - size / 2.0))
                             },
                         ),
                 );
             }
         }
-        let core_size = if done { 78.0 } else { 60.0 };
-        let core = div()
+        const CORE: f32 = 62.0;
+        let ball = div()
             .absolute()
-            .w(px(core_size))
-            .h(px(core_size))
             .rounded_full()
+            .overflow_hidden()
+            .border_1()
+            .border_color(gpui::rgba(0xffffff3d))
             .bg(if done {
                 gpui::linear_gradient(
-                    0.0,
-                    gpui::linear_color_stop(gpui::rgb(0x119c72), 0.0),
-                    gpui::linear_color_stop(gpui::rgb(0x119c72), 1.0),
+                    150.0,
+                    gpui::linear_color_stop(gpui::rgb(0x69E2C2), 0.0),
+                    gpui::linear_color_stop(gpui::rgb(0x0B8F68), 1.0),
                 )
             } else {
                 gpui::linear_gradient(
-                    140.0,
-                    gpui::linear_color_stop(gpui::rgb(0xB7A4FF), 0.0),
-                    gpui::linear_color_stop(gpui::rgb(0x6D4AF0), 1.0),
+                    150.0,
+                    gpui::linear_color_stop(gpui::rgb(0xE6DCFF), 0.0),
+                    gpui::linear_color_stop(gpui::rgb(0x7444E4), 1.0),
                 )
             })
-            .flex()
-            .items_center()
-            .justify_center()
-            .when(done, |el| el.child(widgets::icon("check", 34.0, gpui::rgb(0xffffff))))
             .when(!done, |el| {
                 el.child(
                     div()
                         .absolute()
-                        .left(px(14.0))
-                        .top(px(10.0))
-                        .w(px(14.0))
-                        .h(px(14.0))
+                        .left(px(CORE * 0.2))
+                        .top(px(CORE * 0.15))
+                        .w(px(CORE * 0.34))
+                        .h(px(CORE * 0.34))
                         .rounded_full()
-                        .bg(gpui::rgba(0xffffffaa)),
+                        .bg(gpui::rgba(0xffffff66)),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .left(px(0.0))
+                        .top(px(CORE * 0.52))
+                        .w(px(CORE))
+                        .h(px(CORE * 0.48))
+                        .bg(gpui::linear_gradient(
+                            180.0,
+                            gpui::linear_color_stop(gpui::rgba(0x2a126000), 0.0),
+                            gpui::linear_color_stop(gpui::rgba(0x2a126040), 1.0),
+                        )),
+                )
+            })
+            .when(done, |el| {
+                el.child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(widgets::icon("check", 24.0, gpui::rgb(0xffffff))),
                 )
             });
-        root = root.child(core.with_animation(
+        root = root.child(ball.with_animation(
             "core-breath",
-            gpui::Animation::new(std::time::Duration::from_millis(2200)).repeat(),
+            gpui::Animation::new(std::time::Duration::from_millis(2600)).repeat(),
             move |el, t| {
                 let s = if done {
                     1.0
                 } else {
-                    1.0 + 0.06 * ((t * std::f32::consts::TAU).sin() * 0.5 + 0.5)
+                    1.0 + 0.045 * ((t * std::f32::consts::TAU).sin() * 0.5 + 0.5)
                 };
-                let size = core_size * s;
+                let size = CORE * s;
                 el.w(px(size))
                     .h(px(size))
-                    .left(px(130.0 - size / 2.0))
-                    .top(px(110.0 - size / 2.0))
+                    .left(px(CX - size / 2.0))
+                    .top(px(CY - size / 2.0))
             },
         ));
-        if done {
-            root = root
-                .child(
-                    div()
-                        .absolute()
-                        .left(px(70.0))
-                        .top(px(50.0))
-                        .w(px(120.0))
-                        .h(px(120.0))
-                        .rounded_full()
-                        .border_1()
-                        .border_color(gpui::rgba(0x119c7259)),
-                )
-                .child(
-                    div()
-                        .absolute()
-                        .left(px(62.0))
-                        .top(px(98.0))
-                        .w(px(10.0))
-                        .h(px(10.0))
-                        .rounded_full()
-                        .bg(gpui::rgb(0x22c3a6)),
-                )
-                .child(
-                    div()
-                        .absolute()
-                        .left(px(186.0))
-                        .top(px(110.0))
-                        .w(px(8.0))
-                        .h(px(8.0))
-                        .rounded_full()
-                        .bg(gpui::rgb(0xff6b8b)),
-                )
-                .child(
-                    div()
-                        .absolute()
-                        .left(px(148.0))
-                        .top(px(44.0))
-                        .w(px(6.0))
-                        .h(px(6.0))
-                        .rounded_full()
-                        .bg(gpui::rgb(0xfbbf24)),
-                );
-        }
         root.into_any_element()
     }
 
@@ -3069,24 +3051,24 @@ impl LauncherApp {
             let done = self.sync_done;
             div()
                 .id(id)
-                .h(px(48.0))
-                .px(px(24.0))
+                .h(px(38.0))
+                .px(px(22.0))
                 .rounded_full()
                 .flex()
                 .items_center()
                 .justify_center()
-                .min_w(px(150.0))
+                .min_w(px(112.0))
                 .bg(if primary {
                     gpui::rgb(0x16151b)
                 } else {
-                    gpui::rgb(0xefedf6)
+                    gpui::rgb(0xf3f1f6)
                 })
                 .text_color(if primary {
                     gpui::rgb(0xffffff)
                 } else {
                     gpui::rgb(0x16151b)
                 })
-                .text_size(px(13.0))
+                .text_size(px(12.0))
                 .font_weight(FontWeight::SEMIBOLD)
                 .cursor_pointer()
                 .hover(|st| st.opacity(0.9))
@@ -3118,25 +3100,24 @@ impl LauncherApp {
             )
         };
         let mut card = div()
-            .w(px(440.0))
-            .rounded(px(26.0))
-            .bg(gpui::linear_gradient(
-                160.0,
-                gpui::linear_color_stop(gpui::rgb(0xffffff), 0.0),
-                gpui::linear_color_stop(gpui::rgb(0xf3f1fa), 1.0),
-            ))
+            .w(px(340.0))
+            .rounded(px(24.0))
+            .bg(gpui::rgb(0xffffff))
             .border_1()
-            .border_color(gpui::rgba(0x16151b14))
-            .p(px(26.0))
+            .border_color(gpui::rgba(0x16151b0f))
+            .shadow_lg()
+            .px(px(24.0))
+            .pt(px(22.0))
+            .pb(px(24.0))
             .flex()
             .flex_col()
             .items_center()
-            .gap(px(10.0))
+            .gap(px(5.0))
             .child(
                 div()
                     .w_full()
                     .text_center()
-                    .text_size(px(22.0))
+                    .text_size(px(17.0))
                     .font_weight(FontWeight::BOLD)
                     .text_color(gpui::rgb(0x16151b))
                     .child(title),
@@ -3145,12 +3126,12 @@ impl LauncherApp {
                 div()
                     .w_full()
                     .text_center()
-                    .text_size(px(13.0))
-                    .text_color(gpui::rgb(0x6b6875))
+                    .text_size(px(12.5))
+                    .text_color(gpui::rgb(0x8a8794))
                     .child(subtitle),
             );
         if self.sync_running || self.sync_done || !self.sync_error.is_empty() {
-            card = card.child(self.orbit_spinner(&theme));
+            card = card.child(div().mt(px(8.0)).child(self.orbit_spinner()));
         }
         let actions: Vec<AnyElement> = if !self.sync_error.is_empty() {
             vec![
@@ -3208,11 +3189,12 @@ impl LauncherApp {
                 ),
             ]
         };
-        card = card.child(div().flex().gap(px(10.0)).mt(px(6.0)).children(actions));
+        card = card.child(div().flex().gap(px(10.0)).mt(px(12.0)).children(actions));
         let card = card.with_animation(
             "sync-card",
-            gpui::Animation::new(std::time::Duration::from_millis(240)),
-            |el, t| el.opacity(t),
+            gpui::Animation::new(std::time::Duration::from_millis(260))
+                .with_easing(|x| 1.0 - (1.0 - x).powi(3)),
+            |el, t| el.opacity(t).mt(px(16.0 * (1.0 - t))),
         );
         div()
             .absolute()
