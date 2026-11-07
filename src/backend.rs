@@ -771,6 +771,15 @@ impl Backend {
         let java = self
             .java_for_version(&entry.version, &entry.id, entry.java_path.clone())
             .await?;
+        #[cfg(target_os = "linux")]
+        let installer_java = {
+            let major = if java.major > 0 { java.major } else { 17 };
+            crate::mc::java::ensure_temurin(paths, major)
+                .await
+                .unwrap_or_else(|_| java.path.clone())
+        };
+        #[cfg(not(target_os = "linux"))]
+        let installer_java = java.path.clone();
         let before: HashSet<String> = std::fs::read_dir(&paths.versions)
             .map(|entries| {
                 entries
@@ -794,7 +803,7 @@ impl Backend {
             "--installClient".into(),
             paths.shared.to_string_lossy().into_owned(),
         ];
-        let mut command = tokio::process::Command::new(&java.path);
+        let mut command = tokio::process::Command::new(&installer_java);
         command
             .args(&args)
             .current_dir(&paths.shared)

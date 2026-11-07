@@ -741,6 +741,33 @@ pub async fn install_zulu(
     Ok((java_path, info))
 }
 
+#[cfg(target_os = "linux")]
+pub async fn ensure_temurin(paths: &Paths, major: u32) -> Result<PathBuf> {
+    let arch = if cfg!(target_arch = "aarch64") {
+        "aarch64"
+    } else {
+        "x64"
+    };
+    let dir = paths
+        .runtime
+        .join(format!("temurin-{major}-jre-linux-{arch}"));
+    if let Some(java) = find_java_in_tree(&dir, 3) {
+        return Ok(java);
+    }
+    tokio::fs::create_dir_all(&paths.runtime).await?;
+    let archive = paths
+        .runtime
+        .join(format!("temurin-{major}-jre-linux-{arch}.tar.gz"));
+    let url = format!(
+        "https://api.adoptium.net/v3/binary/latest/{major}/ga/linux/{arch}/jre/hotspot/normal/eclipse"
+    );
+    crate::net::download_one(&url, &archive, None, std::sync::Arc::new(|_| {})).await?;
+    extract_tar_gz(&archive, &dir)?;
+    let _ = std::fs::remove_file(&archive);
+    find_java_in_tree(&dir, 3)
+        .ok_or_else(|| anyhow!("Không tìm thấy java trong gói Temurin vừa tải."))
+}
+
 #[cfg(not(windows))]
 fn extract_tar_gz(archive: &Path, dest: &Path) -> Result<()> {
     let file = std::fs::File::open(archive)?;
