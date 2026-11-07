@@ -435,6 +435,7 @@ pub struct LauncherApp {
     pub file_name_input: Entity<TextField>,
     pub console_scroll: gpui::ScrollHandle,
     pub page_scroll: gpui::ScrollHandle,
+    pub page_scroll_target: f32,
     pub server_scroll: gpui::ScrollHandle,
     pub last_window: (f32, f32),
     pub window_gen: u64,
@@ -649,6 +650,7 @@ impl LauncherApp {
             file_name_input,
             console_scroll: gpui::ScrollHandle::new(),
             page_scroll: gpui::ScrollHandle::new(),
+            page_scroll_target: 0.0,
             server_scroll: gpui::ScrollHandle::new(),
             last_window: (0.0, 0.0),
             window_gen: 0,
@@ -1855,6 +1857,7 @@ impl LauncherApp {
         self.page = page;
         self.select_open = None;
         self.page_scroll.set_offset(gpui::point(px(0.0), px(0.0)));
+        self.page_scroll_target = 0.0;
         let (target, visible) = self.pill_target_for_page(page);
         self.update_pill(target, visible, cx);
         cx.notify();
@@ -1955,24 +1958,19 @@ impl LauncherApp {
         line_height: gpui::Pixels,
         cx: &mut Context<Self>,
     ) {
-        let native_dy = f32::from(delta.pixel_delta(line_height).y);
-        if native_dy.abs() < 0.01 {
+        let dy = f32::from(delta.pixel_delta(line_height).y);
+        if dy.abs() < 0.01 {
             return;
         }
         let current = f32::from(self.page_scroll.offset().y);
         let max = f32::from(self.page_scroll.max_offset().height);
-        let at_top = current >= -0.5;
-        let at_bottom = current <= -max + 0.5;
-        let mut from = current - native_dy;
-        if (native_dy < 0.0 && at_bottom) || (native_dy > 0.0 && at_top) {
-            from = current;
-        }
-        let from = from.clamp(-max, 0.0);
-        let target = (from + native_dy).clamp(-max, 0.0);
-        if (target - from).abs() < 0.01 {
+        let target = (self.page_scroll_target + dy).clamp(-max, 0.0);
+        if (target - current).abs() < 0.01 {
+            self.page_scroll_target = current;
             return;
         }
-        self.page_scroll.set_offset(gpui::point(px(0.0), px(from)));
+        let from = current;
+        self.page_scroll_target = target;
         self.scroll_gen = self.scroll_gen.wrapping_add(1);
         let generation = self.scroll_gen;
         let start = std::time::Instant::now();
@@ -1991,6 +1989,9 @@ impl LauncherApp {
                         let value = from + (target - from) * eased;
                         this.page_scroll
                             .set_offset(gpui::point(px(0.0), px(value)));
+                        if t >= 1.0 {
+                            this.page_scroll_target = value;
+                        }
                         cx.notify();
                         t >= 1.0
                     })
@@ -2859,15 +2860,16 @@ impl Render for LauncherApp {
                             .overflow_x_hidden()
                             .overflow_y_scroll()
                             .track_scroll(&self.page_scroll)
-                            .on_scroll_wheel(cx.listener(|this, event: &gpui::ScrollWheelEvent, window, cx| {
-                                cx.stop_propagation();
-                                let line_height = window.line_height();
-                                this.smooth_page_scroll(event.delta, line_height, cx);
-                            }))
                             .child({
                                 use gpui::{AnimationExt, ElementId};
                                 let page_key: SharedString = format!("page-{:?}", self.page).into();
                                 div()
+                                    .id("page-content")
+                                    .on_scroll_wheel(cx.listener(|this, event: &gpui::ScrollWheelEvent, window, cx| {
+                                        cx.stop_propagation();
+                                        let line_height = window.line_height();
+                                        this.smooth_page_scroll(event.delta, line_height, cx);
+                                    }))
                                     .child(self.content(window, cx))
                                     .with_animation(
                                         ElementId::Name(page_key),
