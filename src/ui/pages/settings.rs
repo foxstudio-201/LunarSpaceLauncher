@@ -198,154 +198,346 @@ fn icon_action(
 }
 
 
-fn theme_switch(theme: &Theme, is_night: bool, view: gpui::WeakEntity<LauncherApp>) -> impl IntoElement {
+fn theme_switch(
+    theme: &Theme,
+    is_night: bool,
+    animate: bool,
+    day_label: String,
+    night_label: String,
+    view: gpui::WeakEntity<LauncherApp>,
+) -> impl IntoElement {
     use gpui::AnimationExt;
+    let ease = |x: f32| {
+        let t = x.clamp(0.0, 1.0);
+        1.0 - (1.0 - t).powi(3)
+    };
     let view_click = view;
-    let spring = |t: f32| crate::ui::app::spring_ease(t.clamp(0.0, 1.0));
-    let knob_left = move |t: f32| -> f32 {
-        let k = spring(t);
-        if is_night {
-            6.0 + 98.0 * k
+    let target = if is_night { 138.0f32 } else { 8.0 };
+    let start_left = if is_night { 8.0f32 } else { 138.0 };
+    let day_sky = gpui::linear_gradient(
+        180.0,
+        gpui::linear_color_stop(gpui::rgb(0x5DB7FF), 0.0),
+        gpui::linear_color_stop(gpui::rgb(0x9ED8FF), 1.0),
+    );
+    let night_sky = gpui::linear_gradient(
+        180.0,
+        gpui::linear_color_stop(gpui::rgb(0x141A3A), 0.0),
+        gpui::linear_color_stop(gpui::rgb(0x232C5C), 1.0),
+    );
+    let sky: AnyElement = {
+        let layer = div().absolute().inset_0().rounded_full().bg(night_sky);
+        if animate {
+            layer
+                .with_animation(
+                    gpui::SharedString::from(format!("tsw-sky-{is_night}")),
+                    gpui::Animation::new(std::time::Duration::from_millis(800)).with_easing(ease),
+                    move |el, t| el.opacity(if is_night { t } else { 1.0 - t }),
+                )
+                .into_any_element()
         } else {
-            6.0 + 98.0 * (1.0 - k)
+            layer.opacity(if is_night { 1.0 } else { 0.0 }).into_any_element()
         }
     };
-    let stars = [
-        (26.0, 14.0, 3.0),
-        (52.0, 26.0, 2.0),
-        (90.0, 12.0, 2.5),
-        (118.0, 32.0, 2.0),
-        (140.0, 16.0, 3.0),
-        (76.0, 40.0, 2.0),
+    let stars_data = [
+        (30.0f32, 20.0f32, 4.0f32),
+        (58.0, 56.0, 3.0),
+        (86.0, 26.0, 4.0),
+        (44.0, 72.0, 3.0),
+        (110.0, 60.0, 2.0),
+        (20.0, 46.0, 2.0),
     ];
     let mut star_layer = div().absolute().inset_0();
-    for (i, (x, y, s)) in stars.into_iter().enumerate() {
-        let tile = div()
-            .absolute()
-            .left(px(x))
-            .top(px(y))
-            .w(px(s))
-            .h(px(s))
-            .rounded_full()
-            .bg(gpui::rgb(0xFFFFFF))
-            .with_animation(
-                gpui::SharedString::from(format!("star-{i}")),
-                gpui::Animation::new(std::time::Duration::from_millis(2400)).repeat(),
-                move |el, t| {
-                    let o = if is_night {
-                        0.35 + 0.65 * ((t * std::f32::consts::TAU).sin() * 0.5 + 0.5)
-                    } else {
-                        0.0
-                    };
-                    el.opacity(o)
-                },
-            );
-        star_layer = star_layer.child(tile);
-    }
-    let clouds = div()
-        .absolute()
-        .inset_0()
-        .child(div().absolute().right(px(-8.0)).bottom(px(-14.0)).w(px(96.0)).h(px(42.0)).rounded_full().bg(gpui::rgb(0xFFFFFF)))
-        .child(div().absolute().right(px(30.0)).bottom(px(-22.0)).w(px(74.0)).h(px(38.0)).rounded_full().bg(gpui::rgb(0xE3F1FF)))
-        .child(div().absolute().right(px(64.0)).bottom(px(-16.0)).w(px(58.0)).h(px(32.0)).rounded_full().bg(gpui::rgb(0xFFFFFF)))
-        .with_animation(
-            "tsw-clouds",
-            gpui::Animation::new(std::time::Duration::from_millis(700)),
-            move |el, t| {
-                let n = if is_night { t } else { 1.0 - t };
-                el.top(px(26.0 * n)).opacity(1.0 - n)
-            },
-        );
-    div()
-        .id("theme-switch")
-        .relative()
-        .w(px(168.0))
-        .h(px(70.0))
-        .rounded_full()
-        .overflow_hidden()
-        .bg(gpui::linear_gradient(
-            180.0,
-            gpui::linear_color_stop(gpui::rgb(0x5DB7FF), 0.0),
-            gpui::linear_color_stop(gpui::rgb(0x9ED8FF), 1.0),
-        ))
-        .cursor_pointer()
-        .on_click(move |_, _, cx| {
-            let target = if is_night { "light" } else { "dark" };
-            let _ = view_click.update(cx, |this, cx| {
-                this.backend.settings_set(json!({ "theme": target }));
-                this.refresh_settings();
-                cx.notify();
-            });
-        })
-        .child(
+    for (i, (x, y, size)) in stars_data.into_iter().enumerate() {
+        star_layer = star_layer.child(
             div()
                 .absolute()
-                .inset_0()
-                .bg(gpui::linear_gradient(
-                    180.0,
-                    gpui::linear_color_stop(gpui::rgb(0x141A3A), 0.0),
-                    gpui::linear_color_stop(gpui::rgb(0x232C5C), 1.0),
-                ))
-                .with_animation(
-                    "tsw-night",
-                    gpui::Animation::new(std::time::Duration::from_millis(800)),
-                    move |el, t| el.opacity(if is_night { t } else { 1.0 - t }),
-                ),
-        )
-        .child(star_layer)
-        .child(
-            div()
-                .absolute()
-                .left(px(28.0))
-                .top(px(32.0))
-                .w(px(10.0))
-                .h(px(10.0))
+                .left(px(x))
+                .top(px(y))
+                .w(px(size))
+                .h(px(size))
                 .rounded_full()
-                .bg(gpui::rgba(0xffffff22))
+                .bg(gpui::rgb(0xFFFFFF))
                 .with_animation(
-                    "tsw-halo",
-                    gpui::Animation::new(std::time::Duration::from_millis(700)),
-                    move |el, t| {
-                        let n = if is_night { t } else { 1.0 - t };
-                        el.w(px(10.0 + 96.0 * n)).h(px(10.0 + 96.0 * n)).opacity(n)
+                    gpui::SharedString::from(format!("tsw-star-{i}")),
+                    gpui::Animation::new(std::time::Duration::from_millis(2400)).repeat(),
+                    |el, t| {
+                        el.opacity(0.3 + 0.7 * (t * std::f32::consts::TAU).cos().abs())
                     },
                 ),
-        )
-        .child(clouds)
-        .child({
-            let moon = div()
-                .absolute()
-                .inset_0()
-                .rounded_full()
-                .bg(gpui::linear_gradient(
-                    140.0,
-                    gpui::linear_color_stop(gpui::rgb(0xF4F6FB), 0.0),
-                    gpui::linear_color_stop(gpui::rgb(0xA9B0C2), 1.0),
-                ))
-                .child(gpui::svg().path(widgets::icon_source("moon")).size(px(30.0)).text_color(gpui::rgb(0xE8ECF5)))
+        );
+    }
+    let stars: AnyElement = {
+        let layer = star_layer;
+        if animate {
+            layer
                 .with_animation(
-                    "tsw-moon",
-                    gpui::Animation::new(std::time::Duration::from_millis(700)),
-                    move |el, t| el.opacity(if is_night { t } else { 1.0 - t }),
-                );
+                    gpui::SharedString::from(format!("tsw-stars-{is_night}")),
+                    gpui::Animation::new(std::time::Duration::from_millis(600)).with_easing(ease),
+                    move |el, t| {
+                        let n = if is_night { t } else { 1.0 - t };
+                        el.top(px(-30.0 * (1.0 - n))).opacity(n)
+                    },
+                )
+                .into_any_element()
+        } else {
+            layer
+                .top(px(if is_night { 0.0 } else { -30.0 }))
+                .opacity(if is_night { 1.0 } else { 0.0 })
+                .into_any_element()
+        }
+    };
+    let halo_circle = |size: f32| {
+        div()
+            .absolute()
+            .left(px(-size / 2.0))
+            .top(px(-size / 2.0))
+            .w(px(size))
+            .h(px(size))
+            .rounded_full()
+            .bg(gpui::rgba(0xffffff1f))
+    };
+    let halo_base = || {
+        div()
+            .absolute()
+            .left(px(47.0))
+            .top(px(47.0))
+            .child(halo_circle(64.0))
+            .child(halo_circle(78.0))
+            .child(halo_circle(92.0))
+    };
+    let halo: AnyElement = {
+        let layer = halo_base();
+        if animate {
+            layer
+                .with_animation(
+                    gpui::SharedString::from(format!("tsw-halo-{is_night}")),
+                    gpui::Animation::new(std::time::Duration::from_millis(900))
+                        .with_easing(|x| crate::ui::app::spring_ease(x)),
+                    move |el, t| {
+                        let n = if is_night { t } else { 1.0 - t };
+                        el.left(px(47.0 + 130.0 * n))
+                    },
+                )
+                .into_any_element()
+        } else {
+            layer
+                .left(px(if is_night { 177.0 } else { 47.0 }))
+                .into_any_element()
+        }
+    };
+    let clouds_base = || {
+        div()
+            .absolute()
+            .inset_0()
+            .child(div().absolute().right(px(10.0)).bottom(px(10.0)).w(px(92.0)).h(px(34.0)).rounded_full().bg(gpui::rgb(0xFFFFFF)))
+            .child(div().absolute().right(px(52.0)).bottom(px(4.0)).w(px(64.0)).h(px(30.0)).rounded_full().bg(gpui::rgb(0xFFFFFF)))
+            .child(div().absolute().right(px(6.0)).bottom(px(20.0)).w(px(56.0)).h(px(28.0)).rounded_full().bg(gpui::rgb(0xFFFFFF)))
+            .child(div().absolute().right(px(34.0)).bottom(px(0.0)).w(px(74.0)).h(px(24.0)).rounded_full().bg(gpui::rgb(0xE3F1FF)))
+            .child(div().absolute().right(px(94.0)).bottom(px(0.0)).w(px(44.0)).h(px(20.0)).rounded_full().bg(gpui::rgb(0xE3F1FF)))
+    };
+    let clouds: AnyElement = {
+        let layer = clouds_base();
+        if animate {
+            layer
+                .with_animation(
+                    gpui::SharedString::from(format!("tsw-clouds-{is_night}")),
+                    gpui::Animation::new(std::time::Duration::from_millis(800)).with_easing(ease),
+                    move |el, t| {
+                        let n = if is_night { t } else { 1.0 - t };
+                        el.top(px(80.0 * n)).opacity(1.0 - n)
+                    },
+                )
+                .into_any_element()
+        } else {
+            layer
+                .top(px(if is_night { 80.0 } else { 0.0 }))
+                .opacity(if is_night { 0.0 } else { 1.0 })
+                .into_any_element()
+        }
+    };
+    let crater = |left: f32, top: f32, size: f32| {
+        div()
+            .absolute()
+            .left(px(left))
+            .top(px(top))
+            .w(px(size))
+            .h(px(size))
+            .rounded_full()
+            .bg(gpui::rgb(0xA3AABC))
+    };
+    let moon_base = || {
+        div()
+            .absolute()
+            .inset_0()
+            .rounded_full()
+            .bg(gpui::linear_gradient(
+                140.0,
+                gpui::linear_color_stop(gpui::rgb(0xF4F6FB), 0.0),
+                gpui::linear_color_stop(gpui::rgb(0xA9B0C2), 1.0),
+            ))
+            .child(crater(20.0, 16.0, 20.0))
+            .child(crater(46.0, 40.0, 14.0))
+            .child(crater(24.0, 48.0, 9.0))
+    };
+    let moon: AnyElement = {
+        let layer = moon_base();
+        if animate {
+            layer
+                .with_animation(
+                    gpui::SharedString::from(format!("tsw-moon-{is_night}")),
+                    gpui::Animation::new(std::time::Duration::from_millis(800)).with_easing(ease),
+                    move |el, t| {
+                        let left = if is_night { 78.0 * (1.0 - t) } else { 78.0 * t };
+                        let opacity = if is_night { t } else { 1.0 - t };
+                        el.left(px(left)).opacity(opacity)
+                    },
+                )
+                .into_any_element()
+        } else {
+            layer
+                .left(px(if is_night { 0.0 } else { 78.0 }))
+                .opacity(if is_night { 1.0 } else { 0.0 })
+                .into_any_element()
+        }
+    };
+    let sun_base = || {
+        div()
+            .absolute()
+            .w(px(78.0))
+            .h(px(78.0))
+            .rounded_full()
+            .overflow_hidden()
+            .bg(gpui::linear_gradient(
+                140.0,
+                gpui::linear_color_stop(gpui::rgb(0xFFF1A8), 0.0),
+                gpui::linear_color_stop(gpui::rgb(0xF8A91E), 1.0),
+            ))
+            .child(
+                div()
+                    .absolute()
+                    .left(px(8.0))
+                    .top(px(6.0))
+                    .w(px(34.0))
+                    .h(px(34.0))
+                    .rounded_full()
+                    .bg(gpui::rgba(0xffffff88)),
+            )
+    };
+    let knob: AnyElement = {
+        let layer = sun_base().child(moon);
+        if animate {
+            layer
+                .with_animation(
+                    gpui::SharedString::from(format!("tsw-knob-{is_night}")),
+                    gpui::Animation::new(std::time::Duration::from_millis(900))
+                        .with_easing(|x| crate::ui::app::spring_ease(x)),
+                    move |el, t| el.left(px(start_left + (target - start_left) * t)).top(px(8.0)),
+                )
+                .into_any_element()
+        } else {
+            layer.left(px(target)).top(px(8.0)).into_any_element()
+        }
+    };
+    let label_base = |text: String| {
+        div()
+            .absolute()
+            .left(px(0.0))
+            .right(px(0.0))
+            .text_center()
+            .child(text)
+    };
+    let day_target_top = if is_night { -24.0f32 } else { 0.0 };
+    let day_start_top = if is_night { 0.0 } else { -24.0 };
+    let day_target_op = if is_night { 0.0f32 } else { 1.0 };
+    let day_start_op = 1.0 - day_target_op;
+    let night_target_top = if is_night { 0.0f32 } else { 24.0 };
+    let night_start_top = if is_night { 24.0 } else { 0.0 };
+    let night_target_op = 1.0 - day_target_op;
+    let night_start_op = day_target_op;
+    let day_el: AnyElement = {
+        let base = label_base(day_label)
+            .top(px(day_start_top))
+            .opacity(day_start_op);
+        if animate {
+            base.with_animation(
+                gpui::SharedString::from(format!("tsw-lab-day-{is_night}")),
+                gpui::Animation::new(std::time::Duration::from_millis(550))
+                    .with_easing(|x| crate::ui::app::spring_ease(x)),
+                move |el, t| {
+                    el.top(px(day_start_top + (day_target_top - day_start_top) * t))
+                        .opacity(day_start_op + (day_target_op - day_start_op) * t)
+                },
+            )
+            .into_any_element()
+        } else {
+            base.top(px(day_target_top))
+                .opacity(day_target_op)
+                .into_any_element()
+        }
+    };
+    let night_el: AnyElement = {
+        let base = label_base(night_label)
+            .top(px(night_start_top))
+            .opacity(night_start_op);
+        if animate {
+            base.with_animation(
+                gpui::SharedString::from(format!("tsw-lab-night-{is_night}")),
+                gpui::Animation::new(std::time::Duration::from_millis(550))
+                    .with_easing(|x| crate::ui::app::spring_ease(x)),
+                move |el, t| {
+                    el.top(px(night_start_top + (night_target_top - night_start_top) * t))
+                        .opacity(night_start_op + (night_target_op - night_start_op) * t)
+                },
+            )
+            .into_any_element()
+        } else {
+            base.top(px(night_target_top))
+                .opacity(night_target_op)
+                .into_any_element()
+        }
+    };
+    let label_layers: AnyElement = div()
+        .relative()
+        .w(px(200.0))
+        .h(px(24.0))
+        .overflow_hidden()
+        .text_size(px(16.0))
+        .font_weight(gpui::FontWeight::BOLD)
+        .text_color(theme.text)
+        .child(day_el)
+        .child(night_el)
+        .into_any_element();
+    div()
+        .flex()
+        .flex_col()
+        .items_center()
+        .gap(px(20.0))
+        .child(
             div()
-                .absolute()
-                .w(px(58.0))
-                .h(px(58.0))
+                .id("theme-switch")
+                .relative()
+                .w(px(224.0))
+                .h(px(94.0))
                 .rounded_full()
                 .overflow_hidden()
-                .bg(gpui::linear_gradient(
-                    140.0,
-                    gpui::linear_color_stop(gpui::rgb(0xFFF1A8), 0.0),
-                    gpui::linear_color_stop(gpui::rgb(0xF8A91E), 1.0),
-                ))
-                .child(moon)
-                .with_animation(
-                    "tsw-knob",
-                    gpui::Animation::new(std::time::Duration::from_millis(900)),
-                    move |el, t| el.left(px(knob_left(t))).top(px(6.0)),
-                )
-        })
+                .bg(day_sky)
+                .cursor_pointer()
+                .on_click(move |_, _, cx| {
+                    let next = if is_night { "light" } else { "dark" };
+                    let _ = view_click.update(cx, |this, cx| {
+                        this.theme_switch_at = Some(std::time::Instant::now());
+                        this.backend.settings_set(json!({ "theme": next }));
+                        this.refresh_settings();
+                        cx.notify();
+                    });
+                })
+                .child(sky)
+                .child(stars)
+                .child(halo)
+                .child(clouds)
+                .child(knob),
+        )
+        .child(label_layers)
 }
 
 fn setting_chip(
@@ -655,7 +847,18 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
         .child(setting_chip(&theme, "vi", "Tiếng Việt", &lang, view.clone(), "language"))
         .child(setting_chip(&theme, "en", "English", &lang, view.clone(), "language"));
 
-    let theme_row = theme_switch(&theme, theme_key == "dark", view.clone());
+    let animate_theme = app
+        .theme_switch_at
+        .map(|at| at.elapsed() < std::time::Duration::from_millis(1500))
+        .unwrap_or(false);
+    let theme_row = theme_switch(
+        &theme,
+        theme_key == "dark",
+        animate_theme,
+        tr(en, "Ban ngày", "Clear day").to_string(),
+        tr(en, "Ban đêm", "Quiet night").to_string(),
+        view.clone(),
+    );
 
     let page = page_body()
         .max_w(px(860.0))

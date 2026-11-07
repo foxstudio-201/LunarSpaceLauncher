@@ -482,6 +482,7 @@ pub struct LauncherApp {
     pub delete_name: String,
     pub delete_text: String,
     pub delete_shake: u64,
+    pub theme_switch_at: Option<std::time::Instant>,
 }
 
 impl LauncherApp {
@@ -730,6 +731,7 @@ impl LauncherApp {
             delete_name: String::new(),
             delete_text: String::new(),
             delete_shake: 0,
+            theme_switch_at: None,
         };
         app.refresh_settings();
         app.refresh_instances();
