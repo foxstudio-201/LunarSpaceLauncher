@@ -1944,9 +1944,9 @@ impl LauncherApp {
                         if this.rail_gen != generation {
                             return true;
                         }
-                        let t = (start.elapsed().as_secs_f32() / 0.6).min(1.0);
-                        let eased = spring_ease(t);
-                        this.rail_width = (from + (to - from) * eased).clamp(60.0, 215.0);
+                        let t = (start.elapsed().as_secs_f32() / 0.32).min(1.0);
+                        let eased = 1.0 - (1.0 - t).powi(3);
+                        this.rail_width = from + (to - from) * eased;
                         cx.notify();
                         t >= 1.0
                     })
@@ -2507,16 +2507,9 @@ impl LauncherApp {
                     .path(widgets::icon_source("caret-right"))
                     .size(px(16.0))
                     .text_color(theme.text)
-                    .with_animation(
-                        gpui::ElementId::Name(SharedString::from(format!("rail-caret-{collapsed}"))),
-                        gpui::Animation::new(std::time::Duration::from_millis(500))
-                            .with_easing(|t| 1.0 - (1.0 - t).powi(3)),
-                        move |el, t| {
-                            el.with_transformation(gpui::Transformation::rotate(gpui::radians(
-                                rotate_to * t,
-                            )))
-                        },
-                    ),
+                    .with_transformation(gpui::Transformation::rotate(gpui::radians(
+                        rotate_to * p,
+                    ))),
             );
         let toggle = widgets::with_tooltip(toggle, toggle_title, toggle_hint);
 
