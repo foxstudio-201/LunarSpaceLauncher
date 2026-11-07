@@ -1267,6 +1267,8 @@ fn delete_instance_content(
     let view = cx.entity().downgrade();
     let cancel_view = view.clone();
     let delete_view = view.clone();
+    let copy_view = view.clone();
+    let copy_name = name.clone();
     let confirm: AnyElement = if matches {
         div()
             .id("delete-confirm")
@@ -1365,6 +1367,7 @@ fn delete_instance_content(
                 )
                 .child(
                     div()
+                        .flex_1()
                         .flex()
                         .flex_col()
                         .min_w(px(0.0))
@@ -1376,7 +1379,56 @@ fn delete_instance_content(
                                 .truncate()
                                 .child(name.clone()),
                         )
-                        .child(div().text_size(px(10.0)).text_color(theme.faint).child(meta)),
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(8.0))
+                                .mt(px(3.0))
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w(px(0.0))
+                                        .text_size(px(10.0))
+                                        .text_color(theme.faint)
+                                        .truncate()
+                                        .child(meta),
+                                )
+                                .child(
+                                    div()
+                                        .id("delete-copy-name")
+                                        .flex_shrink_0()
+                                        .h(px(22.0))
+                                        .px(px(8.0))
+                                        .rounded(px(6.0))
+                                        .bg(theme.surface_active)
+                                        .border_1()
+                                        .border_color(theme.border_soft)
+                                        .flex()
+                                        .items_center()
+                                        .gap(px(4.0))
+                                        .text_size(px(9.5))
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_color(theme.muted)
+                                        .cursor_pointer()
+                                        .hover(|s| s.bg(theme.surface_hover).text_color(theme.text))
+                                        .on_click(move |_, _, cx| {
+                                            cx.write_to_clipboard(gpui::ClipboardItem::new_string(
+                                                copy_name.clone(),
+                                            ));
+                                            let _ = copy_view.update(cx, |this, cx| {
+                                                this.toast(
+                                                    "ok",
+                                                    "Đã sao chép tên",
+                                                    "Dán vào ô bên dưới để xác nhận.",
+                                                    cx,
+                                                );
+                                            });
+                                        })
+                                        .child(widgets::icon("copy", 11.0, theme.faint))
+                                        .child("Sao chép"),
+                                ),
+                        ),
                 ),
         )
         .child(
