@@ -841,22 +841,93 @@ pub async fn project(source: &str, id: &str, kind: Kind) -> Result<Value> {
     }
     if source == "curseforge" {
         let data = cf_json(&format!("{CF}/mods/{}/description", urlencode(id))).await?;
-        let description = crate::util::html_to_text(
-            data.get("data").and_then(Value::as_str).unwrap_or(""),
-        );
+        let raw = data.get("data").and_then(Value::as_str).unwrap_or("");
+        let description = crate::util::html_to_text(raw);
         let mod_data = cf_json(&format!("{CF}/mods/{}", urlencode(id))).await?;
         let row = mod_data.get("data").cloned().unwrap_or(Value::Null);
+        let indexes = row
+            .get("latestFilesIndexes")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let loaders = loaders_of(&Value::Array(
+            indexes
+                .iter()
+                .filter_map(|f| {
+                    f.get("modLoader")
+                        .and_then(Value::as_u64)
+                        .map(|id| Value::String(cf_loader_name(id).into()))
+                })
+                .collect(),
+        ));
+        let game_versions: Vec<String> = indexes
+            .iter()
+            .filter_map(|f| f.get("gameVersion").and_then(Value::as_str).map(str::to_string))
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        let categories: Vec<String> = row
+            .get("categories")
+            .and_then(Value::as_array)
+            .map(|list| {
+                list.iter()
+                    .filter_map(|c| {
+                        c.get("name")
+                            .and_then(Value::as_str)
+                            .or_else(|| c.get("slug").and_then(Value::as_str))
+                    })
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let creators: Vec<Value> = row
+            .get("authors")
+            .and_then(Value::as_array)
+            .map(|list| {
+                list.iter()
+                    .filter_map(|a| a.get("name").and_then(Value::as_str))
+                    .map(|name| serde_json::json!({"name": name, "role": "Tác giả", "avatar": null}))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut links = Vec::new();
+        for (label, key) in [
+            ("Trang dự án", "websiteUrl"),
+            ("Wiki", "wikiUrl"),
+            ("Báo lỗi", "issuesUrl"),
+            ("Mã nguồn", "sourceUrl"),
+        ] {
+            if let Some(url) = row
+                .pointer(&format!("/links/{key}"))
+                .and_then(Value::as_str)
+                .filter(|v| !v.is_empty())
+            {
+                links.push(serde_json::json!({"label": label, "url": url}));
+            }
+        }
         return Ok(serde_json::json!({
             "id": id,
             "source": "curseforge",
             "name": row.get("name"),
             "summary": row.get("summary"),
             "description": description,
+            "descriptionRaw": raw,
+            "descriptionFormat": "html",
             "icon": row.pointer("/logo/thumbnailUrl"),
             "downloads": row.get("downloadCount"),
-            "website": row.get("links").and_then(|l| l.get("websiteUrl")),
-            "author": row.get("authors").and_then(Value::as_array).map(|list| list.iter().filter_map(|a| a.get("name").and_then(Value::as_str)).collect::<Vec<_>>().join(", ")),
+            "followers": 0,
+            "website": row.pointer("/links/websiteUrl"),
+            "author": creators.iter().filter_map(|c| c.get("name").and_then(Value::as_str)).collect::<Vec<_>>().join(", "),
             "gallery": [],
+            "loaders": loaders,
+            "categories": categories,
+            "gameVersions": game_versions,
+            "license": row.pointer("/license/name"),
+            "slug": row.get("slug"),
+            "created": row.get("dateCreated"),
+            "updated": row.get("dateModified"),
+            "creators": creators,
+            "links": links,
             "kind": kind.folder(),
         }));
     }
@@ -871,17 +942,61 @@ pub async fn project(source: &str, id: &str, kind: Kind) -> Result<Value> {
                 .join(", ")
         })
         .unwrap_or_default();
+    let body = row.get("body").and_then(Value::as_str).unwrap_or("");
+    let mut links = Vec::new();
+    for (label, key) in [
+        ("Trang dự án", "source_url"),
+        ("Wiki", "wiki_url"),
+        ("Báo lỗi", "issues_url"),
+        ("Discord", "discord_url"),
+    ] {
+        if let Some(url) = row
+            .get(key)
+            .and_then(Value::as_str)
+            .filter(|v| !v.is_empty())
+        {
+            links.push(serde_json::json!({"label": label, "url": url}));
+        }
+    }
+    let creators: Vec<Value> = row
+        .get("members")
+        .and_then(Value::as_array)
+        .map(|list| {
+            list.iter()
+                .filter_map(|m| {
+                    let name = m.get("username").and_then(Value::as_str)?;
+                    Some(serde_json::json!({
+                        "name": name,
+                        "role": m.get("role").and_then(Value::as_str).unwrap_or("Thành viên"),
+                        "avatar": m.pointer("/user/avatar_url").cloned().unwrap_or(Value::Null),
+                    }))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     Ok(serde_json::json!({
         "id": id,
         "source": "modrinth",
         "name": row.get("title"),
         "summary": row.get("description"),
-        "description": crate::util::markdown_to_text(row.get("body").and_then(Value::as_str).unwrap_or("")),
+        "description": crate::util::markdown_to_text(body),
+        "descriptionRaw": body,
+        "descriptionFormat": "markdown",
         "icon": row.get("icon_url"),
         "downloads": row.get("downloads"),
+        "followers": row.get("followers"),
         "website": row.get("source_url"),
         "author": members,
         "gallery": row.get("gallery"),
+        "loaders": row.get("loaders"),
+        "categories": row.get("categories"),
+        "gameVersions": row.get("game_versions"),
+        "license": row.pointer("/license/id"),
+        "slug": row.get("slug"),
+        "created": row.get("published"),
+        "updated": row.get("updated"),
+        "creators": creators,
+        "links": links,
         "kind": kind.folder(),
     }))
 }

@@ -167,6 +167,17 @@ pub struct ContentState {
     pub environment: String,
     pub detail_tab: String,
     pub instance_id: Option<String>,
+    pub view: String,
+    pub menu: Option<String>,
+    pub tags: Vec<Value>,
+    pub env_supported: bool,
+    pub inventory: Vec<Value>,
+    pub versions_loading: bool,
+    pub installing: String,
+    pub install_error: String,
+    pub done: Option<Value>,
+    pub changelog_open: String,
+    pub changelogs: std::collections::HashMap<String, String>,
 }
 
 #[derive(Clone, Debug)]
@@ -1287,6 +1298,9 @@ impl LauncherApp {
         self.selected_instance = Some(id.clone());
         self.page = Page::Instance;
         self.instance_tab = InstanceTab::Overview;
+        self.content.open = false;
+        self.content.view = "list".into();
+        self.content.menu = None;
         self.instance_ui = InstanceUi::default();
         self.update_pill(78.0, true, cx);
         self.instance_ui.logs = self.logs.get(&id).cloned().unwrap_or_default();
@@ -2306,6 +2320,9 @@ impl LauncherApp {
                     index as f32,
                     Box::new(move |this, cx| {
                         this.instance_tab = tab;
+                        this.content.open = false;
+                        this.content.view = "list".into();
+                        this.content.menu = None;
                         this.instance_ui.list_limit = 60;
                         this.instance_ui.list_anchor = 0.0;
                         this.load_instance_tab(cx);

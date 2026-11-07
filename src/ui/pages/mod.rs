@@ -1,4 +1,5 @@
 pub mod accounts;
+pub mod content;
 pub mod home;
 pub mod host;
 pub mod instance;

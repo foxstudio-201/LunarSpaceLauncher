@@ -2384,8 +2384,56 @@ impl Backend {
                 Ok(plan) => plan,
                 Err(err) => return fail(err.to_string()),
             };
+            let dir = PathBuf::from(&entry.dir);
+            let folder = kind.folder();
+            let mut recs = read_content_records(&dir);
+            let mut stale: Vec<String> = recs
+                .iter()
+                .filter(|row| {
+                    row.get("kind").and_then(Value::as_str) == Some(folder)
+                        && row.get("projectId").and_then(Value::as_str) == Some(id.as_str())
+                })
+                .filter_map(|row| row.get("file").and_then(Value::as_str).map(str::to_string))
+                .collect();
+            if let Some(list) = opts.get("remove").and_then(Value::as_array) {
+                stale.extend(
+                    list.iter()
+                        .filter_map(|v| v.as_str())
+                        .map(str::to_string),
+                );
+            }
+            if !stale.is_empty() {
+                let rels: Vec<String> = stale
+                    .iter()
+                    .map(|file| format!("{folder}/{file}"))
+                    .collect();
+                let _ = this.trash_files(&instance_id, rels);
+                recs.retain(|row| {
+                    let file = row.get("file").and_then(Value::as_str).unwrap_or("");
+                    !stale.iter().any(|name| name == file)
+                });
+                write_content_records(&dir, &recs);
+            }
             let progress = this.progress_fn(instance_id.clone(), "download".into());
             let summary = content::install(&plan, Some(progress), |_| {}).await;
+            let main = plan.tasks.first().map(|task| task.name.clone()).unwrap_or_default();
+            if !main.is_empty() && !summary.failed.iter().any(|name| name == &main) {
+                recs.retain(|row| {
+                    !(row.get("kind").and_then(Value::as_str) == Some(folder)
+                        && row.get("projectId").and_then(Value::as_str) == Some(id.as_str()))
+                });
+                recs.push(json!({
+                    "kind": folder,
+                    "file": main,
+                    "projectId": id,
+                    "versionId": version_id,
+                    "version": opts.get("version").and_then(Value::as_str).unwrap_or(""),
+                    "source": source,
+                    "slug": opts.get("slug").and_then(Value::as_str).unwrap_or(""),
+                    "title": opts.get("name").and_then(Value::as_str).unwrap_or(""),
+                }));
+                write_content_records(&dir, &recs);
+            }
             this.emit(json!({"type": "content-installed", "id": instance_id}));
             ok(json!({
                 "added": summary.added,
@@ -2393,6 +2441,97 @@ impl Backend {
                 "failed": summary.failed,
                 "total": summary.total,
             }))
+        })
+    }
+
+    pub fn content_inventory(self: &Arc<Self>, kind: String, instance_id: String) -> Receiver<Value> {
+        let this = self.clone();
+        self.request(async move {
+            let Some(entry) = this.store.find_instance(&instance_id) else {
+                return fail("Không tìm thấy instance.");
+            };
+            let dir = PathBuf::from(&entry.dir);
+            let folder = dir.join(&kind);
+            let items: Vec<Value> = read_content_records(&dir)
+                .into_iter()
+                .filter(|row| row.get("kind").and_then(Value::as_str) == Some(kind.as_str()))
+                .filter(|row| {
+                    row.get("file")
+                        .and_then(Value::as_str)
+                        .map(|file| {
+                            folder.join(file).is_file()
+                                || folder.join(format!("{file}.disabled")).is_file()
+                        })
+                        .unwrap_or(false)
+                })
+                .collect();
+            ok(json!({"items": items}))
+        })
+    }
+
+    pub fn content_remove(self: &Arc<Self>, opts: Value) -> Receiver<Value> {
+        let this = self.clone();
+        self.request(async move {
+            let kind = opts.get("kind").and_then(Value::as_str).unwrap_or("mods").to_string();
+            let instance_id = opts.get("instanceId").and_then(Value::as_str).unwrap_or("").to_string();
+            let file = opts.get("file").and_then(Value::as_str).unwrap_or("").to_string();
+            if file.is_empty() {
+                return fail("Thiếu tệp cần gỡ.");
+            }
+            let Some(entry) = this.store.find_instance(&instance_id) else {
+                return fail("Không tìm thấy instance.");
+            };
+            let value = this.trash_files(&instance_id, vec![format!("{kind}/{file}")]);
+            if value.get("ok").and_then(Value::as_bool) != Some(true) {
+                return fail(value.get("error").and_then(Value::as_str).unwrap_or("Không gỡ được tệp."));
+            }
+            let dir = PathBuf::from(&entry.dir);
+            let mut recs = read_content_records(&dir);
+            recs.retain(|row| {
+                !(row.get("kind").and_then(Value::as_str) == Some(kind.as_str())
+                    && row.get("file").and_then(Value::as_str) == Some(file.as_str()))
+            });
+            write_content_records(&dir, &recs);
+            this.emit(json!({"type": "content-installed", "id": instance_id}));
+            ok(json!({"removed": file}))
+        })
+    }
+
+    pub fn content_changelog(self: &Arc<Self>, opts: Value) -> Receiver<Value> {
+        self.request(async move {
+            let source = opts.get("source").and_then(Value::as_str).unwrap_or("modrinth").to_string();
+            let id = opts.get("id").and_then(Value::as_str).unwrap_or("").to_string();
+            let version_id = opts.get("versionId").and_then(Value::as_str).unwrap_or("").to_string();
+            if source == "curseforge" {
+                match content::cf_json(&format!(
+                    "{}/mods/{}/files/{}/changelog",
+                    content::CF,
+                    urlencode(&id),
+                    urlencode(&version_id)
+                ))
+                .await
+                {
+                    Ok(data) => ok(json!({
+                        "text": crate::util::html_to_text(data.get("data").and_then(Value::as_str).unwrap_or("")),
+                        "format": "html",
+                    })),
+                    Err(err) => fail(err.to_string()),
+                }
+            } else {
+                match crate::net::fetch_json(&format!(
+                    "{}/version/{}",
+                    content::MODRINTH,
+                    urlencode(&version_id)
+                ))
+                .await
+                {
+                    Ok(value) => ok(json!({
+                        "text": crate::util::markdown_to_text(value.get("changelog").and_then(Value::as_str).unwrap_or("")),
+                        "format": "markdown",
+                    })),
+                    Err(err) => fail(err.to_string()),
+                }
+            }
         })
     }
 
@@ -4383,6 +4522,22 @@ fn unique_name(parent: &Path, name: &str) -> String {
         }
     }
     format!("{base}-{}{ext}", chrono::Utc::now().timestamp())
+}
+
+fn content_records_path(dir: &Path) -> PathBuf {
+    dir.join(".xyo-content.json")
+}
+
+fn read_content_records(dir: &Path) -> Vec<Value> {
+    std::fs::read_to_string(content_records_path(dir))
+        .ok()
+        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+        .and_then(|value| value.get("records").and_then(Value::as_array).cloned())
+        .unwrap_or_default()
+}
+
+fn write_content_records(dir: &Path, rows: &[Value]) {
+    let _ = store::write_json_atomic(&content_records_path(dir), &json!({"records": rows}));
 }
 
 pub(crate) async fn resolve_lunar_build(game: &str, requested: &str) -> String {

@@ -393,14 +393,23 @@ fn render_file_list(app: &mut LauncherApp, cx: &mut Context<LauncherApp>, theme:
                                 InstanceTab::Shaderpacks => "shaderpacks",
                                 _ => "mods",
                             };
-                            el.child(widgets::ghost_button("files-browse", "Thêm từ Modrinth", theme, move |_, _, cx| {
-                                let view = view.clone();
-                                let _ = view.update(cx, |this, cx| {
-                                    if let Some(id) = this.selected_instance.clone() {
-                                        crate::ui::pages::modpack::open_browser(this, kind, id, cx);
-                                    }
-                                });
-                            }))
+                            el.child(widgets::ghost_button(
+                                "files-browse",
+                                if kind == "resourcepacks" {
+                                    "Tải gói tài nguyên"
+                                } else {
+                                    "Tải shader"
+                                },
+                                theme,
+                                move |_, _, cx| {
+                                    let view = view.clone();
+                                    let _ = view.update(cx, |this, cx| {
+                                        if let Some(id) = this.selected_instance.clone() {
+                                            crate::ui::pages::content::open(this, kind, id, cx);
+                                        }
+                                    });
+                                },
+                            ))
                         })
                         .child(widgets::ghost_button("files-reload", "Làm mới", theme, {
                             let view = view.clone();
@@ -676,6 +685,20 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                 )
                 .child(widgets::progress_bar(percent, &theme, indeterminate)),
         );
+    }
+
+    let download_folder = match app.instance_tab {
+        InstanceTab::Mods => "mods",
+        InstanceTab::Resourcepacks => "resourcepacks",
+        InstanceTab::Shaderpacks => "shaderpacks",
+        _ => "",
+    };
+    if app.content.open
+        && !download_folder.is_empty()
+        && app.content.kind == download_folder
+        && app.content.instance_id.as_deref() == Some(instance.id.as_str())
+    {
+        return page_body().child(pages::content::render(app, cx)).into_any_element();
     }
 
     let mut body = page_body();
@@ -968,6 +991,9 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                         .on_click(move |_, _, cx| {
                             let _ = view.update(cx, |this, cx| {
                                 this.instance_tab = tab;
+                                this.content.open = false;
+                                this.content.view = "list".into();
+                                this.content.menu = None;
                                 let target = 78.0 + tab as usize as f32 * 38.0;
                                 this.update_pill(target, true, cx);
                                 this.load_instance_tab(cx);
@@ -1758,13 +1784,13 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                                     .detach();
                                 }
                             }))
-                            .child(widgets::ghost_button("mods-browse", "Thêm từ Modrinth", &theme, {
+                            .child(widgets::button("mods-browse", "Tải mod", &theme, true, {
                                 let view = view.clone();
                                 move |_, _, cx| {
                                     let view = view.clone();
                                     let _ = view.update(cx, |this, cx| {
                                         if let Some(id) = this.selected_instance.clone() {
-                                            crate::ui::pages::modpack::open_browser(this, "mods", id, cx);
+                                            crate::ui::pages::content::open(this, "mods", id, cx);
                                         }
                                     });
                                 }
