@@ -264,10 +264,8 @@ fn create_instance(app: &mut LauncherApp, cx: &mut Context<LauncherApp>) {
     });
 }
 
-fn loader_image(id: &str) -> String {
+fn loader_image(id: &str) -> std::path::PathBuf {
     crate::ui::assets::image_path(&format!("loader-icon/{id}.png"))
-        .to_string_lossy()
-        .into_owned()
 }
 
 fn loader_desc(id: &str) -> &'static str {

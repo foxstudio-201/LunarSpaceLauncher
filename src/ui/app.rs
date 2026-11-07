@@ -2584,6 +2584,10 @@ impl LauncherApp {
                     .h_full()
                     .flex_1()
                     .window_control_area(gpui::WindowControlArea::Drag)
+                    .on_mouse_down(gpui::MouseButton::Left, |_, window, _| {
+                        #[cfg(target_os = "linux")]
+                        window.start_window_move();
+                    })
                     .child(
                         gpui::img(crate::ui::assets::image_path("xyolauncher.png"))
                             .size(px(28.0))

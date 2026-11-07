@@ -19,10 +19,8 @@ fn loader_name(id: &str) -> &'static str {
     LOADERS.iter().find(|(key, _, _)| *key == id).map(|(_, name, _)| *name).unwrap_or("Vanilla")
 }
 
-fn loader_image(id: &str) -> String {
+fn loader_image(id: &str) -> std::path::PathBuf {
     crate::ui::assets::image_path(&format!("loader-icon/{id}.png"))
-        .to_string_lossy()
-        .into_owned()
 }
 
 fn date_of(iso: &str) -> String {
