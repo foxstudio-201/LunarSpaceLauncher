@@ -8,6 +8,7 @@ mod ms_login;
 mod models;
 mod server;
 mod net;
+mod platform;
 mod store;
 mod tray;
 mod ui;

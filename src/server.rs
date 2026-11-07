@@ -1,6 +1,7 @@
 use crate::backend::Backend;
 use crate::mc::install;
 use crate::mc::meta;
+use crate::platform::HideConsole;
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -341,7 +342,7 @@ async fn install_forge_server(
         .current_dir(dir)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
-        .creation_flags(0x08000000);
+        .hide_console();
     let mut child = command.spawn()?;
     for stream in [
         child.stdout.take().map(StreamKind::Out),

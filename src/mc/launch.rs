@@ -4,7 +4,10 @@ use crate::mc::install::{
     split_args,
 };
 use crate::mc::paths::Paths;
-use crate::util::{hex, strip_ansi};
+use crate::platform::HideConsole;
+#[cfg(windows)]
+use crate::util::hex;
+use crate::util::strip_ansi;
 use anyhow::{anyhow, Result};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -17,39 +20,45 @@ fn has_wide(value: &str) -> bool {
 }
 
 fn junction_path(link_dir: &Path, target: &str) -> Option<PathBuf> {
-    use sha1::{Digest, Sha1};
-    let mut hasher = Sha1::new();
-    hasher.update(target.as_bytes());
-    let name = hex(&hasher.finalize())[..12].to_string();
-    let link = link_dir.join(name);
-    if link.exists() {
-        return Some(link);
+    #[cfg(not(windows))]
+    {
+        let _ = (link_dir, target);
+        None
     }
-    let _ = std::fs::create_dir_all(link_dir);
+
     #[cfg(windows)]
     {
+        use sha1::{Digest, Sha1};
+        let mut hasher = Sha1::new();
+        hasher.update(target.as_bytes());
+        let name = hex(&hasher.finalize())[..12].to_string();
+        let link = link_dir.join(name);
+        if link.exists() {
+            return Some(link);
+        }
+        let _ = std::fs::create_dir_all(link_dir);
         if std::os::windows::fs::symlink_dir(target, &link).is_ok() {
             return Some(link);
         }
+        // The cmd fallback must never see shell metacharacters from the target path.
+        if target
+            .chars()
+            .any(|c| matches!(c, '&' | '|' | '<' | '>' | '^' | '%' | '!' | '"') || c as u32 == 39)
+        {
+            return None;
+        }
+        let ok = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&link)
+            .arg(target)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .hide_console()
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        ok.then_some(link)
     }
-    // The cmd fallback must never see shell metacharacters from the target path.
-    if target
-        .chars()
-        .any(|c| matches!(c, '&' | '|' | '<' | '>' | '^' | '%' | '!' | '"') || c as u32 == 39)
-    {
-        return None;
-    }
-    let ok = std::process::Command::new("cmd")
-        .args(["/C", "mklink", "/J"])
-        .arg(&link)
-        .arg(target)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .creation_flags(0x08000000)
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    ok.then_some(link)
 }
 
 pub fn ascii_safe_path(value: &Path, link_dir: Option<&Path>) -> PathBuf {
@@ -381,7 +390,9 @@ pub fn spawn_game(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .creation_flags(0x08000000);
+        .hide_console();
+    #[cfg(unix)]
+    command.process_group(0);
     let mut child = command.spawn()?;
     let pid = child.id().unwrap_or(0);
     if let Some(stdout) = child.stdout.take() {
@@ -416,27 +427,51 @@ pub fn spawn_game(
 }
 
 pub fn kill_tree(pid: u32) {
-    let _ = std::process::Command::new("taskkill")
-        .args(["/pid", &pid.to_string(), "/T", "/F"])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .creation_flags(0x08000000)
-        .status();
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("taskkill")
+            .args(["/pid", &pid.to_string(), "/T", "/F"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .hide_console()
+            .status();
+    }
+
+    #[cfg(unix)]
+    {
+        if pid == 0 {
+            return;
+        }
+        unsafe {
+            if libc::kill(-(pid as i32), libc::SIGKILL) != 0 {
+                libc::kill(pid as i32, libc::SIGKILL);
+            }
+        }
+    }
+
+    #[cfg(not(any(windows, unix)))]
+    let _ = pid;
 }
 
 pub fn set_high_priority(pid: u32) {
-    let _ = std::process::Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-Command",
-            &format!(
-                "Get-Process -Id {pid} -ErrorAction SilentlyContinue | ForEach-Object {{ $_.PriorityClass = 'High' }}"
-            ),
-        ])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .creation_flags(0x08000000)
-        .status();
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                &format!(
+                    "Get-Process -Id {pid} -ErrorAction SilentlyContinue | ForEach-Object {{ $_.PriorityClass = 'High' }}"
+                ),
+            ])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .hide_console()
+            .status();
+    }
+
+    #[cfg(not(windows))]
+    let _ = pid;
 }
 
 pub fn latest_world_folder(instance_dir: &Path) -> Option<String> {
@@ -459,4 +494,3 @@ pub fn latest_world_folder(instance_dir: &Path) -> Option<String> {
     best.map(|(name, _)| name)
 }
 
-use std::os::windows::process::CommandExt;

@@ -1,5 +1,6 @@
 use crate::mc::{auth, content, install, java, launch, meta, modpack, paths::Paths, skins, world};
 use crate::models::*;
+use crate::platform::HideConsole;
 use crate::store::{self, Store};
 use crate::util::*;
 use anyhow::{anyhow, Result};
@@ -799,7 +800,7 @@ impl Backend {
             .current_dir(&paths.shared)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
-            .creation_flags(0x08000000);
+            .hide_console();
         let mut child = command.spawn()?;
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
@@ -1415,7 +1416,7 @@ impl Backend {
             .current_dir(&entry.dir)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
-            .creation_flags(0x08000000);
+            .hide_console();
         let mut child = match command.spawn() {
             Ok(child) => child,
             Err(err) => {
@@ -3202,7 +3203,9 @@ impl Backend {
                 .stdin(std::process::Stdio::piped())
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
-                .creation_flags(0x08000000);
+                .hide_console();
+            #[cfg(unix)]
+            command.process_group(0);
             let mut child = match command.spawn() {
                 Ok(child) => child,
                 Err(err) => return fail(format!("Không chạy được server: {err}")),
@@ -4036,7 +4039,9 @@ impl Backend {
                 ])
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
-                .creation_flags(0x08000000);
+                .hide_console();
+            #[cfg(unix)]
+            command.process_group(0);
             let mut child = match command.spawn() {
                 Ok(child) => child,
                 Err(err) => {
