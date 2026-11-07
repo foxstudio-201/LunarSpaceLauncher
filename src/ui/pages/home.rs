@@ -349,27 +349,11 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
         .child(widgets::icon("cube", 14.0, theme.faint))
         .child("Phiên bản")
         .child(widgets::icon("arrow-right", 11.0, theme.faint));
-    let theme_button = div()
-        .id("home-theme")
-        .flex()
-        .items_center()
-        .justify_center()
-        .size(px(36.0))
-        .rounded(px(8.0))
-        .bg(theme.elevated)
-        .border_1()
-        .border_color(theme.border)
-        .cursor_pointer()
-        .hover(|st| st.opacity(0.8))
-        .on_click(move |_, _, cx| {
-            let _ = view_theme.update(cx, |this, cx| {
-                let next = if this.theme.dark { "light" } else { "dark" };
-                this.backend.settings_set(json!({"theme": next}));
-                this.refresh_settings();
-                cx.notify();
-            });
-        })
-        .child(widgets::icon(if theme.dark { "moon" } else { "sun" }, 15.0, theme.muted));
+    let theme_button = crate::ui::pages::settings::theme_switch(
+        &theme,
+        theme.dark,
+        view_theme.clone(),
+    );
 
     let header = div()
         .flex_shrink_0()

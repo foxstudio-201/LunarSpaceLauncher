@@ -2884,28 +2884,49 @@ impl LauncherApp {
     fn orbit_spinner(&self, theme: &Theme) -> AnyElement {
         use gpui::AnimationExt;
         let done = self.sync_done;
-        let mut root = div().relative().w(px(230.0)).h(px(200.0));
-        for d in [210.0f32, 150.0, 100.0] {
+        let mut root = div().relative().w(px(260.0)).h(px(220.0));
+        root = root
+            .child(
+                div()
+                    .absolute()
+                    .left(px(10.0))
+                    .top(px(0.0))
+                    .w(px(240.0))
+                    .h(px(240.0))
+                    .rounded_full()
+                    .bg(gpui::rgba(0x8b6cff1c)),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .left(px(55.0))
+                    .top(px(45.0))
+                    .w(px(150.0))
+                    .h(px(150.0))
+                    .rounded_full()
+                    .bg(gpui::rgba(0x8b6cff2e)),
+            );
+        for (w, h) in [(220.0f32, 76.0f32), (156.0, 54.0), (104.0, 36.0)] {
             root = root.child(
                 div()
                     .absolute()
-                    .left(px(115.0 - d / 2.0))
-                    .top(px(100.0 - (d * 0.38) / 2.0))
-                    .w(px(d))
-                    .h(px(d * 0.38))
+                    .left(px(130.0 - w / 2.0))
+                    .top(px(110.0 - h / 2.0))
+                    .w(px(w))
+                    .h(px(h))
                     .rounded_full()
                     .border_1()
-                    .border_color(gpui::Rgba { a: 0.16, ..theme.text }),
+                    .border_color(gpui::rgba(0x6a57f247)),
             );
         }
         if !done {
             let planets = [
-                (105.0f32, -18.0f32, 5.5f32, 12.0f32, gpui::rgb(0x22c3a6)),
-                (105.0, -18.0, 5.5, 8.0, gpui::rgb(0x22c3a6)),
-                (75.0, 24.0, 3.6, 10.0, gpui::rgb(0xff6b8b)),
-                (75.0, 24.0, 3.6, 7.0, gpui::rgb(0xff6b8b)),
-                (50.0, -58.0, 2.2, 9.0, gpui::rgb(0xffb547)),
-                (50.0, -58.0, 2.2, 6.0, gpui::rgb(0xffb547)),
+                (110.0f32, -18.0f32, 5.5f32, 11.0f32, gpui::rgb(0xf87171)),
+                (110.0, -18.0, 5.5, 7.0, gpui::rgb(0xf87171)),
+                (78.0, 24.0, 3.6, 9.0, gpui::rgb(0x22c3a6)),
+                (78.0, 24.0, 3.6, 6.0, gpui::rgb(0x22c3a6)),
+                (52.0, -58.0, 2.2, 8.0, gpui::rgb(0xfbbf24)),
+                (52.0, -58.0, 2.2, 5.0, gpui::rgb(0xfbbf24)),
             ];
             for (i, (r, tilt, period, size, color)) in planets.into_iter().enumerate() {
                 let phase = if i % 2 == 1 { std::f32::consts::PI } else { 0.0 };
@@ -2924,17 +2945,17 @@ impl LauncherApp {
                             move |el, t| {
                                 let a = phase + t * std::f32::consts::TAU;
                                 let x = a.cos() * r;
-                                let y = a.sin() * r * 0.38;
+                                let y = a.sin() * r * 0.34;
                                 let rx = x * tilt.cos() - y * tilt.sin();
                                 let ry = x * tilt.sin() + y * tilt.cos();
-                                el.left(px(115.0 + rx - size / 2.0))
-                                    .top(px(100.0 + ry - size / 2.0))
+                                el.left(px(130.0 + rx - size / 2.0))
+                                    .top(px(110.0 + ry - size / 2.0))
                             },
                         ),
                 );
             }
         }
-        let core_size = if done { 84.0 } else { 56.0 };
+        let core_size = if done { 78.0 } else { 60.0 };
         let core = div()
             .absolute()
             .w(px(core_size))
@@ -2943,20 +2964,32 @@ impl LauncherApp {
             .bg(if done {
                 gpui::linear_gradient(
                     0.0,
-                    gpui::linear_color_stop(theme.ok, 0.0),
-                    gpui::linear_color_stop(theme.ok, 1.0),
+                    gpui::linear_color_stop(gpui::rgb(0x119c72), 0.0),
+                    gpui::linear_color_stop(gpui::rgb(0x119c72), 1.0),
                 )
             } else {
                 gpui::linear_gradient(
                     140.0,
-                    gpui::linear_color_stop(theme.accent, 0.0),
-                    gpui::linear_color_stop(theme.accent_hover, 1.0),
+                    gpui::linear_color_stop(gpui::rgb(0xB7A4FF), 0.0),
+                    gpui::linear_color_stop(gpui::rgb(0x6D4AF0), 1.0),
                 )
             })
             .flex()
             .items_center()
             .justify_center()
-            .when(done, |el| el.child(widgets::icon("check", 34.0, gpui::rgb(0xffffff))));
+            .when(done, |el| el.child(widgets::icon("check", 34.0, gpui::rgb(0xffffff))))
+            .when(!done, |el| {
+                el.child(
+                    div()
+                        .absolute()
+                        .left(px(14.0))
+                        .top(px(10.0))
+                        .w(px(14.0))
+                        .h(px(14.0))
+                        .rounded_full()
+                        .bg(gpui::rgba(0xffffffaa)),
+                )
+            });
         root = root.child(core.with_animation(
             "core-breath",
             gpui::Animation::new(std::time::Duration::from_millis(2200)).repeat(),
@@ -2964,35 +2997,58 @@ impl LauncherApp {
                 let s = if done {
                     1.0
                 } else {
-                    1.0 + 0.07 * ((t * std::f32::consts::TAU).sin() * 0.5 + 0.5)
+                    1.0 + 0.06 * ((t * std::f32::consts::TAU).sin() * 0.5 + 0.5)
                 };
                 let size = core_size * s;
                 el.w(px(size))
                     .h(px(size))
-                    .left(px(115.0 - size / 2.0))
-                    .top(px(100.0 - size / 2.0))
+                    .left(px(130.0 - size / 2.0))
+                    .top(px(110.0 - size / 2.0))
             },
         ));
         if done {
-            root = root.child(
-                div()
-                    .absolute()
-                    .rounded_full()
-                    .border_2()
-                    .border_color(theme.ok)
-                    .with_animation(
-                        "sync-ripple",
-                        gpui::Animation::new(std::time::Duration::from_millis(1100)).repeat(),
-                        move |el, t| {
-                            let size = 84.0 + 116.0 * t;
-                            el.w(px(size))
-                                .h(px(size))
-                                .left(px(115.0 - size / 2.0))
-                                .top(px(100.0 - size / 2.0))
-                                .opacity(0.7 * (1.0 - t))
-                        },
-                    ),
-            );
+            root = root
+                .child(
+                    div()
+                        .absolute()
+                        .left(px(70.0))
+                        .top(px(50.0))
+                        .w(px(120.0))
+                        .h(px(120.0))
+                        .rounded_full()
+                        .border_1()
+                        .border_color(gpui::rgba(0x119c7259)),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .left(px(62.0))
+                        .top(px(98.0))
+                        .w(px(10.0))
+                        .h(px(10.0))
+                        .rounded_full()
+                        .bg(gpui::rgb(0x22c3a6)),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .left(px(186.0))
+                        .top(px(110.0))
+                        .w(px(8.0))
+                        .h(px(8.0))
+                        .rounded_full()
+                        .bg(gpui::rgb(0xff6b8b)),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .left(px(148.0))
+                        .top(px(44.0))
+                        .w(px(6.0))
+                        .h(px(6.0))
+                        .rounded_full()
+                        .bg(gpui::rgb(0xfbbf24)),
+                );
         }
         root.into_any_element()
     }
@@ -3010,23 +3066,25 @@ impl LauncherApp {
          -> AnyElement {
             let view = view.clone();
             let theme = theme.clone();
+            let done = self.sync_done;
             div()
                 .id(id)
-                .h(px(40.0))
-                .px(px(16.0))
-                .rounded(px(10.0))
+                .h(px(48.0))
+                .px(px(24.0))
+                .rounded_full()
                 .flex()
                 .items_center()
                 .justify_center()
+                .min_w(px(150.0))
                 .bg(if primary {
-                    theme.accent
+                    gpui::rgb(0x16151b)
                 } else {
-                    theme.surface_hover
+                    gpui::rgb(0xefedf6)
                 })
                 .text_color(if primary {
-                    theme.on_accent
+                    gpui::rgb(0xffffff)
                 } else {
-                    theme.text
+                    gpui::rgb(0x16151b)
                 })
                 .text_size(px(13.0))
                 .font_weight(FontWeight::SEMIBOLD)
@@ -3038,22 +3096,20 @@ impl LauncherApp {
                 .child(label.to_string())
                 .into_any_element()
         };
-        let legacy_path = self.backend.store.legacy_dir.display().to_string();
         let (title, subtitle) = if !self.sync_error.is_empty() {
             ("Đồng bộ thất bại".to_string(), self.sync_error.clone())
         } else if self.sync_done {
             (
                 "Đồng bộ hoàn tất".to_string(),
                 format!(
-                    "{} tệp · {:.1} MB",
-                    self.sync_total,
-                    self.sync_bytes_total as f64 / 1_048_576.0
+                    "{} tệp · vừa xong",
+                    self.sync_total
                 ),
             )
         } else if self.sync_running {
             (
                 "Đang đồng bộ".to_string(),
-                format!("{} / {} tệp", self.sync_files, self.sync_total),
+                format!("Tệp {} / {}", self.sync_files, self.sync_total),
             )
         } else {
             (
@@ -3061,60 +3117,41 @@ impl LauncherApp {
                 "Tìm thấy dữ liệu của LunarSpaceLauncher trên máy. Bạn có thể giữ nguyên hoặc sao chép toàn bộ sang thư mục XyoLauncher.".to_string(),
             )
         };
-        let ratio = if self.sync_total > 0 {
-            (self.sync_files as f32 / self.sync_total as f32).clamp(0.0, 1.0)
-        } else {
-            0.0
-        };
         let mut card = div()
-            .w(px(460.0))
-            .rounded(px(22.0))
-            .bg(theme.surface)
+            .w(px(440.0))
+            .rounded(px(26.0))
+            .bg(gpui::linear_gradient(
+                160.0,
+                gpui::linear_color_stop(gpui::rgb(0xffffff), 0.0),
+                gpui::linear_color_stop(gpui::rgb(0xf3f1fa), 1.0),
+            ))
             .border_1()
-            .border_color(theme.border)
-            .p(px(22.0))
+            .border_color(gpui::rgba(0x16151b14))
+            .p(px(26.0))
             .flex()
             .flex_col()
             .items_center()
             .gap(px(10.0))
             .child(
                 div()
-                    .text_size(px(17.0))
+                    .w_full()
+                    .text_center()
+                    .text_size(px(22.0))
                     .font_weight(FontWeight::BOLD)
-                    .text_color(theme.text)
+                    .text_color(gpui::rgb(0x16151b))
                     .child(title),
             )
             .child(
                 div()
                     .w_full()
-                    .text_size(px(12.0))
-                    .text_color(theme.muted)
+                    .text_center()
+                    .text_size(px(13.0))
+                    .text_color(gpui::rgb(0x6b6875))
                     .child(subtitle),
             );
         if self.sync_running || self.sync_done || !self.sync_error.is_empty() {
-            card = card
-                .child(self.orbit_spinner(&theme))
-                .child(
-                    div()
-                        .w(px(400.0))
-                        .h(px(6.0))
-                        .rounded_full()
-                        .bg(theme.surface_hover)
-                        .child(
-                            div()
-                                .h(px(6.0))
-                                .w(px(400.0 * ratio))
-                                .rounded_full()
-                                .bg(theme.accent),
-                        ),
-                );
+            card = card.child(self.orbit_spinner(&theme));
         }
-        card = card.child(
-            div()
-                .text_size(px(11.0))
-                .text_color(theme.faint)
-                .child(format!("Dữ liệu cũ: {legacy_path}")),
-        );
         let actions: Vec<AnyElement> = if !self.sync_error.is_empty() {
             vec![
                 button(
@@ -3171,7 +3208,7 @@ impl LauncherApp {
                 ),
             ]
         };
-        card = card.child(div().flex().gap(px(8.0)).mt(px(4.0)).children(actions));
+        card = card.child(div().flex().gap(px(10.0)).mt(px(6.0)).children(actions));
         let card = card.with_animation(
             "sync-card",
             gpui::Animation::new(std::time::Duration::from_millis(240)),
