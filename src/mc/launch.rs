@@ -262,7 +262,10 @@ pub fn build_launch(options: LaunchOptions<'_>) -> Result<LaunchPlan> {
         ("launcher_name", "XyoLauncher".into()),
         ("launcher_version", "2.0.0".into()),
         ("classpath", classpath.clone()),
-        ("classpath_separator", ";".into()),
+        (
+            "classpath_separator",
+            if cfg!(windows) { ";" } else { ":" }.into(),
+        ),
         ("library_directory", libraries.to_string_lossy().into_owned()),
         ("resolution_width", "1280".into()),
         ("resolution_height", "720".into()),
