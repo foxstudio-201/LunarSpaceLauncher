@@ -3232,18 +3232,6 @@ impl LauncherApp {
             .flex()
             .flex_col()
             .gap(px(2.0));
-        if let Some(index) = self.account_menu_hover {
-            menu = menu.child(
-                div()
-                    .absolute()
-                    .left(px(6.0))
-                    .right(px(6.0))
-                    .top(px(30.0 + index as f32 * 46.0))
-                    .h(px(42.0))
-                    .rounded(px(12.0))
-                    .bg(theme.surface_hover),
-            );
-        }
         menu = menu.child(
             div()
                 .h(px(24.0))
@@ -3278,6 +3266,11 @@ impl LauncherApp {
                     .items_center()
                     .gap(px(10.0))
                     .cursor_pointer()
+                    .bg(if self.account_menu_hover == Some(index_now) {
+                        theme.surface_hover
+                    } else {
+                        gpui::rgba(0x00000000)
+                    })
                     .on_hover({
                         let view = view.clone();
                         move |hovered, _, cx| {
@@ -3353,6 +3346,74 @@ impl LauncherApp {
                 .my(px(4.0))
                 .bg(theme.border_soft),
         );
+        if self.backend.store.legacy_dir.exists() {
+            let index_now = index;
+            let view_click = view.clone();
+            menu = menu.child(
+                div()
+                    .id("acct-sync")
+                    .h(px(46.0))
+                    .px(px(8.0))
+                    .rounded(px(12.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(10.0))
+                    .cursor_pointer()
+                    .bg(if self.account_menu_hover == Some(index_now) {
+                        theme.surface_hover
+                    } else {
+                        gpui::rgba(0x00000000)
+                    })
+                    .on_hover({
+                        let view = view.clone();
+                        move |hovered, _, cx| {
+                            let view = view.clone();
+                            let _ = view.update(cx, |this, cx| {
+                                this.account_menu_hover = if *hovered {
+                                    Some(index_now)
+                                } else if this.account_menu_hover == Some(index_now) {
+                                    None
+                                } else {
+                                    this.account_menu_hover
+                                };
+                                cx.notify();
+                            });
+                        }
+                    })
+                    .on_click(move |_, _, cx| {
+                        let view = view_click.clone();
+                        let _ = view.update(cx, |this, cx| {
+                            this.account_menu_open = false;
+                            this.sync_done = false;
+                            this.sync_running = false;
+                            this.sync_error.clear();
+                            this.sync_files = 0;
+                            this.sync_total = 0;
+                            this.sync_bytes = 0;
+                            this.sync_bytes_total = 0;
+                            this.sync_open = true;
+                            cx.notify();
+                        });
+                    })
+                    .child(
+                        div()
+                            .size(px(30.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(widgets::icon("arrows-clockwise", 17.0, theme.muted)),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .text_size(px(13.0))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child("Đồng bộ dữ liệu cũ"),
+                    ),
+            );
+            index += 1;
+        }
         let actions = [
             ("acct-manage", "user", "Quản lý tài khoản", Page::Accounts),
             ("acct-settings", "gear", "Cài đặt hệ thống", Page::Settings),
@@ -3371,6 +3432,11 @@ impl LauncherApp {
                     .items_center()
                     .gap(px(10.0))
                     .cursor_pointer()
+                    .bg(if self.account_menu_hover == Some(index_now) {
+                        theme.surface_hover
+                    } else {
+                        gpui::rgba(0x00000000)
+                    })
                     .on_hover({
                         let view = view.clone();
                         move |hovered, _, cx| {
