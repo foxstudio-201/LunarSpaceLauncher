@@ -1292,6 +1292,17 @@ pub fn show_launcher_window() {
     }
 }
 
+pub fn status_text(status: &str) -> &'static str {
+    match status {
+        "running" => "Đang chơi",
+        "starting" => "Đang khởi động",
+        "stopping" => "Đang dừng",
+        "installing" => "Đang cài",
+        "error" => "Lỗi",
+        _ => "Sẵn sàng",
+    }
+}
+
 impl LauncherApp {
     pub fn run_confirm(&mut self, cx: &mut Context<Self>) {
         let action = match &self.modal {
@@ -1364,6 +1375,14 @@ impl LauncherApp {
     }
 
     pub fn play_instance(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.launch_instance_with(id, serde_json::Value::Null, cx);
+    }
+
+    pub fn play_instance_quick(&mut self, id: &str, quick: serde_json::Value, cx: &mut Context<Self>) {
+        self.launch_instance_with(id, quick, cx);
+    }
+
+    fn launch_instance_with(&mut self, id: &str, quick: serde_json::Value, cx: &mut Context<Self>) {
         let Some(instance) = self.instances.iter().find(|i| i.id == id) else {
             return;
         };
@@ -1378,7 +1397,12 @@ impl LauncherApp {
             self.toast("warn", "Đang cài đặt", "Chờ cài xong rồi chơi.", cx);
             return;
         }
-        let rx = self.backend.launch(json!({"id": id}));
+        let opts = if quick.is_null() {
+            json!({"id": id})
+        } else {
+            json!({"id": id, "quickPlay": quick})
+        };
+        let rx = self.backend.launch(opts);
         self.launch_errors.remove(id);
         self.toast("info", "Đang khởi chạy", "Chuẩn bị Java và kiểm tra tệp game…", cx);
         let launch_id = id.to_string();

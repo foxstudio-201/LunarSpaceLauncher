@@ -381,7 +381,6 @@ pub struct LauncherApp {
     pub rail_collapsed: bool,
     pub rail_width: f32,
     pub rail_gen: u64,
-    pub scroll_gen: u64,
     pub pill_y: f32,
     pub pill_gen: u64,
     pub pill_visible: bool,
@@ -435,7 +434,6 @@ pub struct LauncherApp {
     pub file_name_input: Entity<TextField>,
     pub console_scroll: gpui::ScrollHandle,
     pub page_scroll: gpui::ScrollHandle,
-    pub page_scroll_target: f32,
     pub server_scroll: gpui::ScrollHandle,
     pub last_window: (f32, f32),
     pub window_gen: u64,
@@ -574,7 +572,6 @@ impl LauncherApp {
             rail_collapsed: false,
             rail_width: 196.0,
             rail_gen: 0,
-            scroll_gen: 0,
             pill_y: 40.0,
             pill_gen: 0,
             pill_visible: true,
@@ -650,7 +647,6 @@ impl LauncherApp {
             file_name_input,
             console_scroll: gpui::ScrollHandle::new(),
             page_scroll: gpui::ScrollHandle::new(),
-            page_scroll_target: 0.0,
             server_scroll: gpui::ScrollHandle::new(),
             last_window: (0.0, 0.0),
             window_gen: 0,
@@ -1857,7 +1853,6 @@ impl LauncherApp {
         self.page = page;
         self.select_open = None;
         self.page_scroll.set_offset(gpui::point(px(0.0), px(0.0)));
-        self.page_scroll_target = 0.0;
         let (target, visible) = self.pill_target_for_page(page);
         self.update_pill(target, visible, cx);
         cx.notify();
@@ -1940,58 +1935,6 @@ impl LauncherApp {
                         let t = (start.elapsed().as_secs_f32() / 0.28).min(1.0);
                         let eased = 1.0 - (1.0 - t).powi(3);
                         this.rail_width = from + (to - from) * eased;
-                        cx.notify();
-                        t >= 1.0
-                    })
-                    .unwrap_or(true);
-                if done {
-                    break;
-                }
-            }
-        })
-        .detach();
-    }
-
-    fn smooth_page_scroll(
-        &mut self,
-        delta: gpui::ScrollDelta,
-        line_height: gpui::Pixels,
-        cx: &mut Context<Self>,
-    ) {
-        let dy = f32::from(delta.pixel_delta(line_height).y);
-        if dy.abs() < 0.01 {
-            return;
-        }
-        let current = f32::from(self.page_scroll.offset().y);
-        let max = f32::from(self.page_scroll.max_offset().height);
-        let target = (self.page_scroll_target + dy).clamp(-max, 0.0);
-        if (target - current).abs() < 0.01 {
-            self.page_scroll_target = current;
-            return;
-        }
-        let from = current;
-        self.page_scroll_target = target;
-        self.scroll_gen = self.scroll_gen.wrapping_add(1);
-        let generation = self.scroll_gen;
-        let start = std::time::Instant::now();
-        cx.spawn(async move |this, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(std::time::Duration::from_millis(16))
-                    .await;
-                let done = this
-                    .update(cx, |this, cx| {
-                        if this.scroll_gen != generation {
-                            return true;
-                        }
-                        let t = (start.elapsed().as_secs_f32() / 0.2).min(1.0);
-                        let eased = 1.0 - (1.0 - t).powi(3);
-                        let value = from + (target - from) * eased;
-                        this.page_scroll
-                            .set_offset(gpui::point(px(0.0), px(value)));
-                        if t >= 1.0 {
-                            this.page_scroll_target = value;
-                        }
                         cx.notify();
                         t >= 1.0
                     })
@@ -2850,34 +2793,38 @@ impl Render for LauncherApp {
                             .flex_shrink_0()
                             .child(self.sidebar(cx)),
                     )
-                    .child(
-                        div()
-                            .id("page-scroll")
-                            .flex_1()
-                            .min_w(px(0.0))
-                            .h_full()
-                            .min_w(px(0.0))
-                            .overflow_x_hidden()
-                            .overflow_y_scroll()
-                            .track_scroll(&self.page_scroll)
-                            .child({
-                                use gpui::{AnimationExt, ElementId};
-                                let page_key: SharedString = format!("page-{:?}", self.page).into();
-                                div()
-                                    .id("page-content")
-                                    .on_scroll_wheel(cx.listener(|this, event: &gpui::ScrollWheelEvent, window, cx| {
-                                        cx.stop_propagation();
-                                        let line_height = window.line_height();
-                                        this.smooth_page_scroll(event.delta, line_height, cx);
-                                    }))
-                                    .child(self.content(window, cx))
-                                    .with_animation(
-                                        ElementId::Name(page_key),
-                                        gpui::Animation::new(std::time::Duration::from_millis(200)),
-                                        |el, t| el.opacity(t),
-                                    )
-                            }),
-                    ),
+                    .child({
+                        use gpui::{AnimationExt, ElementId};
+                        let page_key: SharedString = format!("page-{:?}", self.page).into();
+                        let body = div()
+                            .child(self.content(window, cx))
+                            .with_animation(
+                                ElementId::Name(page_key),
+                                gpui::Animation::new(std::time::Duration::from_millis(200)),
+                                |el, t| el.opacity(t),
+                            );
+                        if self.page == Page::Home {
+                            div()
+                                .id("home-page")
+                                .flex_1()
+                                .min_w(px(0.0))
+                                .h_full()
+                                .min_h(px(0.0))
+                                .overflow_hidden()
+                                .child(body)
+                        } else {
+                            div()
+                                .id("page-scroll")
+                                .flex_1()
+                                .min_w(px(0.0))
+                                .h_full()
+                                .min_h(px(0.0))
+                                .overflow_x_hidden()
+                                .overflow_y_scroll()
+                                .track_scroll(&self.page_scroll)
+                                .child(body)
+                        }
+                    }),
             )
             .child(self.toast_layer());
         if self.boot_splash {

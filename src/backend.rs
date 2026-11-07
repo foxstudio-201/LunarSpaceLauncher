@@ -74,6 +74,44 @@ fn fail(message: impl Into<String>) -> Value {
     json!({"ok": false, "error": message.into()})
 }
 
+fn parse_quick_play(value: Option<&Value>) -> Option<(String, String, Option<u16>)> {
+    let value = value?;
+    let kind = value.get("type").and_then(Value::as_str)?.trim().to_string();
+    match kind.as_str() {
+        "world" => {
+            let folder = value.get("folder").and_then(Value::as_str)?.trim().to_string();
+            if folder.is_empty() {
+                None
+            } else {
+                Some((kind, folder, None))
+            }
+        }
+        "server" => {
+            let host = value.get("host").and_then(Value::as_str)?.trim().to_string();
+            if host.is_empty() {
+                None
+            } else {
+                let port = value.get("port").and_then(Value::as_u64).map(|p| p as u16);
+                Some((kind, host, port))
+            }
+        }
+        _ => None,
+    }
+}
+
+fn parse_server_log(line: &str) -> Option<(String, u16)> {
+    let marker = "Connecting to ";
+    let start = line.find(marker)? + marker.len();
+    let rest = &line[start..];
+    let comma = rest.find(',')?;
+    let host = rest[..comma].trim().to_string();
+    if host.is_empty() {
+        return None;
+    }
+    let port: String = rest[comma + 1..].chars().take_while(|c| c.is_ascii_digit()).collect();
+    Some((host, port.parse().unwrap_or(25565)))
+}
+
 impl Backend {
     pub fn new(store: Arc<Store>, events: Sender<Value>) -> Arc<Self> {
         if let Some(token) = store
@@ -1162,6 +1200,47 @@ impl Backend {
     }
 
     // ---------- launch ----------
+    fn record_recent(&self, id: &str, kind: &str, item: Value) {
+        let Some(entry) = self.store.find_instance(id) else {
+            return;
+        };
+        let key_of = |row: &Value| -> String {
+            if kind == "world" {
+                row.get("folder").and_then(Value::as_str).unwrap_or("").to_string()
+            } else {
+                format!(
+                    "{}:{}",
+                    row.get("host").and_then(Value::as_str).unwrap_or(""),
+                    row.get("port").and_then(Value::as_u64).unwrap_or(25565)
+                )
+            }
+        };
+        let key = key_of(&item);
+        if key.is_empty() || key == ":25565" {
+            return;
+        }
+        let mut list = if kind == "world" {
+            entry.recent_worlds.clone()
+        } else {
+            entry.recent_servers.clone()
+        };
+        list.retain(|row| key_of(row) != key);
+        let mut item = item;
+        if item.get("playedAt").is_none() {
+            item["playedAt"] = json!(chrono::Utc::now()
+                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true));
+        }
+        list.insert(0, item);
+        list.truncate(8);
+        let patch = if kind == "world" {
+            json!({"recentWorlds": list})
+        } else {
+            json!({"recentServers": list})
+        };
+        self.store.update_instance(id, patch);
+        self.emit(json!({"type": "instances-changed"}));
+    }
+
     pub fn launch(self: &Arc<Self>, opts: Value) -> Receiver<Value> {
         let this = self.clone();
         self.request(async move { this.run_launch(opts).await })
@@ -1178,12 +1257,31 @@ impl Backend {
         if self.installing.lock().contains(&id) {
             return fail("Instance đang cài đặt.");
         }
+        let quick_play = parse_quick_play(opts.get("quickPlay"));
+        let quick_name = opts
+            .get("quickPlay")
+            .and_then(|q| q.get("name"))
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
         let paths = self.paths();
         self.store
             .update_instance(&id, json!({"status": "starting", "error": Value::Null}));
         self.logs.lock().insert(id.clone(), Vec::new());
         self.emit(json!({"type": "state", "id": id, "status": "starting"}));
         self.push_log_emit(&id, "[XyoLauncher] Đang chuẩn bị khởi chạy…");
+        if let Some((kind, value, port)) = quick_play.as_ref() {
+            if kind == "world" {
+                let name = if quick_name.is_empty() { value.clone() } else { quick_name.clone() };
+                self.record_recent(&id, "world", json!({"folder": value, "name": name}));
+            } else if kind == "server" {
+                self.record_recent(
+                    &id,
+                    "server",
+                    json!({"host": value, "port": port.unwrap_or(25565), "name": quick_name}),
+                );
+            }
+        }
 
         let mut version_id = match entry.version_id.clone() {
             Some(v) => v,
@@ -1280,7 +1378,7 @@ impl Backend {
             extra_jvm,
             auth: Some(&auth),
             demo: entry.demo,
-            quick_play: None,
+            quick_play: quick_play.as_ref().map(|(kind, value, port)| (kind.as_str(), value.as_str(), *port)),
             skin: skin.as_ref().map(|(dir, uuid, name, model)| (dir.as_path(), uuid.as_str(), name.as_str(), model.as_str())),
         }) {
             Ok(plan) => plan,
@@ -1292,9 +1390,20 @@ impl Backend {
         }
         let tx = self.events.clone();
         let log_id = id.clone();
+        let instance_dir = entry.dir.clone();
+        let world_seen = Arc::new(AtomicBool::new(false));
         let log_fn: launch::LogFn = {
             let this = self.clone();
+            let world_seen = world_seen.clone();
             Arc::new(move |line: String| {
+                if let Some((host, port)) = parse_server_log(&line) {
+                    this.record_recent(&log_id, "server", json!({"host": host, "port": port}));
+                }
+                if line.contains("Starting integrated minecraft server") && !world_seen.swap(true, Ordering::Relaxed) {
+                    if let Some(found) = world::worlds(&this.store, Path::new(&instance_dir)).into_iter().next() {
+                        this.record_recent(&log_id, "world", json!({"folder": found.folder, "name": found.name}));
+                    }
+                }
                 this.push_log(&log_id, &line);
                 let _ = tx.try_send(json!({"type": "log", "id": log_id, "line": line}));
             })
