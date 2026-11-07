@@ -778,10 +778,7 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                             "Tài khoản mặc định: {}",
                             instance.username
                         ))
-                        .when(instance.demo, |el| el.child("Chế độ demo: có"))
-                        .when(instance.boost, |el| {
-                            el.child("Tăng FPS (JVM flags): đang bật")
-                        }),
+                        .when(instance.demo, |el| el.child("Chế độ demo: có")),
                 );
             if let Some(modpack) = instance.modpack.as_ref() {
                 let view_update = view.clone();
@@ -2282,8 +2279,6 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
             let view_delete = view.clone();
             let view_choose = view.clone();
             let view_clear_java = view.clone();
-            let boost = instance.boost;
-            let view_boost = view.clone();
             let java_override = instance.java_path.clone().unwrap_or_default();
             body = body.child(
                 div()
@@ -2487,59 +2482,6 @@ pub fn render(app: &mut LauncherApp, window: &mut Window, cx: &mut Context<Launc
                                             } else {
                                                 java_override.clone()
                                             }),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .justify_between()
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .flex_col()
-                                            .child(
-                                                div()
-                                                    .text_size(px(TEXT_BASE))
-                                                    .font_weight(medium())
-                                                    .text_color(theme.text)
-                                                    .child("Tăng FPS (JVM flags)"),
-                                            )
-                                            .child(
-                                                div()
-                                                    .text_size(px(TEXT_XS))
-                                                    .text_color(theme.faint)
-                                                    .child("G1GC tối ưu cho client, ưu tiên tiến trình game."),
-                                            ),
-                                    )
-                                    .child(
-                                        div()
-                                            .id("boost-toggle")
-                                            .w(px(42.0))
-                                            .h(px(24.0))
-                                            .rounded_full()
-                                            .bg(if boost { theme.accent } else { theme.surface_active })
-                                            .p(px(3.0))
-                                            .flex()
-                                            .items_center()
-                                            .when(boost, |el| el.justify_end())
-                                            .cursor_pointer()
-                                            .on_click(move |_, _, cx| {
-                                                let _ = view_boost.update(cx, |this, cx| {
-                                                    if let Some(id) = this.selected_instance.clone() {
-                                                        let next = !this
-                                                            .instances
-                                                            .iter()
-                                                            .find(|i| i.id == id)
-                                                            .map(|i| i.boost)
-                                                            .unwrap_or(false);
-                                                        this.backend.update_instance(&id, serde_json::json!({"boost": next}));
-                                                        this.refresh_instances();
-                                                        cx.notify();
-                                                    }
-                                                });
-                                            })
-                                            .child(div().size(px(18.0)).rounded_full().bg(gpui::white())),
                                     ),
                             )
                             .child(

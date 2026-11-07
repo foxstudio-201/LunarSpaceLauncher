@@ -134,8 +134,6 @@ pub struct Instance {
     #[serde(default)]
     pub jvm_args: Option<String>,
     #[serde(default)]
-    pub boost: bool,
-    #[serde(default)]
     pub error: Option<String>,
     #[serde(default)]
     pub modpack: Option<Value>,

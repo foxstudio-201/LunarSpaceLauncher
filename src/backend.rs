@@ -1432,9 +1432,6 @@ impl Backend {
             auth.name.clone()
         };
         let mut extra_jvm: Vec<String> = Vec::new();
-        if entry.boost {
-            extra_jvm.extend(boost_flags(entry.memory_mb));
-        }
         if let Some(extra) = entry.jvm_args.as_deref() {
             extra_jvm.extend(extra.split_whitespace().map(str::to_string));
         }
@@ -1540,9 +1537,6 @@ impl Backend {
                 stopped: false,
             },
         );
-        if entry.boost {
-            launch::set_high_priority(real_pid);
-        }
         self.store
             .update_instance(&id, json!({"status": "running"}));
         self.emit(json!({"type": "state", "id": id, "status": "running", "pid": real_pid}));
@@ -4378,30 +4372,6 @@ fn unique_name(parent: &Path, name: &str) -> String {
         }
     }
     format!("{base}-{}{ext}", chrono::Utc::now().timestamp())
-}
-
-pub fn boost_flags(memory_mb: u32) -> Vec<String> {
-    vec![
-        format!("-Xms{}M", memory_mb.max(512)),
-        "-XX:+UnlockExperimentalVMOptions".into(),
-        "-XX:+UseG1GC".into(),
-        "-XX:+ParallelRefProcEnabled".into(),
-        "-XX:MaxGCPauseMillis=37".into(),
-        "-XX:+DisableExplicitGC".into(),
-        "-XX:+AlwaysPreTouch".into(),
-        "-XX:G1NewSizePercent=20".into(),
-        "-XX:G1MaxNewSizePercent=40".into(),
-        "-XX:G1HeapRegionSize=32M".into(),
-        "-XX:G1ReservePercent=20".into(),
-        "-XX:G1HeapWastePercent=5".into(),
-        "-XX:G1MixedGCCountTarget=4".into(),
-        "-XX:InitiatingHeapOccupancyPercent=15".into(),
-        "-XX:G1MixedGCLiveThresholdPercent=90".into(),
-        "-XX:G1RSetUpdatingPauseTimePercent=5".into(),
-        "-XX:SurvivorRatio=32".into(),
-        "-XX:MaxTenuringThreshold=1".into(),
-        "-XX:+PerfDisableSharedMem".into(),
-    ]
 }
 
 pub fn analyze_crash(lines: &[String]) -> Value {

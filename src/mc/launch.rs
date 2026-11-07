@@ -456,27 +456,6 @@ pub fn kill_tree(pid: u32) {
     let _ = pid;
 }
 
-pub fn set_high_priority(pid: u32) {
-    #[cfg(windows)]
-    {
-        let _ = std::process::Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-Command",
-                &format!(
-                    "Get-Process -Id {pid} -ErrorAction SilentlyContinue | ForEach-Object {{ $_.PriorityClass = 'High' }}"
-                ),
-            ])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .hide_console()
-            .status();
-    }
-
-    #[cfg(not(windows))]
-    let _ = pid;
-}
-
 pub fn latest_world_folder(instance_dir: &Path) -> Option<String> {
     let saves = instance_dir.join("saves");
     let entries = std::fs::read_dir(saves).ok()?;
