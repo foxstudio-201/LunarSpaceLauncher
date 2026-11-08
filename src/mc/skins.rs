@@ -270,6 +270,30 @@ pub async fn resolve_remote(
         }
     }
     if url.is_empty() {
+        let clean_uuid: String = uuid.chars().filter(|c| c.is_ascii_hexdigit()).collect();
+        let clean_name = name.trim();
+        let avatar_url = if (provider == "microsoft" || provider == "ely") && !clean_uuid.is_empty() {
+            Some(format!("https://crafthead.net/avatar/{clean_uuid}"))
+        } else if clean_name.len() >= 3 && clean_name.len() <= 16 {
+            Some(format!("https://crafthead.net/avatar/{clean_name}"))
+        } else {
+            None
+        };
+        if let Some(avatar_url) = avatar_url {
+            if let Ok(bytes) = crate::net::fetch_bytes(&avatar_url, MAX_DATA).await {
+                if image::load_from_memory(&bytes).is_ok() {
+                    let file = cache_dir.join(format!("avatar-{key}.png"));
+                    if std::fs::write(&file, bytes).is_ok() {
+                        index.insert(
+                            key,
+                            json!({"file": file.to_string_lossy(), "at": chrono::Utc::now().timestamp_millis()}),
+                        );
+                        let _ = std::fs::write(&index_file, serde_json::to_string(&index).unwrap_or_default());
+                        return Some(file);
+                    }
+                }
+            }
+        }
         index.insert(key, json!({"file": "", "at": chrono::Utc::now().timestamp_millis()}));
         let _ = std::fs::write(&index_file, serde_json::to_string(&index).unwrap_or_default());
         return None;
@@ -314,8 +338,18 @@ pub fn head_png(store: &Store, skin_path: &Path, uuid: &str) -> Option<PathBuf> 
     if target.is_file() {
         return Some(target);
     }
+    let is_avatar = skin_path
+        .file_name()
+        .map(|name| name.to_string_lossy().starts_with("avatar-"))
+        .unwrap_or(false);
     let source = image::open(skin_path).ok()?.to_rgba8();
-    if source.width() < 64 || source.height() < 64 {
+    if is_avatar {
+        let scaled = image::imageops::resize(&source, 32, 32, image::imageops::FilterType::Nearest);
+        let _ = std::fs::create_dir_all(target.parent()?);
+        scaled.save(&target).ok()?;
+        return Some(target);
+    }
+    if source.width() < 64 || source.height() < 32 {
         return None;
     }
     let mut head = image::RgbaImage::new(8, 8);
@@ -324,11 +358,13 @@ pub fn head_png(store: &Store, skin_path: &Path, uuid: &str) -> Option<PathBuf> 
             head.put_pixel(x, y, *source.get_pixel(8 + x, 8 + y));
         }
     }
-    for y in 0..8 {
-        for x in 0..8 {
-            let pixel = *source.get_pixel(40 + x, 8 + y);
-            if pixel[3] > 0 {
-                head.put_pixel(x, y, pixel);
+    if source.height() >= 64 {
+        for y in 0..8 {
+            for x in 0..8 {
+                let pixel = *source.get_pixel(40 + x, 8 + y);
+                if pixel[3] > 0 {
+                    head.put_pixel(x, y, pixel);
+                }
             }
         }
     }
@@ -344,7 +380,7 @@ pub fn front_png(store: &Store, skin_path: &Path, uuid: &str) -> Option<PathBuf>
         return Some(target);
     }
     let source = image::open(skin_path).ok()?.to_rgba8();
-    if source.width() < 64 || source.height() < 64 {
+    if source.width() < 64 || source.height() < 32 {
         return None;
     }
     let mut canvas = image::RgbaImage::new(16, 32);

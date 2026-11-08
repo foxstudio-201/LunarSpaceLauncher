@@ -41,20 +41,7 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
             "ely" => theme.ok,
             _ => theme.accent_soft,
         };
-        let head = if account.kind == "offline" {
-            let skin = app.backend.skin_read(&account.uuid);
-            skin.get("skinPath")
-                .and_then(Value::as_str)
-                .and_then(|path| {
-                    crate::mc::skins::head_png(
-                        &app.backend.store,
-                        Path::new(path),
-                        &account.uuid,
-                    )
-                })
-        } else {
-            None
-        };
+        let head = app.account_heads.get(&account.uuid).cloned();
         let discord_link = app
             .discord_ui
             .links
@@ -201,7 +188,7 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                             let _ = view_use.update(cx, |this, cx| {
                                 let value = this.backend.account_set_active(&id);
                                 if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
-                                    this.refresh_accounts();
+                                    this.refresh_accounts(cx);
                                     this.toast("ok", "Đã chọn tài khoản", "", cx);
                                 }
                             });
@@ -571,7 +558,7 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
                 })
                 .child(widgets::ghost_button("acc-refresh", "Làm mới", &theme, move |_, _, cx| {
                     let _ = refresh_view.update(cx, |this, cx| {
-                        this.refresh_accounts();
+                        this.refresh_accounts(cx);
                         cx.notify();
                     });
                 }))
@@ -1158,7 +1145,7 @@ Tài khoản launcher sẽ được tạo và liên kết sau khi xác minh xong
                                         let name = this.account_name.read(cx).text().trim().to_string();
                                         let value = this.backend.account_add_offline(&name);
                                         if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
-                                            this.refresh_accounts();
+                                            this.refresh_accounts(cx);
                                             this.modal = Modal::None;
                                             this.account_ui.open = false;
                                             this.toast("ok", "Đã thêm tài khoản", "", cx);
@@ -1178,7 +1165,7 @@ Tài khoản launcher sẽ được tạo và liên kết sau khi xác minh xong
                                         this.on_result(cx, rx, |this, value, cx| {
                                             this.account_ui.ms_waiting = false;
                                             if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
-                                                this.refresh_accounts();
+                                                this.refresh_accounts(cx);
                                                 this.modal = Modal::None;
                                                 this.account_ui.open = false;
                                                 this.toast("ok", "Đã đăng nhập Microsoft", "", cx);
@@ -1203,7 +1190,7 @@ Tài khoản launcher sẽ được tạo và liên kết sau khi xác minh xong
                                         let rx = this.backend.ely_login(user, pass);
                                         this.on_result(cx, rx, |this, value, cx| {
                                             if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
-                                                this.refresh_accounts();
+                                                this.refresh_accounts(cx);
                                                 this.modal = Modal::None;
                                                 this.account_ui.open = false;
                                                 this.toast("ok", "Đã thêm tài khoản ely.by", "", cx);
