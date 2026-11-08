@@ -639,7 +639,11 @@ fn dropdown(
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(if disabled { theme.faint } else { theme.muted })
         .child(div().truncate().child(current))
-        .child(widgets::icon("caret-down", 10.0, theme.faint));
+        .child(widgets::icon(
+            if open { "caret-up" } else { "caret-down" },
+            10.0,
+            theme.faint,
+        ));
     if !disabled {
         button = button.cursor_pointer().on_click(move |_, _, cx| {
             let _ = view_toggle.update(cx, |this, cx| {
@@ -709,8 +713,33 @@ fn dropdown(
         .relative()
         .w_full()
         .child(button)
-        .when(open, |el| el.child(gpui::deferred(panel)))
+        .when(open, |el| {
+            el.child(
+                gpui::deferred(panel)
+                    .with_priority(2)
+                    .into_any_element(),
+            )
+        })
         .into_any_element()
+}
+
+fn menu_backdrop(view: &gpui::WeakEntity<LauncherApp>) -> AnyElement {
+    let view = view.clone();
+    gpui::deferred(
+        div()
+            .id("content-menu-backdrop")
+            .absolute()
+            .inset_0()
+            .occlude()
+            .on_click(move |_, _, cx| {
+                let _ = view.update(cx, |this, cx| {
+                    this.content.menu = None;
+                    cx.notify();
+                });
+            }),
+    )
+    .with_priority(1)
+    .into_any_element()
 }
 
 fn apply_filter(app: &mut LauncherApp, field: &str, value: String) -> bool {
@@ -1691,7 +1720,13 @@ fn list_page(app: &mut LauncherApp, cx: &mut Context<LauncherApp>) -> AnyElement
         )
     };
     let _ = &mut filter_row2;
-    let mut page = div().flex().flex_col().gap(px(10.0)).w_full().child(header);
+    let mut page = div()
+        .relative()
+        .flex()
+        .flex_col()
+        .gap(px(10.0))
+        .w_full()
+        .child(header);
     page = page.child(filter_row1);
     if let Some(note) = env_note {
         page = page.child(note);
@@ -1703,6 +1738,9 @@ fn list_page(app: &mut LauncherApp, cx: &mut Context<LauncherApp>) -> AnyElement
     page = page.child(grid);
     if let Some(more) = more {
         page = page.child(more);
+    }
+    if menu.is_some() {
+        page = page.child(menu_backdrop(&view));
     }
     page.into_any_element()
 }
@@ -4007,7 +4045,8 @@ fn pack_list(app: &mut LauncherApp, cx: &mut Context<LauncherApp>) -> AnyElement
     if let Some(more) = more {
         scroll = scroll.child(more);
     }
-    div()
+    let mut page = div()
+        .relative()
         .flex()
         .flex_col()
         .gap(px(10.0))
@@ -4016,8 +4055,11 @@ fn pack_list(app: &mut LauncherApp, cx: &mut Context<LauncherApp>) -> AnyElement
         .min_h(px(0.0))
         .p(px(22.0))
         .child(header)
-        .child(scroll)
-        .into_any_element()
+        .child(scroll);
+    if app.content.menu.is_some() {
+        page = page.child(menu_backdrop(&view));
+    }
+    page.into_any_element()
 }
 
 fn pack_detail(app: &mut LauncherApp, cx: &mut Context<LauncherApp>) -> AnyElement {
@@ -4361,7 +4403,8 @@ fn pack_detail(app: &mut LauncherApp, cx: &mut Context<LauncherApp>) -> AnyEleme
         .overflow_y_scroll()
         .pr(px(4.0))
         .child(body);
-    div()
+    let mut page = div()
+        .relative()
         .flex()
         .flex_col()
         .gap(px(10.0))
@@ -4371,8 +4414,11 @@ fn pack_detail(app: &mut LauncherApp, cx: &mut Context<LauncherApp>) -> AnyEleme
         .p(px(22.0))
         .child(fixed)
         .child(scroll)
-        .child(footer)
-        .into_any_element()
+        .child(footer);
+    if app.content.menu.is_some() {
+        page = page.child(menu_backdrop(&view));
+    }
+    page.into_any_element()
 }
 
 fn pack_import_body(app: &LauncherApp, theme: &Theme, memory: String) -> AnyElement {
