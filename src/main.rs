@@ -69,6 +69,10 @@ fn single_instance() -> bool {
 }
 
 fn main() {
+    if std::env::args().any(|arg| arg == "--ms-login") {
+        ms_login::print_result(ms_login::run_login_window());
+        return;
+    }
     if !single_instance() {
         return;
     }

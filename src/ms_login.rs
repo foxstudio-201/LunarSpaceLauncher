@@ -1,7 +1,25 @@
+use crate::platform::HideConsole;
+use std::io::Write;
+use std::process::{Command, Stdio};
+
 #[derive(Clone, Debug)]
 enum UserEvent {
     Code(String),
     Failed(String),
+}
+
+const CLIENT_ID: &str = "00000000402b5328";
+const REDIRECT: &str = "https://login.live.com/oauth20_desktop.srf";
+const SCOPE: &str = "XboxLive.signin offline_access";
+const AUTH_URL: &str = "https://login.live.com/oauth20_authorize.srf";
+
+fn auth_url(state: &str) -> String {
+    format!(
+        "{AUTH_URL}?client_id={CLIENT_ID}&response_type=code&redirect_uri={}&scope={}&state={}&prompt=select_account",
+        percent_encode(REDIRECT),
+        percent_encode(SCOPE),
+        state
+    )
 }
 
 fn percent_encode(value: &str) -> String {
@@ -70,108 +88,148 @@ fn parse_redirect(target: &str, expected_state: &str) -> Result<String, String> 
         .ok_or_else(|| "Microsoft không trả về mã đăng nhập.".into())
 }
 
-pub fn login_code() -> Result<String, String> {
-    #[cfg(not(windows))]
-    {
-        return Err("Đăng nhập Microsoft bằng cửa sổ nhúng chỉ hỗ trợ Windows.".into());
+/// Runs the embedded Microsoft sign-in window on the current (main) thread.
+/// The launcher starts this in a child process so GTK/WebKit and the GPUI
+/// event loop never compete for the same main loop.
+pub fn run_login_window() -> Result<String, String> {
+    use tao::dpi::LogicalSize;
+    use tao::event::{Event, WindowEvent};
+    use tao::event_loop::{ControlFlow, EventLoopBuilder};
+    use tao::platform::run_return::EventLoopExtRunReturn;
+    use tao::window::WindowBuilder;
+    use wry::WebViewBuilder;
+
+    #[cfg(target_os = "linux")]
+    if gtk::init().is_err() {
+        return Err("Không khởi tạo được GTK cho cửa sổ đăng nhập.".into());
     }
-    #[cfg(windows)]
-    {
-        use tao::dpi::LogicalSize;
-        use tao::event::{Event, WindowEvent};
-        use tao::event_loop::{ControlFlow, EventLoopBuilder};
-        use tao::platform::run_return::EventLoopExtRunReturn;
-        use tao::platform::windows::WindowBuilderExtWindows;
-        use tao::window::WindowBuilder;
-        use windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
-        use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, SetForegroundWindow};
-        use wry::WebViewBuilder;
-
-        const CLIENT_ID: &str = "00000000402b5328";
-        const REDIRECT: &str = "https://login.live.com/oauth20_desktop.srf";
-        const SCOPE: &str = "XboxLive.signin offline_access";
-
-        let state = uuid::Uuid::new_v4().simple().to_string();
-        let initial_state = state.clone();
-        let url = format!(
-            "https://login.live.com/oauth20_authorize.srf?client_id={CLIENT_ID}&response_type=code&redirect_uri={}&scope={}&state={}&prompt=select_account",
-            percent_encode(REDIRECT),
-            percent_encode(SCOPE),
-            state
-        );
-
-        #[allow(unused_imports)]
-        use tao::platform::windows::EventLoopBuilderExtWindows;
-        let mut builder = EventLoopBuilder::<UserEvent>::with_user_event();
-        builder.with_any_thread(true);
-        let mut event_loop = builder.build();
-        let proxy = event_loop.create_proxy();
-        let parent = unsafe { FindWindowW(windows::core::PCWSTR::null(), windows::core::w!("XyoLauncher")).ok() };
-        let mut window_builder = WindowBuilder::new()
-            .with_title("Đăng nhập Microsoft")
-            .with_inner_size(LogicalSize::new(520.0, 680.0))
-            .with_resizable(false)
-            .with_skip_taskbar(true);
-        if let Some(parent) = parent {
-            window_builder = window_builder.with_owner_window(parent.0 as isize);
-        }
-        let window = window_builder
-            .build(&event_loop)
-            .map_err(|err| format!("Không mở được cửa sổ đăng nhập: {err}"))?;
-        if let Some(parent) = parent {
-            unsafe {
-                let _ = EnableWindow(parent, false);
+    let state = uuid::Uuid::new_v4().simple().to_string();
+    let initial_state = state.clone();
+    let mut event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
+    let proxy = event_loop.create_proxy();
+    let window = WindowBuilder::new()
+        .with_title("Đăng nhập Microsoft")
+        .with_inner_size(LogicalSize::new(520.0, 680.0))
+        .with_resizable(false)
+        .build(&event_loop)
+        .map_err(|err| format!("Không mở được cửa sổ đăng nhập: {err}"))?;
+    let proxy_nav = proxy.clone();
+    let redirect_state = initial_state.clone();
+    let builder = WebViewBuilder::new()
+        .with_url(auth_url(&state))
+        .with_navigation_handler(move |target| {
+            if target.starts_with(REDIRECT) {
+                let event = match parse_redirect(&target, &redirect_state) {
+                    Ok(code) => UserEvent::Code(code),
+                    Err(err) => UserEvent::Failed(err),
+                };
+                let _ = proxy_nav.send_event(event);
+                return false;
             }
-        }
-
-        let proxy_nav = proxy.clone();
-        let redirect_state = initial_state.clone();
-        let webview = WebViewBuilder::new()
-            .with_url(url)
-            .with_navigation_handler(move |target| {
-                if target.starts_with(REDIRECT) {
-                    let event = match parse_redirect(&target, &redirect_state) {
-                        Ok(code) => UserEvent::Code(code),
-                        Err(err) => UserEvent::Failed(err),
-                    };
-                    let _ = proxy_nav.send_event(event);
-                    return false;
-                }
-                true
-            })
-            .build(&window)
-            .map_err(|err| format!("Không mở được WebView2: {err}"))?;
-
-        let mut result: Result<String, String> =
-            Err("Bạn đã đóng cửa sổ đăng nhập Microsoft.".into());
-        event_loop.run_return(|event, _, control_flow| {
-            *control_flow = ControlFlow::Wait;
-            match event {
-                Event::UserEvent(UserEvent::Code(code)) => {
-                    result = Ok(code);
-                    *control_flow = ControlFlow::Exit;
-                }
-                Event::UserEvent(UserEvent::Failed(error)) => {
-                    result = Err(error);
-                    *control_flow = ControlFlow::Exit;
-                }
-                Event::WindowEvent {
-                    event: WindowEvent::CloseRequested,
-                    ..
-                } => {
-                    *control_flow = ControlFlow::Exit;
-                }
-                _ => {}
-            }
+            true
         });
-        drop(webview);
-        drop(window);
-        if let Some(parent) = parent {
-            unsafe {
-                let _ = EnableWindow(parent, true);
-                let _ = SetForegroundWindow(parent);
+    #[cfg(target_os = "linux")]
+    let webview = {
+        use gtk::prelude::*;
+        use tao::platform::unix::WindowExtUnix;
+        use wry::WebViewBuilderExtUnix;
+        let vbox = window
+            .default_vbox()
+            .ok_or_else(|| "Không tạo được khung cửa sổ đăng nhập.".to_string())?;
+        let fixed = gtk::Fixed::new();
+        vbox.pack_start(&fixed, true, true, 0);
+        let size = window.inner_size().to_logical::<f64>(window.scale_factor());
+        let webview = builder
+            .with_bounds(wry::Rect {
+                position: wry::dpi::LogicalPosition::new(0.0, 0.0).into(),
+                size: wry::dpi::LogicalSize::new(size.width, size.height).into(),
+            })
+            .build_gtk(&fixed)
+            .map_err(|err| format!("Không mở được cửa sổ web đăng nhập: {err}"))?;
+        fixed.show_all();
+        let _ = webview.set_visible(true);
+        webview
+    };
+    #[cfg(not(target_os = "linux"))]
+    let webview = builder
+        .build(&window)
+        .map_err(|err| format!("Không mở được cửa sổ web đăng nhập: {err}"))?;
+
+    let mut result: Result<String, String> =
+        Err("Bạn đã đóng cửa sổ đăng nhập Microsoft.".into());
+    event_loop.run_return(|event, _, control_flow| {
+        *control_flow = ControlFlow::Wait;
+        match event {
+            Event::UserEvent(UserEvent::Code(code)) => {
+                result = Ok(code);
+                *control_flow = ControlFlow::Exit;
+            }
+            Event::UserEvent(UserEvent::Failed(error)) => {
+                result = Err(error);
+                *control_flow = ControlFlow::Exit;
+            }
+            Event::WindowEvent {
+                event: WindowEvent::CloseRequested,
+                ..
+            } => {
+                *control_flow = ControlFlow::Exit;
+            }
+            _ => {}
+        }
+    });
+    drop(webview);
+    drop(window);
+    result
+}
+
+pub fn login_code() -> Result<String, String> {
+    let exe = std::env::current_exe()
+        .map_err(|err| format!("Không xác định được tệp launcher: {err}"))?;
+    let output = Command::new(exe)
+        .arg("--ms-login")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .hide_console()
+        .output()
+        .map_err(|err| format!("Không mở được cửa sổ đăng nhập Microsoft: {err}"))?;
+    let mut stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    if !stderr.trim().is_empty() {
+        if !stdout.ends_with('\n') {
+            stdout.push('\n');
+        }
+        stdout.push_str(&stderr);
+    }
+    for line in stdout.lines() {
+        if let Some(code) = line.strip_prefix("OK:") {
+            return Ok(code.trim().to_string());
+        }
+        if let Some(error) = line.strip_prefix("ERR:") {
+            let error = error.trim();
+            if !error.is_empty() {
+                return Err(error.to_string());
             }
         }
-        result
     }
+    let detail = stderr
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or("")
+        .trim();
+    if detail.is_empty() {
+        Err("Không nhận được mã đăng nhập Microsoft.".into())
+    } else {
+        Err(format!("Đăng nhập Microsoft thất bại: {detail}"))
+    }
+}
+
+pub fn print_result(result: Result<String, String>) {
+    let text = match result {
+        Ok(code) => format!("OK:{code}"),
+        Err(error) => format!("ERR:{}", error.replace(['\n', '\r'], " ")),
+    };
+    let mut stdout = std::io::stdout();
+    let _ = writeln!(stdout, "{text}");
+    let _ = stdout.flush();
 }

@@ -8658,6 +8658,7 @@ dependencies = [
  "flate2",
  "futures-util",
  "gpui",
+ "gtk",
  "html-escape",
  "image",
  "libc",
