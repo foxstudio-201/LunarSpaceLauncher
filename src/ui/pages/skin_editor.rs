@@ -866,7 +866,12 @@ pub fn render(app: &mut LauncherApp, cx: &mut Context<LauncherApp>) -> AnyElemen
                             .line_height(px(13.0))
                             .text_color(theme.muted)
                             .child(widgets::icon("info", 12.0, theme.accent_soft))
-                            .child("Đây không phải tài khoản đang dùng. Skin vẫn được lưu cho tài khoản này."),
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w(px(0.0))
+                                    .child("Đây không phải tài khoản đang dùng. Skin vẫn được lưu cho tài khoản này."),
+                            ),
                     )
                 })
                 .child(

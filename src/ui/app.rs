@@ -837,8 +837,9 @@ impl LauncherApp {
                 app.accounts_tab = "skin".into();
                 app.skin_ui.paint_model_grid = true;
             }
-            if preview == "accounts-skin-rot" {
+            if preview == "accounts-skin-settings" {
                 app.accounts_tab = "skin".into();
+                app.skin_ui.settings_open = true;
             }
         }
         app.refresh_settings();
