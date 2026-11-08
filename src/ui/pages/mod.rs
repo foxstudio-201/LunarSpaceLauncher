@@ -2228,6 +2228,20 @@ impl LauncherApp {
                     self.toast("ok", "Đã xoá tài khoản", "", cx);
                 }
             }
+            ConfirmAction::SkinReset(uuid) => {
+                let value = self.backend.skin_remove(&uuid);
+                if value.get("ok").and_then(serde_json::Value::as_bool).unwrap_or(false) {
+                    if self.skin_ui.uuid == uuid {
+                        self.skin_ui.model = "classic".into();
+                        self.skin_ui.paint_touched_skin = false;
+                        self.skin_ui.paint_touched_cape = false;
+                        self.skin_ui.loaded_uuid.clear();
+                        self.load_skin_editor(cx);
+                    }
+                    self.refresh_accounts(cx);
+                    self.toast("ok", "Đã xoá skin tuỳ chỉnh", "", cx);
+                }
+            }
         }
         self.modal = Modal::None;
         cx.notify();

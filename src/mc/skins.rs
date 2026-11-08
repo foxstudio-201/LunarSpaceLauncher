@@ -333,6 +333,26 @@ fn invalidate_head(store: &Store, uuid: &str) -> std::io::Result<()> {
     Ok(())
 }
 
+fn crop_head(source: &image::RgbaImage) -> image::RgbaImage {
+    let mut head = image::RgbaImage::new(8, 8);
+    for y in 0..8 {
+        for x in 0..8 {
+            head.put_pixel(x, y, *source.get_pixel(8 + x, 8 + y));
+        }
+    }
+    if source.height() >= 64 {
+        for y in 0..8 {
+            for x in 0..8 {
+                let pixel = *source.get_pixel(40 + x, 8 + y);
+                if pixel[3] > 0 {
+                    head.put_pixel(x, y, pixel);
+                }
+            }
+        }
+    }
+    head
+}
+
 pub fn head_png(store: &Store, skin_path: &Path, uuid: &str) -> Option<PathBuf> {
     let target = head_cache_path(store, uuid)?;
     if target.is_file() {
@@ -352,22 +372,59 @@ pub fn head_png(store: &Store, skin_path: &Path, uuid: &str) -> Option<PathBuf> 
     if source.width() < 64 || source.height() < 32 {
         return None;
     }
-    let mut head = image::RgbaImage::new(8, 8);
-    for y in 0..8 {
-        for x in 0..8 {
-            head.put_pixel(x, y, *source.get_pixel(8 + x, 8 + y));
-        }
-    }
-    if source.height() >= 64 {
-        for y in 0..8 {
-            for x in 0..8 {
-                let pixel = *source.get_pixel(40 + x, 8 + y);
-                if pixel[3] > 0 {
-                    head.put_pixel(x, y, pixel);
-                }
+    let head = crop_head(&source);
+    let scaled = image::imageops::resize(&head, 32, 32, image::imageops::FilterType::Nearest);
+    let _ = std::fs::create_dir_all(target.parent()?);
+    scaled.save(&target).ok()?;
+    Some(target)
+}
+
+pub fn default_skin_data() -> Vec<u8> {
+    let mut image = image::RgbaImage::new(64, 64);
+    let fill = |image: &mut image::RgbaImage, x: u32, y: u32, w: u32, h: u32, color: [u8; 4]| {
+        for py in y..(y + h).min(64) {
+            for px in x..(x + w).min(64) {
+                image.put_pixel(px, py, image::Rgba(color));
             }
         }
+    };
+    let skin = [198, 146, 112, 255];
+    let skin_dark = [162, 114, 85, 255];
+    let hair = [58, 41, 28, 255];
+    let shirt = [0, 175, 175, 255];
+    let pants = [76, 66, 140, 255];
+    let shoes = [64, 54, 50, 255];
+    fill(&mut image, 0, 0, 32, 16, skin);
+    fill(&mut image, 8, 0, 8, 8, hair);
+    fill(&mut image, 24, 8, 8, 8, hair);
+    fill(&mut image, 0, 8, 8, 8, skin_dark);
+    fill(&mut image, 16, 8, 8, 8, skin_dark);
+    fill(&mut image, 9, 11, 2, 1, [245, 245, 245, 255]);
+    fill(&mut image, 13, 11, 2, 1, [245, 245, 245, 255]);
+    fill(&mut image, 9, 12, 1, 1, [70, 70, 110, 255]);
+    fill(&mut image, 10, 12, 1, 1, [70, 70, 110, 255]);
+    fill(&mut image, 13, 12, 1, 1, [70, 70, 110, 255]);
+    fill(&mut image, 14, 12, 1, 1, [70, 70, 110, 255]);
+    fill(&mut image, 11, 14, 2, 1, [122, 76, 62, 255]);
+    fill(&mut image, 16, 16, 24, 16, shirt);
+    fill(&mut image, 40, 16, 16, 16, skin);
+    fill(&mut image, 40, 20, 16, 4, shirt);
+    fill(&mut image, 32, 48, 16, 16, skin);
+    fill(&mut image, 32, 52, 16, 4, shirt);
+    fill(&mut image, 0, 16, 16, 16, pants);
+    fill(&mut image, 0, 29, 16, 3, shoes);
+    fill(&mut image, 16, 48, 16, 16, pants);
+    fill(&mut image, 16, 61, 16, 3, shoes);
+    image.into_raw()
+}
+
+pub fn default_head_png(store: &Store, uuid: &str) -> Option<PathBuf> {
+    let target = head_cache_path(store, uuid)?;
+    if target.is_file() {
+        return Some(target);
     }
+    let source = image::RgbaImage::from_raw(64, 64, default_skin_data())?;
+    let head = crop_head(&source);
     let scaled = image::imageops::resize(&head, 32, 32, image::imageops::FilterType::Nearest);
     let _ = std::fs::create_dir_all(target.parent()?);
     scaled.save(&target).ok()?;
