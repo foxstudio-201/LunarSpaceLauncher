@@ -2867,7 +2867,13 @@ impl Backend {
                 // Some packs omit dependencies; fall back to the instance selection in the UI later.
             }
             let display_name = if name.trim().is_empty() { plan.name.clone() } else { name.trim().to_string() };
-            let dir = store::instance_dir_for(&display_name, &this.store.default_instance_dir());
+            let dir = opts
+                .get("dir")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| store::instance_dir_for(&display_name, &this.store.default_instance_dir()));
+            let icon = opts.get("icon").and_then(Value::as_str).unwrap_or("").to_string();
             if this.store.find_instance_by_dir(&dir).is_some() {
                 return fail("Thư mục này đã có một instance của XyoLauncher.");
             }
@@ -2898,6 +2904,7 @@ impl Backend {
                 dir: dir.to_string_lossy().into_owned(),
                 status: "installing".into(),
                 created: Some(now_iso()),
+                icon: (!icon.is_empty()).then_some(icon),
                 modpack: Some(json!({
                     "source": plan.source,
                     "name": plan.name,
@@ -2955,7 +2962,36 @@ impl Backend {
         })
     }
 
-    pub fn modpack_import_file(self: &Arc<Self>, path: String, name: String, memory: u32, token: String) -> Receiver<Value> {
+    pub fn modpack_import_plan(self: &Arc<Self>, path: String) -> Receiver<Value> {
+        self.request(async move {
+            let plan = match modpack::parse_pack_file(Path::new(&path), |_| {}).await {
+                Ok(plan) => plan,
+                Err(err) => return fail(err.to_string()),
+            };
+            ok(json!({
+                "name": plan.name,
+                "summary": plan.summary,
+                "version": plan.version,
+                "mc": plan.mc,
+                "loader": plan.loader,
+                "loaderVersion": plan.loader_version,
+                "source": plan.source,
+                "files": plan.listed,
+                "extras": plan.extras,
+                "overrides": plan.overrides.len(),
+            }))
+        })
+    }
+
+    pub fn modpack_import_file(
+        self: &Arc<Self>,
+        path: String,
+        name: String,
+        memory: u32,
+        token: String,
+        dir: Option<String>,
+        icon: Option<String>,
+    ) -> Receiver<Value> {
         let this = self.clone();
         self.request(async move {
             let this_emit = this.events.clone();
@@ -2968,7 +3004,10 @@ impl Backend {
                 Err(err) => return fail(err.to_string()),
             };
             let display_name = if name.trim().is_empty() { plan.name.clone() } else { name.trim().to_string() };
-            let dir = store::instance_dir_for(&display_name, &this.store.default_instance_dir());
+            let dir = dir
+                .filter(|value| !value.trim().is_empty())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| store::instance_dir_for(&display_name, &this.store.default_instance_dir()));
             if this.store.find_instance_by_dir(&dir).is_some() {
                 return fail("Thư mục này đã có một instance của XyoLauncher.");
             }
@@ -2995,6 +3034,7 @@ impl Backend {
                 dir: dir.to_string_lossy().into_owned(),
                 status: "installing".into(),
                 created: Some(now_iso()),
+                icon: icon.filter(|value| !value.is_empty()),
                 modpack: Some(json!({"source": plan.source, "name": plan.name, "version": plan.version})),
                 ..Default::default()
             };

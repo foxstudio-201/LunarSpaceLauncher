@@ -266,6 +266,7 @@ pub struct SystemInfo {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct ContentHit {
     pub id: String,
     pub slug: String,

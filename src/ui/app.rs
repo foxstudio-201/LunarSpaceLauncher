@@ -178,6 +178,14 @@ pub struct ContentState {
     pub done: Option<Value>,
     pub changelog_open: String,
     pub changelogs: std::collections::HashMap<String, String>,
+    pub pack_import: Option<Value>,
+    pub pack_import_error: String,
+    pub pack_stage: String,
+    pub pack_token: String,
+    pub pack_created: Option<Value>,
+    pub pack_result: Option<Value>,
+    pub version_game: String,
+    pub version_loader: String,
 }
 
 #[derive(Clone, Debug)]
@@ -329,6 +337,7 @@ pub enum Modal {
     AddAccount,
     ContentDetail,
     ContentBrowser,
+    PackImport,
     Confirm {
         title: String,
         message: String,
@@ -1926,8 +1935,8 @@ impl LauncherApp {
                 return;
             }
         }
-        if page == Page::Modpacks && self.content.hits.is_empty() {
-            self.search_content(self.content_search.read(cx).text().to_string(), cx);
+        if page == Page::Modpacks && self.content.kind != "modpacks" {
+            crate::ui::pages::content::modpack_open(self, cx);
         }
         if page == Page::Settings {
             let memory = self
@@ -2851,6 +2860,7 @@ impl LauncherApp {
             Modal::AddAccount => Some(pages::accounts::add_account_modal(self, window, cx).into_any_element()),
             Modal::ContentDetail => Some(pages::modpack::detail_modal(self, window, cx).into_any_element()),
             Modal::ContentBrowser => Some(pages::modpack::browser_modal(self, window, cx).into_any_element()),
+            Modal::PackImport => Some(pages::content::pack_import_modal(self, window, cx)),
             Modal::Confirm { .. } => Some(pages::confirm_modal(self, window, cx).into_any_element()),
             Modal::LogUpload { .. } => None,
             Modal::ModpackUpdate { .. } => Some(pages::modpack_update_modal(self, window, cx).into_any_element()),
@@ -3640,7 +3650,11 @@ impl Render for LauncherApp {
                     .child({
                         use gpui::{AnimationExt, ElementId};
                         let page_key: SharedString = format!("page-{:?}", self.page).into();
-                        let body = div()
+                        let mut body = div();
+                        if self.page == Page::Modpacks {
+                            body = body.h_full().min_h(px(0.0));
+                        }
+                        let body = body
                             .child(self.content(window, cx))
                             .with_animation(
                                 ElementId::Name(page_key),
@@ -3650,6 +3664,15 @@ impl Render for LauncherApp {
                         if self.page == Page::Home {
                             div()
                                 .id("home-page")
+                                .flex_1()
+                                .min_w(px(0.0))
+                                .h_full()
+                                .min_h(px(0.0))
+                                .overflow_hidden()
+                                .child(body)
+                        } else if self.page == Page::Modpacks {
+                            div()
+                                .id("modpack-page")
                                 .flex_1()
                                 .min_w(px(0.0))
                                 .h_full()
