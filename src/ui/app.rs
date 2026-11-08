@@ -159,6 +159,9 @@ pub struct SkinState {
     pub colors_open: bool,
     pub settings_open: bool,
     pub paint_soft: bool,
+    pub paint_model_grid: bool,
+    pub paint_loupe: Option<Arc<gpui::RenderImage>>,
+    pub paint_color_drag: String,
     pub loaded_uuid: String,
 }
 
@@ -913,6 +916,7 @@ impl LauncherApp {
             camera,
             WIDTH,
             HEIGHT,
+            self.skin_ui.paint_model_grid,
         );
         for (x, y, pixel) in image.enumerate_pixels_mut() {
             if pixel[3] < 255 {
@@ -934,25 +938,19 @@ impl LauncherApp {
     }
 
     pub fn paint_screen(&mut self, sx: f32, sy: f32, cx: &mut Context<Self>) {
+        use crate::mc::skin3d;
         const WIDTH: u32 = 640;
         const HEIGHT: u32 = 560;
         let model = self.paint_model();
         let camera = self.paint_camera(WIDTH, HEIGHT);
-        let Some(hit) = crate::mc::skin3d::pick(&model, camera, sx, sy) else {
+        let Some(hit) = skin3d::pick(&model, camera, sx, sy) else {
             return;
         };
         let wants_cape = self.skin_ui.paint_asset == "cape";
         if hit.cape != wants_cape {
             return;
         }
-        let (region_x, region_y, region_w, region_h) = hit.region;
-        if region_w == 0 || region_h == 0 {
-            return;
-        }
-        let mut u = hit.u.floor() as i32;
-        let mut v = hit.v.floor() as i32;
-        u = u.clamp(region_x as i32, (region_x + region_w).saturating_sub(1) as i32);
-        v = v.clamp(region_y as i32, (region_y + region_h).saturating_sub(1) as i32);
+        let tool = self.skin_ui.paint_tool.clone();
         let width = 64u32;
         let height = if hit.cape { 32 } else { 64 };
         let mut buffer = if hit.cape {
@@ -960,9 +958,23 @@ impl LauncherApp {
         } else {
             self.skin_ui.paint_skin.clone()
         };
-        let tool = self.skin_ui.paint_tool.clone();
-        let index = ((v as u32 * width + u as u32) * 4) as usize;
-        if tool == "picker" {
+        let mut color = if tool == "eraser" {
+            [0u8, 0, 0, 0]
+        } else {
+            let mut color = self.paint_color_rgba();
+            color[3] = self.skin_ui.paint_alpha;
+            color
+        };
+        let brush = self.skin_ui.paint_brush.max(1) as i32;
+        let soft = self.skin_ui.paint_soft;
+        let fill = tool == "fill";
+        let picker = tool == "picker";
+        let u = hit.u.floor() as i32;
+        let v = hit.v.floor() as i32;
+        let index = ((v.clamp(0, height as i32 - 1) as u32 * width
+            + u.clamp(0, width as i32 - 1) as u32)
+            * 4) as usize;
+        if picker {
             if let Some(pixel) = buffer.get(index..index + 4) {
                 self.skin_ui.paint_color = format!("#{:02X}{:02X}{:02X}", pixel[0], pixel[1], pixel[2]);
                 self.skin_ui.paint_alpha = pixel[3];
@@ -971,53 +983,120 @@ impl LauncherApp {
             }
             return;
         }
-        if tool == "fill" {
-            let mut color = self.paint_color_rgba();
-            color[3] = self.skin_ui.paint_alpha;
-            fill_region(
-                &mut buffer,
-                width,
-                height,
-                (region_x, region_y, region_w, region_h),
-                u,
-                v,
-                color,
+        let last = self.skin_ui.paint_last.unwrap_or((u, v));
+        apply_stroke(
+            &mut buffer,
+            width,
+            height,
+            &hit,
+            last,
+            (u, v),
+            color,
+            brush,
+            soft,
+            fill,
+        );
+        self.skin_ui.paint_last = Some((u, v));
+        let mirror = self.skin_ui.paint_mirror.clone();
+        let axis = match mirror.as_str() {
+            "x" => Some(0u8),
+            "y" => Some(1),
+            "z" => Some(2),
+            _ => None,
+        };
+        if let Some(axis) = axis {
+            let mirrored = skin3d::build_model_mirrored(
+                self.skin_ui.model == "slim",
+                true,
+                self.skin_ui.paint_outer,
+                &self.skin_ui.paint_hidden,
+                axis,
             );
-        } else {
-            let color = if tool == "eraser" {
-                [0u8, 0, 0, 0]
-            } else {
-                let mut color = self.paint_color_rgba();
-                color[3] = self.skin_ui.paint_alpha;
-                color
-            };
-            let brush = self.skin_ui.paint_brush.max(1) as i32;
-            let mirror = self.skin_ui.paint_mirror.clone();
-            let (last_u, last_v) = self.skin_ui.paint_last.unwrap_or((u, v));
-            let steps = (u - last_u).abs().max((v - last_v).abs()).max(1);
-            for step in 0..=steps {
-                let px = last_u + (u - last_u) * step / steps;
-                let py = last_v + (v - last_v) * step / steps;
-                stamp_brush(
-                    &mut buffer,
-                    width,
-                    height,
-                    (region_x, region_y, region_w, region_h),
-                    px,
-                    py,
-                    brush,
-                    color,
-                    &mirror,
-                );
+            if let Some(other) = skin3d::pick(&mirrored, camera, sx, sy) {
+                if other.cape == hit.cape {
+                    let ou = other.u.floor() as i32;
+                    let ov = other.v.floor() as i32;
+                    apply_stroke(
+                        &mut buffer,
+                        width,
+                        height,
+                        &other,
+                        (ou, ov),
+                        (ou, ov),
+                        color,
+                        brush,
+                        soft,
+                        fill,
+                    );
+                }
             }
-            self.skin_ui.paint_last = Some((u, v));
         }
+        let _ = &mut color;
         if hit.cape {
             self.skin_ui.paint_cape = buffer;
         } else {
             self.skin_ui.paint_skin = buffer;
         }
         self.refresh_paint_preview();
+        cx.notify();
+    }
+
+    pub fn update_loupe(&mut self, sx: f32, sy: f32, cx: &mut Context<Self>) {
+        use crate::mc::skin3d;
+        const WIDTH: u32 = 640;
+        const HEIGHT: u32 = 560;
+        let model = self.paint_model();
+        let camera = self.paint_camera(WIDTH, HEIGHT);
+        let Some(hit) = skin3d::pick(&model, camera, sx, sy) else {
+            self.skin_ui.paint_loupe = None;
+            cx.notify();
+            return;
+        };
+        let width = 64u32;
+        let height = if hit.cape { 32 } else { 64 };
+        let buffer = if hit.cape {
+            &self.skin_ui.paint_cape
+        } else {
+            &self.skin_ui.paint_skin
+        };
+        let source = image::RgbaImage::from_raw(width, height, buffer.clone());
+        let Some(source) = source else {
+            return;
+        };
+        let span = 16u32;
+        let half = span as i32 / 2;
+        let center_u = hit.u.floor() as i32;
+        let center_v = hit.v.floor() as i32;
+        let mut tile = image::RgbaImage::new(span, span);
+        for y in 0..span {
+            for x in 0..span {
+                let sx_texel = (center_u - half + x as i32).clamp(0, width as i32 - 1) as u32;
+                let sy_texel = (center_v - half + y as i32).clamp(0, height as i32 - 1) as u32;
+                let pixel = *source.get_pixel(sx_texel, sy_texel);
+                let checker = if ((x / 2) + (y / 2)) % 2 == 0 {
+                    [70u8, 74, 84]
+                } else {
+                    [46u8, 49, 57]
+                };
+                let alpha = pixel[3] as f32 / 255.0;
+                let mut out = [0u8; 4];
+                for channel in 0..3 {
+                    out[channel] = (pixel[channel] as f32 * alpha
+                        + checker[channel] as f32 * (1.0 - alpha)) as u8;
+                }
+                out[3] = 255;
+                tile.put_pixel(x, y, image::Rgba(out));
+            }
+        }
+        let scale = 7u32;
+        let scaled = image::imageops::resize(
+            &tile,
+            span * scale,
+            span * scale,
+            image::imageops::FilterType::Nearest,
+        );
+        let frame = image::Frame::new(scaled);
+        self.skin_ui.paint_loupe = Some(Arc::new(gpui::RenderImage::new(vec![frame])));
         cx.notify();
     }
 
@@ -4030,6 +4109,56 @@ fn instance_has_no_icon(instance: &Instance) -> bool {
         && !std::path::Path::new(&instance.dir).join("icon.png").is_file()
 }
 
+fn apply_stroke(
+    buffer: &mut [u8],
+    width: u32,
+    height: u32,
+    hit: &crate::mc::skin3d::Hit,
+    from: (i32, i32),
+    to: (i32, i32),
+    color: [u8; 4],
+    brush: i32,
+    soft: bool,
+    fill: bool,
+) {
+    let region = hit.region;
+    if region.2 == 0 || region.3 == 0 {
+        return;
+    }
+    let clamp_u = |value: i32| {
+        value.clamp(
+            region.0 as i32,
+            (region.0 + region.2).saturating_sub(1) as i32,
+        )
+    };
+    let clamp_v = |value: i32| {
+        value.clamp(
+            region.1 as i32,
+            (region.1 + region.3).saturating_sub(1) as i32,
+        )
+    };
+    let (to_u, to_v) = (clamp_u(to.0), clamp_v(to.1));
+    if fill {
+        fill_region(
+            buffer,
+            width,
+            height,
+            region,
+            to_u,
+            to_v,
+            color,
+        );
+        return;
+    }
+    let (from_u, from_v) = (clamp_u(from.0), clamp_v(from.1));
+    let steps = (to_u - from_u).abs().max((to_v - from_v).abs()).max(1);
+    for step in 0..=steps {
+        let px = from_u + (to_u - from_u) * step / steps;
+        let py = from_v + (to_v - from_v) * step / steps;
+        stamp_brush(buffer, width, height, region, px, py, brush, color, soft);
+    }
+}
+
 fn stamp_brush(
     buffer: &mut [u8],
     width: u32,
@@ -4039,22 +4168,62 @@ fn stamp_brush(
     cy: i32,
     brush: i32,
     color: [u8; 4],
-    mirror: &str,
+    soft: bool,
 ) {
     let half = brush / 2;
+    let radius = (half as f32 + 0.5).max(0.5);
     for dy in -half..=half {
         for dx in -half..=half {
-            paint_texel(buffer, width, height, region, cx + dx, cy + dy, color);
-            if mirror == "x" {
-                let mx = region.0 as i32 + region.2 as i32 - 1 - (cx + dx - region.0 as i32);
-                paint_texel(buffer, width, height, region, mx, cy + dy, color);
+            let factor = if soft {
+                let distance = ((dx * dx + dy * dy) as f32).sqrt();
+                (1.0 - distance / radius).clamp(0.0, 1.0)
+            } else {
+                1.0
+            };
+            if factor <= 0.0 {
+                continue;
             }
-            if mirror == "y" {
-                let my = region.1 as i32 + region.3 as i32 - 1 - (cy + dy - region.1 as i32);
-                paint_texel(buffer, width, height, region, cx + dx, my, color);
-            }
+            let mut paint = color;
+            paint[3] = (color[3] as f32 * factor) as u8;
+            paint_texel_mixed(buffer, width, height, region, cx + dx, cy + dy, paint);
         }
     }
+}
+
+fn paint_texel_mixed(
+    buffer: &mut [u8],
+    width: u32,
+    height: u32,
+    region: (u32, u32, u32, u32),
+    x: i32,
+    y: i32,
+    color: [u8; 4],
+) {
+    if x < region.0 as i32
+        || y < region.1 as i32
+        || x >= (region.0 + region.2) as i32
+        || y >= (region.1 + region.3) as i32
+        || x < 0
+        || y < 0
+        || x >= width as i32
+        || y >= height as i32
+    {
+        return;
+    }
+    let index = ((y as u32 * width + x as u32) * 4) as usize;
+    if index + 4 > buffer.len() {
+        return;
+    }
+    let alpha = color[3] as f32 / 255.0;
+    if alpha >= 0.999 {
+        buffer[index..index + 4].copy_from_slice(&color);
+        return;
+    }
+    for channel in 0..3 {
+        buffer[index + channel] = (color[channel] as f32 * alpha
+            + buffer[index + channel] as f32 * (1.0 - alpha)) as u8;
+    }
+    buffer[index + 3] = ((color[3] as f32) + buffer[index + 3] as f32 * (1.0 - alpha)) as u8;
 }
 
 fn paint_texel(

@@ -13,832 +13,496 @@ pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<Laun
     }
     let theme = app.theme.clone();
     let view = cx.entity().downgrade();
-    let add_view = view.clone();
-    let refresh_view = view.clone();
     if !app.discord_ui.links_loaded {
         app.discord_ui.links_loaded = true;
         app.load_discord_links(cx);
     }
-
-    let mut list = div().flex().gap_3().flex_wrap();
-    if app.accounts.is_empty() {
-        list = list.child(
-            div()
-                .w_full()
-                .child(pages::empty_state(
-                    &theme,
-                    "user",
-                    "Chưa có tài khoản nào",
-                    "Thêm tài khoản ngoại tuyến, Microsoft, ely.by hoặc liên kết Discord để bắt đầu chơi.",
-                )),
-        );
-    }
-    for account in app.accounts.iter().cloned().collect::<Vec<_>>() {
-        let active = app.active_account.as_deref() == Some(account.id.as_str());
-        let kind_label = match account.kind.as_str() {
-            "microsoft" => "Microsoft",
-            "ely" => "ely.by",
-            _ => "Ngoại tuyến",
-        };
-        let kind_color = match account.kind.as_str() {
-            "microsoft" => theme.info,
-            "ely" => theme.ok,
-            _ => theme.accent_soft,
-        };
-        let head = app.account_heads.get(&account.uuid).cloned();
-        let discord_link = app
-            .discord_ui
-            .links
-            .iter()
-            .find(|link| {
-                link.get("accountUuid").and_then(Value::as_str) == Some(account.uuid.as_str())
-                    || link.get("accountId").and_then(Value::as_str) == Some(account.id.as_str())
-            })
-            .cloned();
-        let view_use = view.clone();
-        let view_copy = view.clone();
-        let view_refresh = view.clone();
-        let view_remove = view.clone();
-        let view_discord = view.clone();
-        let id = account.id.clone();
-        let id_use = id.clone();
-        let id_copy = id.clone();
-        let id_refresh = id.clone();
-        let remove_id = account.id.clone();
-        let name = account.name.clone();
-        let uuid = account.uuid.clone();
-        let mut card = div()
+    let list = app.accounts.clone();
+    let count = list.len();
+    let view_add = view.clone();
+    let view_discord = view.clone();
+    let view_tab = view.clone();
+    let header = page_header(
+        &theme,
+        "Tài khoản",
+        "Tài khoản dùng khi khởi chạy game",
+        div()
             .flex()
-            .flex_col()
-            .gap_3()
-            .w(px(320.0))
-            .flex_grow()
-            .p(px(16.0))
-            .rounded(px(RADIUS_LG))
-            .bg(theme.surface)
-            .border_1()
-            .border_color(if active { theme.accent } else { theme.border_soft });
-        card = card.child(
-            div()
-                .flex()
-                .items_center()
-                .gap_3()
-                .child(
-                    div()
-                        .size(px(44.0))
-                        .rounded(px(10.0))
-                        .bg(theme.surface_active)
-                        .truncate()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .when_some(head, |el, path| {
-                            el.child(gpui::img(path).size(px(44.0)).object_fit(gpui::ObjectFit::Cover))
-                        })
-                        .when(account.kind != "offline" || !app.backend.skin_read(&account.uuid).get("skinPath").map(|v| !v.is_null()).unwrap_or(false), |el| {
-                            el.child(
-                                div()
-                                    .text_size(px(16.0))
-                                    .font_weight(bold())
-                                    .text_color(theme.accent_soft)
-                                    .child(name.chars().next().unwrap_or('?').to_uppercase().to_string()),
-                            )
-                        })
-                )
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap(px(2.0))
-                        .flex_1()
-                        .min_w(px(0.0))
-                        .child(
-                            div()
-                                .text_size(px(TEXT_MD))
-                                .font_weight(semibold())
-                                .text_color(theme.text)
-                                .truncate()
-                                .child(name.clone()),
-                        )
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap_2()
-                                .child(widgets::tag(kind_label.to_string(), kind_color, &theme))
-                                .when(active, |el| {
-                                    el.child(widgets::tag("Đang dùng", theme.ok, &theme))
-                                })
-                                .when_some(discord_link.clone(), |el, link| {
-                                    let label = link
-                                        .get("label")
-                                        .or_else(|| link.get("discordName"))
-                                        .or_else(|| link.get("discordTag"))
-                                        .and_then(Value::as_str)
-                                        .unwrap_or("Discord")
-                                        .to_string();
-                                    el.child(
-                                        div()
-                                            .flex()
-                                            .items_center()
-                                            .gap(px(4.0))
-                                            .h(px(18.0))
-                                            .px(px(6.0))
-                                            .rounded(px(4.0))
-                                            .bg(gpui::rgba(0x5865F22A))
-                                            .text_size(px(9.0))
-                                            .font_weight(bold())
-                                            .text_color(gpui::rgb(0x8B95F7))
-                                            .child(widgets::icon("discord-logo", 10.0, gpui::rgb(0x8B95F7)))
-                                            .child(label),
-                                    )
-                                }),
-                        ),
-                ),
-        );
-        // default head for offline without skin
-        if account.kind == "offline" && !app.backend.skin_read(&account.uuid).get("skinPath").map(|v| !v.is_null()).unwrap_or(false) {
-            card = card.child(
+            .items_center()
+            .gap_2()
+            .child(
                 div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .text_size(px(TEXT_XS))
+                    .text_size(px(10.0))
+                    .font_family(MONO)
                     .text_color(theme.faint)
-                    .child(widgets::icon("sparkle", 12.0, theme.faint))
-                    .child("UUID chuẩn Mojang (offline)"),
-            );
-        }
-        card = card.child(
-            div()
-                .text_size(px(10.5))
-                .text_color(theme.faint)
-                .truncate()
-                .child(uuid.clone()),
-        );
-        card = card.child(
-            div()
-                .flex()
-                .items_center()
-                .gap_2()
-                .when(!active, |el| {
-                    el.child(widgets::button(
-                        gpui::SharedString::from(format!("use-{}", id)),
-                        "Dùng",
-                        &theme,
-                        true,
-                        move |_, _, cx| {
-                            let id = id_use.clone();
-                            let _ = view_use.update(cx, |this, cx| {
-                                let value = this.backend.account_set_active(&id);
-                                if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
-                                    this.refresh_accounts(cx);
-                                    this.toast("ok", "Đã chọn tài khoản", "", cx);
-                                }
-                            });
-                        },
-                    ))
-                })
-                .child(widgets::ghost_button(
-                    gpui::SharedString::from(format!("copy-{}", id)),
-                    "UUID",
-                    &theme,
-                    {
-                        let uuid = uuid.clone();
-                        let view = view_copy.clone();
-                        move |_, _, cx| {
-                            let uuid = uuid.clone();
-                            let _ = view.update(cx, |this, cx| {
-                                cx.write_to_clipboard(gpui::ClipboardItem::new_string(uuid.clone()));
-                                this.toast("ok", "Đã sao chép UUID", uuid.clone(), cx);
-                            });
-                        }
-                    },
-                ))
-                .when(account.kind != "offline", |el| {
-                    let view = view_refresh.clone();
-                    let id = id_refresh.clone();
-                    el.child(widgets::ghost_button(
-                        gpui::SharedString::from(format!("refresh-{}", account.id)),
-                        "Làm mới",
-                        &theme,
-                        move |_, _, cx| {
-                            let id = id.clone();
-                            let _ = view.update(cx, |this, cx| {
-                                let rx = this.backend.account_refresh(id.clone());
-                                this.on_result(cx, rx, |this, value, cx| {
-                                    if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
-                                        this.toast("ok", "Đã làm mới phiên đăng nhập", "", cx);
-                                    } else {
-                                        this.toast("bad", "Làm mới thất bại", value.get("error").and_then(Value::as_str).unwrap_or(""), cx);
-                                    }
-                                });
-                            });
-                        },
-                    ))
-                })
-                .when_some(discord_link.clone(), |el, _link| {
-                    let view = view_discord.clone();
-                    let id = account.id.clone();
-                    el.child(
-                        div()
-                            .id(gpui::SharedString::from(format!("discord-unlink-{}", account.id)))
-                            .size(px(28.0))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .rounded(px(7.0))
-                            .bg(gpui::rgba(0x5865F226))
-                            .border_1()
-                            .border_color(gpui::rgba(0x5865F266))
-                            .cursor_pointer()
-                            .on_click(move |_, _, cx| {
-                                let id = id.clone();
-                                let _ = view.update(cx, |this, cx| {
-                                    let rx = this.backend.discord_unlink(id.clone());
-                                    this.on_result(cx, rx, |this, value, cx| {
-                                        if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
-                                            this.load_discord_links(cx);
-                                            this.toast("ok", "Đã gỡ liên kết Discord", "", cx);
-                                        } else {
-                                            this.toast("bad", "Gỡ liên kết thất bại", value.get("error").and_then(Value::as_str).unwrap_or(""), cx);
-                                        }
-                                    });
-                                });
-                            })
-                            .child(widgets::icon("x", 12.0, gpui::rgb(0x8B95F7))),
-                    )
-                })
-                .when(discord_link.is_none(), |el| {
-                    let view = view_discord.clone();
-                    let id = account.id.clone();
-                    let name = account.name.clone();
-                    el.child(
-                        div()
-                            .id(gpui::SharedString::from(format!("discord-link-{}", account.id)))
-                            .h(px(28.0))
-                            .px(px(8.0))
-                            .flex()
-                            .items_center()
-                            .gap(px(4.0))
-                            .rounded(px(6.0))
-                            .bg(gpui::rgba(0x5865F21F))
-                            .border_1()
-                            .border_color(gpui::rgba(0x5865F259))
-                            .text_size(px(9.5))
-                            .font_weight(bold())
-                            .text_color(gpui::rgb(0x8B95F7))
-                            .cursor_pointer()
-                            .on_click(move |_, _, cx| {
-                                let id = id.clone();
-                                let name = name.clone();
-                                let _ = view.update(cx, |this, cx| {
-                                    let input = this.discord_name_input.clone();
-                                    input.update(cx, |input, cx| input.set_text(name.clone(), cx));
-                                    open_discord_link(this, name.clone(), id.clone(), true, cx);
-                                });
-                            })
-                            .child(widgets::icon("discord-logo", 11.0, gpui::rgb(0x8B95F7)))
-                            .child("Discord"),
-                    )
-                })
-                .child(widgets::ghost_button(
-                    gpui::SharedString::from(format!("remove-{}", remove_id)),
-                    "Xoá",
-                    &theme,
-                    move |_, _, cx| {
-                        let id = remove_id.clone();
-                        let _ = view_remove.update(cx, |this, cx| {
-                            this.modal = Modal::Confirm {
-                                title: "Xoá tài khoản?".into(),
-                                message: "Phiên đăng nhập đã lưu của tài khoản này cũng sẽ bị xoá.".into(),
-                                action: ConfirmAction::RemoveAccount(id.clone()),
-                            };
-                            cx.notify();
-                        });
-                    },
-                )),
-        );
-        list = list.child(card);
-    }
-
-    // skin section
-    let offline: Vec<_> = app.accounts.iter().filter(|a| a.kind == "offline").cloned().collect();
-    if app.skin_ui.uuid.is_empty() {
-        if let Some(first) = offline.first() {
-            app.skin_ui.uuid = first.uuid.clone();
-            let skin = app.backend.skin_read(&first.uuid);
-            app.skin_ui.model = skin
-                .get("model")
-                .and_then(Value::as_str)
-                .unwrap_or("classic")
-                .to_string();
-            app.skin_ui.skin_path = skin
-                .get("skinPath")
-                .and_then(Value::as_str)
-                .map(str::to_string);
-            app.skin_ui.cape_path = skin
-                .get("capePath")
-                .and_then(Value::as_str)
-                .map(str::to_string);
-            app.refresh_skin_preview();
-        }
-    }
-    let mut skin_accounts = div().flex().items_center().gap_2().flex_wrap();
-    for account in &offline {
-        let active = app.skin_ui.uuid == account.uuid;
-        let view_acc = view.clone();
-        let uuid = account.uuid.clone();
-        let name = account.name.clone();
-        skin_accounts = skin_accounts.child(
-            div()
-                .id(gpui::SharedString::from(format!("skin-acc-{}", account.uuid)))
-                .flex()
-                .items_center()
-                .gap_2()
-                .h(px(30.0))
-                .px(px(10.0))
-                .rounded(px(6.0))
-                .bg(if active { theme.accent_dim } else { theme.surface })
-                .border_1()
-                .border_color(if active { theme.accent } else { theme.border_soft })
-                .text_size(px(TEXT_SM))
-                .text_color(if active { theme.text } else { theme.muted })
-                .cursor_pointer()
-                .on_click(move |_, _, cx| {
-                    let uuid = uuid.clone();
-                    let _ = view_acc.update(cx, |this, cx| {
-                        this.skin_ui.uuid = uuid.clone();
-                        let skin = this.backend.skin_read(&uuid);
-                        this.skin_ui.model = skin
-                            .get("model")
-                            .and_then(Value::as_str)
-                            .unwrap_or("classic")
-                            .to_string();
-                        this.skin_ui.skin_path = skin
-                            .get("skinPath")
-                            .and_then(Value::as_str)
-                            .map(str::to_string);
-                        this.skin_ui.cape_path = skin
-                            .get("capePath")
-                            .and_then(Value::as_str)
-                            .map(str::to_string);
-                        this.skin_ui.message.clear();
-                        this.refresh_skin_preview();
-                        cx.notify();
+                    .child(format!("{count} tài khoản")),
+            )
+            .child(widgets::ghost_button(
+                "acc-discord-header",
+                "Liên kết Discord",
+                &theme,
+                move |_, _, cx| {
+                    let _ = view_discord.update(cx, |this, cx| {
+                        let input = this.discord_name_input.clone();
+                        input.update(cx, |input, cx| input.clear(cx));
+                        open_discord_link(this, String::new(), String::new(), false, cx);
                     });
-                })
-                .child(widgets::icon("user", 13.0, if active { theme.accent_soft } else { theme.faint }))
-                .child(name),
-        );
-    }
-    let skin = if app.skin_ui.uuid.is_empty() {
-        Value::Null
-    } else {
-        app.backend.skin_read(&app.skin_ui.uuid)
-    };
-    let current_model = skin
-        .get("model")
-        .and_then(Value::as_str)
-        .unwrap_or("classic")
-        .to_string();
-    let skin_head = skin
-        .get("skinPath")
-        .and_then(Value::as_str)
-        .and_then(|path| crate::mc::skins::head_png(&app.backend.store, Path::new(path), &app.skin_ui.uuid));
-
-    let view_paint = view.clone();
-    let view_upload_skin = view.clone();
-    let view_upload_cape = view.clone();
-    let view_model = view.clone();
-    let view_save = view.clone();
-    let view_reset = view.clone();
-    let skin_upload = div()
-        .flex()
-        .items_center()
-        .gap_2()
-        .child(widgets::ghost_button("skin-upload", "Tải skin PNG", &theme, move |_, _, cx| {
-            let view = view_upload_skin.clone();
-            cx.spawn(async move |cx| {
-                let picked = rfd::AsyncFileDialog::new()
-                    .add_filter("PNG", &["png"])
-                    .pick_file()
-                    .await;
-                if let Some(file) = picked {
-                    let path = file.path().to_string_lossy().into_owned();
-                    let _ = view.update(cx, |this, cx| {
-                        this.skin_ui.skin_path = Some(path);
-                        this.skin_ui.message = "Đã nạp skin — nhấn Lưu để áp dụng.".into();
-                        this.refresh_skin_preview();
-                        cx.notify();
-                    });
-                }
-            })
-            .detach();
-        }))
-        .child(widgets::ghost_button("skin-paint", "Vẽ skin", &theme, move |_, _, cx| {
-            let _ = view_paint.update(cx, |this, cx| this.open_skin_painter(cx));
-        }))
-        .child(widgets::ghost_button("cape-upload", "Tải cape PNG", &theme, move |_, _, cx| {
-            let view = view_upload_cape.clone();
-            cx.spawn(async move |cx| {
-                let picked = rfd::AsyncFileDialog::new()
-                    .add_filter("PNG", &["png"])
-                    .pick_file()
-                    .await;
-                if let Some(file) = picked {
-                    let path = file.path().to_string_lossy().into_owned();
-                    let _ = view.update(cx, |this, cx| {
-                        this.skin_ui.cape_path = Some(path);
-                        this.skin_ui.message = "Đã nạp cape — nhấn Lưu để áp dụng.".into();
-                        this.refresh_skin_preview();
-                        cx.notify();
-                    });
-                }
-            })
-            .detach();
-        }));
-
-    let model_row = {
-        let mut row = div().flex().gap_2();
-        for (key, label) in [("classic", "Classic (tay 4 px)"), ("slim", "Slim (tay 3 px)")] {
-            let active = app.skin_ui.model == key;
-            let view = view_model.clone();
-            let key = key.to_string();
-            row = row.child(
-                div()
-                    .id(gpui::SharedString::from(format!("skin-model-{key}")))
-                    .h(px(30.0))
-                    .px(px(10.0))
-                    .flex()
-                    .items_center()
-                    .rounded(px(6.0))
-                    .bg(if active { theme.accent_dim } else { theme.surface })
-                    .border_1()
-                    .border_color(if active { theme.accent } else { theme.border_soft })
-                    .text_size(px(TEXT_SM))
-                    .text_color(if active { theme.text } else { theme.muted })
-                    .cursor_pointer()
-                    .on_click(move |_, _, cx| {
-                        let key = key.clone();
-                        let _ = view.update(cx, |this, cx| {
-                            this.skin_ui.model = key;
-                            cx.notify();
-                        });
-                    })
-                    .child(label),
-            );
-        }
-        row
-    };
-
-    let view_tab = cx.entity().downgrade();
-    let mut tab_row = div().flex().items_center().gap(px(6.0));
-    for (key, label) in [("list", "Danh sách tài khoản"), ("skin", "Skin")] {
-        let active = app.accounts_tab == key;
-        let view = view_tab.clone();
-        let key = key.to_string();
-        tab_row = tab_row.child(
-            div()
-                .id(gpui::SharedString::from(format!("acc-tab-{key}")))
-                .h(px(30.0))
-                .px(px(12.0))
-                .flex()
-                .items_center()
-                .rounded(px(8.0))
-                .bg(if active { theme.elevated } else { theme.bg })
-                .border_1()
-                .border_color(if active { theme.border } else { theme.bg })
-                .text_size(px(11.0))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(if active { theme.text } else { theme.faint })
-                .cursor_pointer()
-                .on_click(move |_, _, cx| {
-                    let key = key.clone();
-                    let _ = view.update(cx, |this, cx| {
-                        this.accounts_tab = key;
-                        cx.notify();
-                    });
-                })
-                .child(label.to_string()),
-        );
-    }
-    page_body()
-        .child(page_header(
-            &theme,
-            "Tài khoản",
-            "Tài khoản dùng khi khởi chạy game",
-            div()
-                .flex()
-                .items_center()
-                .gap_2()
-                .child({
-                    let discord_view = view.clone();
-                    let discord_blue = gpui::rgb(0x5865F2);
-                    div()
-                        .id("acc-discord-header")
-                        .h(px(34.0))
-                        .px(px(11.0))
-                        .flex()
-                        .items_center()
-                        .gap(px(6.0))
-                        .rounded(px(6.0))
-                        .bg(gpui::rgba(0x5865F21F))
-                        .border_1()
-                        .border_color(gpui::rgba(0x5865F259))
-                        .text_size(px(11.0))
-                        .font_weight(semibold())
-                        .text_color(gpui::rgb(0x8B95F7))
-                        .cursor_pointer()
-                        .on_click(move |_, _, cx| {
-                            let _ = discord_view.update(cx, |this, cx| {
-                                let input = this.discord_name_input.clone();
-                                input.update(cx, |input, cx| input.clear(cx));
-                                open_discord_link(this, String::new(), String::new(), false, cx);
-                            });
-                        })
-                        .child(widgets::icon("discord-logo", 13.0, discord_blue))
-                        .child("Liên kết Discord")
-                })
-                .child(widgets::ghost_button("acc-refresh", "Làm mới", &theme, move |_, _, cx| {
-                    let _ = refresh_view.update(cx, |this, cx| {
-                        this.refresh_accounts(cx);
-                        cx.notify();
-                    });
-                }))
-                .child(widgets::button("acc-add", "Thêm tài khoản", &theme, true, move |_, _, cx| {
-                    let _ = add_view.update(cx, |this, cx| {
+                },
+            ))
+            .child(widgets::button(
+                "acc-add",
+                "Thêm tài khoản",
+                &theme,
+                true,
+                move |_, _, cx| {
+                    let _ = view_add.update(cx, |this, cx| {
                         this.modal = Modal::AddAccount;
                         this.account_ui.open = true;
                         this.account_ui.error.clear();
                         this.account_ui.ms_waiting = false;
                         cx.notify();
                     });
-                })),
-        ))
-        .child(tab_row)
-        .child(
+                },
+            )),
+    );
+    let tab_row = div()
+        .flex()
+        .items_center()
+        .gap(px(4.0))
+        .child({
+            let view = view_tab.clone();
             div()
+                .id("acc-tab-list")
+                .h(px(30.0))
+                .px(px(12.0))
+                .rounded(px(8.0))
                 .flex()
                 .items_center()
-                .gap_2()
-                .p(px(12.0))
-                .rounded(px(RADIUS))
-                .bg(theme.accent_dim)
-                .text_size(px(TEXT_SM))
-                .text_color(theme.accent_soft)
-                .child(widgets::icon("info", 15.0, theme.accent_soft))
-                .child("Hỗ trợ Ngoại tuyến, Microsoft (vào được server online), ely.by và liên kết Discord. Phiên đăng nhập được lưu trên máy và tự làm mới.")
-                .when(app.accounts_tab != "list", |el| el.hidden()),
-        )
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .gap_3()
-                .child(section_title(
-                    &theme,
-                    "Danh sách tài khoản",
-                    format!("{} tài khoản", app.accounts.len()),
-                ))
-                .child(list)
-                .when(app.accounts_tab != "list", |el| el.hidden()),
-        )
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .gap_4()
-                .p(px(18.0))
-                .rounded(px(RADIUS_LG))
-                .bg(theme.surface)
+                .bg(theme.elevated)
                 .border_1()
-                .border_color(theme.border_soft)
-                .child(section_title(
-                    &theme,
-                    "Skin & cape",
-                    "Chỉ áp dụng cho tài khoản ngoại tuyến",
-                ))
-                .when(offline.is_empty(), |el| {
-                    el.child(pages::empty_state(
-                        &theme,
-                        "user",
-                        "Chưa có tài khoản ngoại tuyến",
-                        "Skin tuỳ chỉnh chỉ dùng cho tài khoản ngoại tuyến. Thêm một tài khoản rồi quay lại đây.",
-                    ))
+                .border_color(theme.border)
+                .text_size(px(11.0))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(theme.text)
+                .child("Danh sách tài khoản")
+        })
+        .child({
+            let view = view_tab.clone();
+            div()
+                .id("acc-tab-skin")
+                .h(px(30.0))
+                .px(px(12.0))
+                .rounded(px(8.0))
+                .flex()
+                .items_center()
+                .text_size(px(11.0))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(theme.faint)
+                .cursor_pointer()
+                .on_click(move |_, _, cx| {
+                    let _ = view.update(cx, |this, cx| {
+                        this.accounts_tab = "skin".into();
+                        cx.notify();
+                    });
                 })
-                .when(!offline.is_empty(), |el| {
-                    el.child(skin_accounts)
-                        .child(
+                .child("Skin")
+        });
+    let hint = div()
+        .w_full()
+        .flex()
+        .items_start()
+        .gap(px(7.0))
+        .p(px(10.0))
+        .rounded(px(8.0))
+        .bg(theme.elevated)
+        .border_1()
+        .border_color(theme.border_soft)
+        .text_size(px(10.5))
+        .line_height(px(15.0))
+        .text_color(theme.muted)
+        .child(widgets::icon("info", 13.0, theme.accent_soft))
+        .child("Hỗ trợ Ngoại tuyến, Microsoft (vào được server online), ely.by và liên kết Discord. Phiên đăng nhập được lưu trên máy và tự làm mới.");
+
+    let mut rows = div()
+        .w_full()
+        .rounded(px(RADIUS_LG))
+        .bg(theme.surface)
+        .border_1()
+        .border_color(theme.border_soft)
+        .overflow_hidden()
+        .flex()
+        .flex_col();
+    if list.is_empty() {
+        rows = rows.child(
+            div()
+                .w_full()
+                .py(px(56.0))
+                .flex()
+                .flex_col()
+                .items_center()
+                .gap(px(6.0))
+                .child(widgets::icon("user", 28.0, theme.faint))
+                .child(
+                    div()
+                        .text_size(px(12.0))
+                        .text_color(theme.muted)
+                        .child("Chưa có tài khoản nào"),
+                )
+                .child(
+                    div()
+                        .text_size(px(9.5))
+                        .text_color(theme.faint)
+                        .child("Thêm tài khoản ngoại tuyến, Microsoft, ely.by hoặc Discord để bắt đầu."),
+                ),
+        );
+    }
+    for (index, account) in list.iter().cloned().enumerate() {
+        let active = app.active_account.as_deref() == Some(account.id.as_str());
+        let online = account.kind != "offline";
+        let kind_label = match account.kind.as_str() {
+            "microsoft" => "Microsoft",
+            "ely" => "ely.by",
+            _ => "Ngoại tuyến",
+        };
+        let head = app.account_heads.get(&account.uuid).cloned();
+        let link = app
+            .discord_ui
+            .links
+            .iter()
+            .find(|row| {
+                row.get("accountUuid").and_then(Value::as_str) == Some(account.uuid.as_str())
+                    || row.get("accountId").and_then(Value::as_str) == Some(account.id.as_str())
+            })
+            .cloned();
+        let view_use = view.clone();
+        let view_copy = view.clone();
+        let view_refresh = view.clone();
+        let view_delete = view.clone();
+        let view_unlink = view.clone();
+        let view_link = view.clone();
+        let id_use = account.id.clone();
+        let id_delete = account.id.clone();
+        let id_unlink = account.id.clone();
+        let id_refresh = account.id.clone();
+        let uuid = account.uuid.clone();
+        let account_name = account.name.clone();
+        let account_id = account.id.clone();
+        let mut row = div()
+            .id(gpui::SharedString::from(format!("acc-row-{}", account.id)))
+            .w_full()
+            .flex()
+            .items_center()
+            .gap(px(12.0))
+            .px(px(14.0))
+            .py(px(12.0))
+            .when(index > 0, |el| el.border_t_1().border_color(theme.border_soft))
+            .child(
+                div()
+                    .size(px(40.0))
+                    .flex_shrink_0()
+                    .rounded(px(9.0))
+                    .bg(theme.elevated)
+                    .border_1()
+                    .border_color(theme.border_soft)
+                    .overflow_hidden()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .when_some(head, |el, path| {
+                        el.child(
+                            gpui::img(path)
+                                .size(px(40.0))
+                                .object_fit(gpui::ObjectFit::Cover),
+                        )
+                    })
+                    .when(account_heads_missing(app, &account.uuid), |el| {
+                        el.child(
                             div()
-                                .flex()
-                                .gap_4()
-                                .child({
-                                    let view_drag = view.clone();
-                                    let view_drag_move = view_drag.clone();
-                                    let view_up = view.clone();
-                                    let view_up_out = view_up.clone();
-                                    let view_spin = view.clone();
-                                    div()
-                                        .id("skin-preview-3d")
-                                        .relative()
-                                        .w(px(220.0))
-                                        .h(px(300.0))
-                                        .rounded(px(RADIUS))
-                                        .bg(theme.elevated)
-                                        .border_1()
-                                        .border_color(theme.border_soft)
-                                        .overflow_hidden()
-                                        .cursor_pointer()
-                                        .on_mouse_down(MouseButton::Left, move |event, _, cx| {
-                                            let x = f32::from(event.position.x);
-                                            let _ = view_drag.update(cx, |this, cx| {
-                                                this.skin_ui.dragging = true;
-                                                this.skin_drag_x = x;
-                                                cx.notify();
-                                            });
-                                        })
-                                        .on_mouse_move(move |event, _, cx| {
-                                            let x = f32::from(event.position.x);
-                                            let _ = view_drag_move.update(cx, |this, cx| {
-                                                if !this.skin_ui.dragging {
-                                                    return;
-                                                }
-                                                let delta = x - this.skin_drag_x;
-                                                this.skin_drag_x = x;
-                                                this.skin_ui.angle += delta * 0.012;
-                                                this.refresh_skin_preview();
-                                                cx.notify();
-                                            });
-                                        })
-                                        .on_mouse_up(MouseButton::Left, move |_, _, cx| {
-                                            let _ = view_up.update(cx, |this, cx| {
-                                                this.skin_ui.dragging = false;
-                                                cx.notify();
-                                            });
-                                        })
-                                        .on_mouse_up_out(MouseButton::Left, move |_, _, cx| {
-                                            let _ = view_up_out.update(cx, |this, cx| {
-                                                this.skin_ui.dragging = false;
-                                                cx.notify();
-                                            });
-                                        })
-                                        .child(
-                                            div()
-                                                .id("skin-spin")
-                                                .absolute()
-                                                .top(px(6.0))
-                                                .right(px(6.0))
-                                                .flex()
-                                                .items_center()
-                                                .justify_center()
-                                                .size(px(26.0))
-                                                .rounded(px(6.0))
-                                                .bg(theme.surface)
-                                                .border_1()
-                                                .border_color(theme.border_soft)
-                                                .cursor_pointer()
-                                                .hover(|s| s.bg(theme.surface_hover))
-                                                .on_click(move |_, _, cx| {
-                                                    let _ = view_spin.update(cx, |this, cx| {
-                                                        if this.skin_ui.auto_spin {
-                                                            this.stop_skin_spin();
-                                                        } else {
-                                                            this.start_skin_spin(cx);
-                                                        }
-                                                        cx.notify();
-                                                    });
-                                                })
-                                                .child(widgets::icon(
-                                                    "arrows-clockwise",
-                                                    13.0,
-                                                    if app.skin_ui.auto_spin { theme.accent_soft } else { theme.faint },
-                                                )),
-                                        )
-                                        .when_some(app.skin_preview.clone(), |el, image| {
-                                            el.child(gpui::img(image).absolute().inset_0().size_full().object_fit(gpui::ObjectFit::Contain))
-                                        })
-                                        .when(app.skin_preview.is_none(), |el| {
-                                            el.child(
-                                                div()
-                                                    .absolute()
-                                                    .inset_0()
-                                                    .flex()
-                                                    .items_center()
-                                                    .justify_center()
-                                                    .child(widgets::icon("user", 46.0, theme.faint)),
-                                            )
-                                        })
-                                        .child(
-                                            div()
-                                                .absolute()
-                                                .bottom(px(7.0))
-                                                .left(px(9.0))
-                                                .text_size(px(TEXT_XS))
-                                                .text_color(theme.faint)
-                                                .child("Kéo để xoay"),
-                                        )
-                                })
+                                .text_size(px(16.0))
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(theme.accent_soft)
                                 .child(
-                                    div()
-                                        .flex()
-                                        .flex_col()
-                                        .gap_3()
-                                        .flex_1()
-                                        .child(
-                                            div()
-                                                .flex()
-                                                .items_center()
-                                                .gap_2()
-                                                .child(
-                                                    div()
-                                                        .text_size(px(TEXT_SM))
-                                                        .font_weight(medium())
-                                                        .text_color(theme.muted)
-                                                        .child("Kiểu nhân vật"),
-                                                )
-                                                .child(model_row),
-                                        )
-                                        .child(skin_upload)
-                                        .when(!app.skin_ui.message.is_empty(), |el| {
-                                            el.child(
-                                                div()
-                                                    .text_size(px(TEXT_SM))
-                                                    .text_color(theme.ok)
-                                                    .child(app.skin_ui.message.clone()),
-                                            )
-                                        })
-                                        .child(
-                                            div()
-                                                .flex()
-                                                .items_center()
-                                                .gap_2()
-                                                .child(widgets::button("skin-save", "Lưu skin & cape", &theme, true, move |_, _, cx| {
-                                                    let view = view_save.clone();
-                                                    let _ = view.update(cx, |this, cx| {
-                                                        let uuid = this.skin_ui.uuid.clone();
-                                                        let name = this
-                                                            .accounts
-                                                            .iter()
-                                                            .find(|a| a.uuid == uuid)
-                                                            .map(|a| a.name.clone())
-                                                            .unwrap_or_default();
-                                                        let model = if this.skin_ui.model.is_empty() {
-                                                            "classic".to_string()
-                                                        } else {
-                                                            this.skin_ui.model.clone()
-                                                        };
-                                                        let skin_path = this.skin_ui.skin_path.clone();
-                                                        let cape_path = this.skin_ui.cape_path.clone();
-                                                        if skin_path.is_none() && cape_path.is_none() {
-                                                            this.skin_ui.message = "Chọn ảnh skin hoặc cape trước.".into();
-                                                            cx.notify();
-                                                            return;
-                                                        }
-                                                        let rx = this.backend.skin_save(uuid, name, model, skin_path, cape_path);
-                                                        this.on_result(cx, rx, |this, value, cx| {
-                                                            if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
-                                                                this.skin_ui.message = "Đã lưu skin. Mở lại game để áp dụng.".into();
-                                                                this.toast("ok", "Đã lưu skin", "", cx);
-                                                            } else {
-                                                                this.skin_ui.message = value
-                                                                    .get("error")
-                                                                    .and_then(Value::as_str)
-                                                                    .unwrap_or("Lưu skin thất bại")
-                                                                    .to_string();
-                                                            }
-                                                        });
-                                                    });
-                                                }))
-                                                .child(widgets::ghost_button("skin-reset", "Xoá skin tuỳ chỉnh", &theme, move |_, _, cx| {
-                                                    let view = view_reset.clone();
-                                                    let _ = view.update(cx, |this, cx| {
-                                                        this.backend.skin_remove(&this.skin_ui.uuid);
-                                                        this.skin_ui.skin_path = None;
-                                                        this.skin_ui.cape_path = None;
-                                                        this.skin_ui.message = "Đã xoá skin tuỳ chỉnh.".into();
-                                                        this.toast("ok", "Đã xoá skin", "", cx);
-                                                    });
-                                                })),
-                                        ),
+                                    account_name
+                                        .chars()
+                                        .next()
+                                        .unwrap_or('?')
+                                        .to_uppercase()
+                                        .to_string(),
                                 ),
                         )
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap_2()
-                                .text_size(px(TEXT_XS))
-                                .text_color(theme.faint)
-                                .child("PNG 64×64 cho skin, 64×32 cho cape. Skin được chia sẻ để người chơi khác dùng launcher thấy.")
-                                .when_some(skin_head, |el, path| {
-                                    el.child(gpui::img(path).size(px(28.0)).rounded(px(6.0)))
-                                }),
-                        )
-                })
-                .when(app.accounts_tab != "skin", |el| el.hidden()),
-        )
+                    }),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(3.0))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(7.0))
+                            .child(
+                                div()
+                                    .text_size(px(12.0))
+                                    .font_weight(FontWeight::BOLD)
+                                    .text_color(theme.text)
+                                    .truncate()
+                                    .child(account_name.clone()),
+                            )
+                            .child(
+                                div()
+                                    .h(px(17.0))
+                                    .px(px(5.0))
+                                    .rounded(px(4.0))
+                                    .bg(if online { theme.accent_dim } else { theme.elevated })
+                                    .flex()
+                                    .items_center()
+                                    .text_size(px(8.0))
+                                    .font_weight(FontWeight::BOLD)
+                                    .text_color(if online { theme.accent_soft } else { theme.muted })
+                                    .child(kind_label.to_uppercase()),
+                            )
+                            .when_some(link.clone(), |el, link| {
+                                let label = link
+                                    .get("label")
+                                    .or_else(|| link.get("discordName"))
+                                    .or_else(|| link.get("discordTag"))
+                                    .and_then(Value::as_str)
+                                    .unwrap_or("Discord")
+                                    .to_string();
+                                el.child(
+                                    div()
+                                        .h(px(17.0))
+                                        .px(px(5.0))
+                                        .rounded(px(4.0))
+                                        .bg(gpui::rgba(0x5865F22A))
+                                        .flex()
+                                        .items_center()
+                                        .gap(px(4.0))
+                                        .text_size(px(8.0))
+                                        .font_weight(FontWeight::BOLD)
+                                        .text_color(gpui::rgb(0x8B95F7))
+                                        .child(widgets::icon("discord-logo", 9.0, gpui::rgb(0x8B95F7)))
+                                        .child(label),
+                                )
+                            }),
+                    )
+                    .child(
+                        div()
+                            .id(gpui::SharedString::from(format!("acc-uuid-{}", account.id)))
+                            .flex()
+                            .items_center()
+                            .gap(px(5.0))
+                            .max_w_full()
+                            .cursor_pointer()
+                            .on_click(move |_, _, cx| {
+                                let uuid = uuid.clone();
+                                cx.write_to_clipboard(gpui::ClipboardItem::new_string(uuid.clone()));
+                                let _ = view_copy.update(cx, |this, cx| {
+                                    this.toast("ok", "Đã sao chép UUID", uuid, cx);
+                                });
+                            })
+                            .child(
+                                div()
+                                    .text_size(px(9.5))
+                                    .font_family(MONO)
+                                    .text_color(theme.faint)
+                                    .truncate()
+                                    .child(account.uuid.clone()),
+                            )
+                            .child(widgets::icon("copy", 10.0, theme.faint)),
+                    ),
+            )
+            .when_some(link, |el, _| {
+                let view = view_unlink.clone();
+                let id = id_unlink.clone();
+                el.child(
+                    div()
+                        .id(gpui::SharedString::from(format!("acc-unlink-{}", account_id)))
+                        .size(px(28.0))
+                        .rounded(px(7.0))
+                        .bg(gpui::rgba(0x5865F21F))
+                        .border_1()
+                        .border_color(gpui::rgba(0x5865F266))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .cursor_pointer()
+                        .on_click(move |_, _, cx| {
+                            let id = id.clone();
+                            let _ = view.update(cx, |this, cx| {
+                                let rx = this.backend.discord_unlink(id);
+                                this.on_result(cx, rx, |this, value, cx| {
+                                    if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+                                        this.load_discord_links(cx);
+                                        this.toast("ok", "Đã gỡ liên kết Discord", "", cx);
+                                    } else {
+                                        this.toast("bad", "Gỡ liên kết thất bại", value.get("error").and_then(Value::as_str).unwrap_or(""), cx);
+                                    }
+                                });
+                            });
+                        })
+                        .child(widgets::icon("x", 11.0, gpui::rgb(0x8B95F7))),
+                )
+            })
+            .when(link_is_none(app, &account), |el| {
+                let view = view_link.clone();
+                let id = account.id.clone();
+                let name = account.name.clone();
+                el.child(
+                    div()
+                        .id(gpui::SharedString::from(format!("acc-link-{}", account.id)))
+                        .h(px(28.0))
+                        .px(px(8.0))
+                        .rounded(px(6.0))
+                        .bg(gpui::rgba(0x5865F21F))
+                        .border_1()
+                        .border_color(gpui::rgba(0x5865F259))
+                        .flex()
+                        .items_center()
+                        .gap(px(5.0))
+                        .text_size(px(9.5))
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(gpui::rgb(0x8B95F7))
+                        .cursor_pointer()
+                        .on_click(move |_, _, cx| {
+                            let id = id.clone();
+                            let name = name.clone();
+                            let _ = view.update(cx, |this, cx| {
+                                open_discord_link(this, name, id, true, cx);
+                            });
+                        })
+                        .child(widgets::icon("discord-logo", 11.0, gpui::rgb(0x8B95F7)))
+                        .child("Liên kết"),
+                )
+            })
+            .when(online, |el| {
+                let view = view_refresh.clone();
+                let id = id_refresh.clone();
+                el.child(
+                    div()
+                        .id(gpui::SharedString::from(format!("acc-refresh-{}", id)))
+                        .size(px(28.0))
+                        .rounded(px(7.0))
+                        .bg(theme.elevated)
+                        .border_1()
+                        .border_color(theme.border_soft)
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .cursor_pointer()
+                        .on_click(move |_, _, cx| {
+                            let id = id.clone();
+                            let _ = view.update(cx, |this, cx| {
+                                let rx = this.backend.account_refresh(id);
+                                this.on_result(cx, rx, |this, value, cx| {
+                                    if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+                                        this.refresh_accounts(cx);
+                                        this.toast("ok", "Đã làm mới phiên đăng nhập", "", cx);
+                                    } else {
+                                        this.toast("bad", "Làm mới thất bại", value.get("error").and_then(Value::as_str).unwrap_or(""), cx);
+                                    }
+                                });
+                            });
+                        })
+                        .child(widgets::icon("arrow-clockwise", 12.0, theme.muted)),
+                )
+            })
+            .child(if active {
+                div()
+                    .h(px(26.0))
+                    .px(px(8.0))
+                    .rounded(px(5.0))
+                    .bg(theme.accent_dim)
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
+                    .text_size(px(9.5))
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(theme.accent_soft)
+                    .child(widgets::icon("check", 10.0, theme.accent_soft))
+                    .child("Đang dùng")
+                    .into_any_element()
+            } else {
+                div()
+                    .id(gpui::SharedString::from(format!("acc-use-{}", account.id)))
+                    .h(px(26.0))
+                    .px(px(9.0))
+                    .rounded(px(5.0))
+                    .bg(theme.elevated)
+                    .border_1()
+                    .border_color(theme.border)
+                    .flex()
+                    .items_center()
+                    .text_size(px(9.5))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(theme.muted)
+                    .cursor_pointer()
+                    .on_click(move |_, _, cx| {
+                        let id = id_use.clone();
+                        let _ = view_use.update(cx, |this, cx| {
+                            let value = this.backend.account_set_active(&id);
+                            if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+                                this.refresh_accounts(cx);
+                                this.toast("ok", "Đã chọn tài khoản", "", cx);
+                            }
+                        });
+                    })
+                    .child("Dùng")
+                    .into_any_element()
+            })
+            .child(
+                div()
+                    .id(gpui::SharedString::from(format!("acc-delete-{}", account.id)))
+                    .size(px(28.0))
+                    .rounded(px(7.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .cursor_pointer()
+                    .hover(|style| style.bg(gpui::rgba(0xf871711a)))
+                    .on_click(move |_, _, cx| {
+                        let id = id_delete.clone();
+                        let _ = view_delete.update(cx, |this, cx| {
+                            let value = this.backend.account_remove(&id);
+                            if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+                                this.refresh_accounts(cx);
+                                this.toast("ok", "Đã xoá tài khoản", "", cx);
+                            }
+                        });
+                    })
+                    .child(widgets::icon("trash", 13.0, theme.bad)),
+            );
+        rows = rows.child(row);
+    }
+    let content = div()
+        .w_full()
+        .max_w(px(768.0))
+        .mx_auto()
+        .flex()
+        .flex_col()
+        .gap(px(10.0))
+        .child(hint)
+        .child(rows);
+    page_body()
+        .child(header)
+        .child(tab_row)
+        .child(content)
         .into_any_element()
+}
+
+fn account_heads_missing(app: &LauncherApp, uuid: &str) -> bool {
+    !app.account_heads.contains_key(uuid)
+}
+
+fn link_is_none(app: &LauncherApp, account: &crate::models::Account) -> bool {
+    !app.discord_ui.links.iter().any(|row| {
+        row.get("accountUuid").and_then(Value::as_str) == Some(account.uuid.as_str())
+            || row.get("accountId").and_then(Value::as_str) == Some(account.id.as_str())
+    })
 }
 
 pub fn add_account_modal(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<LauncherApp>) -> AnyElement {

@@ -359,6 +359,26 @@ pub fn build_model(slim: bool, cape: bool, outer: bool, hidden: &[u8]) -> Model 
     Model { faces }
 }
 
+pub fn build_model_mirrored(
+    slim: bool,
+    cape: bool,
+    outer: bool,
+    hidden: &[u8],
+    axis: u8,
+) -> Model {
+    let mut model = build_model(slim, cape, outer, hidden);
+    for face in model.faces.iter_mut() {
+        for point in face.points.iter_mut() {
+            match axis {
+                0 => point.0 = -point.0,
+                1 => point.1 = 32.0 - point.1,
+                _ => point.2 = -point.2,
+            }
+        }
+    }
+    model
+}
+
 fn sample(skin: &RgbaImage, x: f32, y: f32) -> [f32; 4] {
     let width = skin.width() as i64;
     let height = skin.height() as i64;
@@ -400,6 +420,7 @@ pub fn render_model(
     camera: Camera,
     width: u32,
     height: u32,
+    grid: bool,
 ) -> RgbaImage {
     let mut image = RgbaImage::new(width, height);
     let mut depth = vec![f32::NEG_INFINITY; (width * height) as usize];
@@ -488,6 +509,9 @@ pub fn render_model(
             }
         }
     }
+    if grid {
+        draw_grid(model, camera, &mut image);
+    }
     image
 }
 
@@ -501,7 +525,7 @@ pub fn render(
 ) -> RgbaImage {
     let scene = build_model(model == "slim", cape.is_some(), true, &[]);
     let camera = Camera::new(angle, 0.12, width, height);
-    render_model(&scene, skin, cape, camera, width, height)
+    render_model(&scene, skin, cape, camera, width, height, false)
 }
 
 #[derive(Clone)]
@@ -573,4 +597,106 @@ pub fn pick(model: &Model, camera: Camera, point_x: f32, point_y: f32) -> Option
         }
     }
     best.map(|(_, hit)| hit)
+}
+
+
+fn draw_grid(model: &Model, camera: Camera, image: &mut RgbaImage) {
+    let width = image.width() as i32;
+    let height = image.height() as i32;
+    for face in &model.faces {
+        let mut min_u = f32::MAX;
+        let mut max_u = f32::MIN;
+        let mut min_v = f32::MAX;
+        let mut max_v = f32::MIN;
+        for corner in face.uv {
+            min_u = min_u.min(corner.2);
+            max_u = max_u.max(corner.2);
+            min_v = min_v.min(corner.3);
+            max_v = max_v.max(corner.3);
+        }
+        if max_u - min_u < 1.0 || max_v - min_v < 1.0 {
+            continue;
+        }
+        let point_at = |u: f32, v: f32| {
+            let fu = ((u - min_u) / (max_u - min_u)).clamp(0.0, 1.0);
+            let fv = ((v - min_v) / (max_v - min_v)).clamp(0.0, 1.0);
+            let p0 = face.points[0];
+            let p1 = face.points[1];
+            let p2 = face.points[2];
+            let p3 = face.points[3];
+            let x = p0.0 * (1.0 - fu) * (1.0 - fv)
+                + p1.0 * fu * (1.0 - fv)
+                + p2.0 * fu * fv
+                + p3.0 * (1.0 - fu) * fv;
+            let y = p0.1 * (1.0 - fu) * (1.0 - fv)
+                + p1.1 * fu * (1.0 - fv)
+                + p2.1 * fu * fv
+                + p3.1 * (1.0 - fu) * fv;
+            let z = p0.2 * (1.0 - fu) * (1.0 - fv)
+                + p1.2 * fu * (1.0 - fv)
+                + p2.2 * fu * fv
+                + p3.2 * (1.0 - fu) * fv;
+            camera.project((x, y, z))
+        };
+        let edge1 = (face.points[1].0 - face.points[0].0, face.points[1].1 - face.points[0].1, face.points[1].2 - face.points[0].2);
+        let edge2 = (face.points[3].0 - face.points[0].0, face.points[3].1 - face.points[0].1, face.points[3].2 - face.points[0].2);
+        let normal = (
+            edge1.1 * edge2.2 - edge1.2 * edge2.1,
+            edge1.2 * edge2.0 - edge1.0 * edge2.2,
+            edge1.0 * edge2.1 - edge1.1 * edge2.0,
+        );
+        let (sin_y, cos_y) = camera.yaw.sin_cos();
+        let (sin_p, cos_p) = camera.pitch.sin_cos();
+        let xr = normal.0 * cos_y + normal.2 * sin_y;
+        let zr = -normal.0 * sin_y + normal.2 * cos_y;
+        let nz = normal.1 * sin_p + zr * cos_p;
+        if nz >= 0.0 {
+            continue;
+        }
+        let color = [34u8, 211, 238, 130];
+        for u in (min_u.ceil() as i32)..(max_u.floor() as i32 + 1) {
+            let (x1, y1, _) = point_at(u as f32, min_v);
+            let (x2, y2, _) = point_at(u as f32, max_v);
+            draw_line(image, x1, y1, x2, y2, color, width, height);
+        }
+        for v in (min_v.ceil() as i32)..(max_v.floor() as i32 + 1) {
+            let (x1, y1, _) = point_at(min_u, v as f32);
+            let (x2, y2, _) = point_at(max_u, v as f32);
+            draw_line(image, x1, y1, x2, y2, color, width, height);
+        }
+    }
+}
+
+fn draw_line(image: &mut RgbaImage, x1: f32, y1: f32, x2: f32, y2: f32, color: [u8; 4], width: i32, height: i32) {
+    let mut x = x1.round() as i32;
+    let mut y = y1.round() as i32;
+    let xe = x2.round() as i32;
+    let ye = y2.round() as i32;
+    let dx = (xe - x).abs();
+    let dy = -(ye - y).abs();
+    let sx = if x < xe { 1 } else { -1 };
+    let sy = if y < ye { 1 } else { -1 };
+    let mut err = dx + dy;
+    loop {
+        if x >= 0 && y >= 0 && x < width && y < height {
+            let pixel = image.get_pixel_mut(x as u32, y as u32);
+            let alpha = color[3] as f32 / 255.0;
+            for channel in 0..3 {
+                pixel[channel] = (pixel[channel] as f32 * (1.0 - alpha) + color[channel] as f32 * alpha) as u8;
+            }
+            pixel[3] = 255;
+        }
+        if x == xe && y == ye {
+            break;
+        }
+        let e2 = 2 * err;
+        if e2 >= dy {
+            err += dy;
+            x += sx;
+        }
+        if e2 <= dx {
+            err += dx;
+            y += sy;
+        }
+    }
 }

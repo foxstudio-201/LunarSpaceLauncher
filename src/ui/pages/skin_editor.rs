@@ -428,6 +428,7 @@ pub fn render(app: &mut LauncherApp, cx: &mut Context<LauncherApp>) -> AnyElemen
             let x = f32::from(point.x);
             let y = f32::from(point.y);
             let _ = view_down.update(cx, |this, cx| {
+                this.update_loupe(x, y, cx);
                 match this.skin_ui.paint_tool.as_str() {
                     "rotate" | "pan" => {
                         this.skin_ui.dragging = true;
@@ -476,6 +477,8 @@ pub fn render(app: &mut LauncherApp, cx: &mut Context<LauncherApp>) -> AnyElemen
                     cx.notify();
                 } else if this.skin_ui.paint_painting {
                     this.paint_screen(x, y, cx);
+                } else {
+                    this.update_loupe(x, y, cx);
                 }
             });
         })
@@ -492,6 +495,7 @@ pub fn render(app: &mut LauncherApp, cx: &mut Context<LauncherApp>) -> AnyElemen
                 this.skin_ui.paint_painting = false;
                 this.skin_ui.dragging = false;
                 this.skin_ui.paint_last = None;
+                this.skin_ui.paint_loupe = None;
                 cx.notify();
             });
         });
@@ -749,34 +753,212 @@ pub fn render(app: &mut LauncherApp, cx: &mut Context<LauncherApp>) -> AnyElemen
                 }),
         );
     }
-    let mut alpha_row = div().flex().items_center().gap(px(4.0));
-    for value in [25u8, 64, 128, 192, 255] {
-        let view = view.clone();
-        let active = alpha == value;
-        alpha_row = alpha_row.child(
-            div()
-                .id(gpui::SharedString::from(format!("editor-alpha-{value}")))
-                .h(px(22.0))
-                .flex_1()
-                .rounded(px(4.0))
-                .bg(if active { theme.accent_dim } else { theme.elevated })
-                .border_1()
-                .border_color(if active { theme.accent } else { theme.border_soft })
-                .flex()
-                .items_center()
-                .justify_center()
-                .text_size(px(9.0))
-                .text_color(if active { theme.accent_soft } else { theme.muted })
-                .cursor_pointer()
-                .on_click(move |_, _, cx| {
-                    let _ = view.update(cx, |this, cx| {
-                        this.skin_ui.paint_alpha = value;
-                        cx.notify();
-                    });
-                })
-                .child(value.to_string()),
-        );
-    }
+    let (hue, sat, val) = rgb_to_hsv(hex_rgb(&color));
+    let sv_image = build_sv_image(hue, 198, 130);
+    let hue_image = build_hue_image(198, 12);
+    let alpha_image = build_alpha_image(&color, 198, 12);
+    let sv_bounds: Rc<RefCell<Option<gpui::Bounds<gpui::Pixels>>>> =
+        Rc::new(RefCell::new(None));
+    let hue_bounds: Rc<RefCell<Option<gpui::Bounds<gpui::Pixels>>>> =
+        Rc::new(RefCell::new(None));
+    let alpha_bounds: Rc<RefCell<Option<gpui::Bounds<gpui::Pixels>>>> =
+        Rc::new(RefCell::new(None));
+    let sv_bounds_set = sv_bounds.clone();
+    let hue_bounds_set = hue_bounds.clone();
+    let alpha_bounds_set = alpha_bounds.clone();
+    let sv_down = sv_bounds.clone();
+    let hue_down = hue_bounds.clone();
+    let alpha_down = alpha_bounds.clone();
+    let sv_move = sv_bounds.clone();
+    let hue_move = hue_bounds.clone();
+    let alpha_move = alpha_bounds.clone();
+    let sv_view_down = view.clone();
+    let sv_view_move = view.clone();
+    let hue_view_down = view.clone();
+    let hue_view_move = view.clone();
+    let alpha_view_down = view.clone();
+    let alpha_view_move = view.clone();
+    let sv_up = view.clone();
+    let hue_up = view.clone();
+    let alpha_up = view.clone();
+    let sv_widget = div()
+        .on_children_prepainted(move |children, _, _| {
+            if let Some(first) = children.first() {
+                *sv_bounds_set.borrow_mut() = Some(*first);
+            }
+        })
+        .id("hsv-square")
+        .relative()
+        .w_full()
+        .h(px(130.0))
+        .rounded(px(7.0))
+        .overflow_hidden()
+        .border_1()
+        .border_color(theme.border)
+        .cursor_crosshair()
+        .child(gpui::img(std::sync::Arc::new(gpui::RenderImage::new(vec![image::Frame::new(sv_image)]))).size_full())
+        .on_mouse_down(gpui::MouseButton::Left, move |event, _, cx| {
+            let Some(point) = sv_down
+                .borrow()
+                .as_ref()
+                .and_then(|bounds| bounds.localize(&event.position))
+            else {
+                return;
+            };
+            let x = (f32::from(point.x) / 198.0).clamp(0.0, 1.0);
+            let y = (f32::from(point.y) / 130.0).clamp(0.0, 1.0);
+            let _ = sv_view_move.update(cx, |this, cx| {
+                this.skin_ui.paint_color_drag = "sv".into();
+                let (hue, _, _) = rgb_to_hsv(hex_rgb(&this.skin_ui.paint_color));
+                let (r, g, b) = hsv_to_rgb(hue, x, 1.0 - y);
+                this.skin_ui.paint_color = rgb_hex(r, g, b);
+                if this.skin_ui.paint_tool == "eraser" || this.skin_ui.paint_tool == "picker" {
+                    this.skin_ui.paint_tool = "pencil".into();
+                }
+                cx.notify();
+            });
+        })
+        .on_mouse_move(move |event, _, cx| {
+            let Some(point) = sv_move
+                .borrow()
+                .as_ref()
+                .and_then(|bounds| bounds.localize(&event.position))
+            else {
+                return;
+            };
+            let x = (f32::from(point.x) / 198.0).clamp(0.0, 1.0);
+            let y = (f32::from(point.y) / 130.0).clamp(0.0, 1.0);
+            let _ = sv_view_down.update(cx, |this, cx| {
+                if this.skin_ui.paint_color_drag != "sv" {
+                    return;
+                }
+                let (hue, _, _) = rgb_to_hsv(hex_rgb(&this.skin_ui.paint_color));
+                let (r, g, b) = hsv_to_rgb(hue, x, 1.0 - y);
+                this.skin_ui.paint_color = rgb_hex(r, g, b);
+                cx.notify();
+            });
+        })
+        .on_mouse_up(gpui::MouseButton::Left, move |_, _, cx| {
+            let _ = sv_up.update(cx, |this, cx| {
+                this.skin_ui.paint_color_drag.clear();
+                cx.notify();
+            });
+        });
+    let hue_widget = div()
+        .on_children_prepainted(move |children, _, _| {
+            if let Some(first) = children.first() {
+                *hue_bounds_set.borrow_mut() = Some(*first);
+            }
+        })
+        .id("hue-slider")
+        .relative()
+        .w_full()
+        .h(px(12.0))
+        .rounded(px(4.0))
+        .overflow_hidden()
+        .border_1()
+        .border_color(theme.border)
+        .cursor_crosshair()
+        .child(gpui::img(std::sync::Arc::new(gpui::RenderImage::new(vec![image::Frame::new(hue_image)]))).size_full())
+        .on_mouse_down(gpui::MouseButton::Left, move |event, _, cx| {
+            let Some(point) = hue_down
+                .borrow()
+                .as_ref()
+                .and_then(|bounds| bounds.localize(&event.position))
+            else {
+                return;
+            };
+            let x = (f32::from(point.x) / 198.0).clamp(0.0, 1.0);
+            let _ = hue_view_move.update(cx, |this, cx| {
+                this.skin_ui.paint_color_drag = "hue".into();
+                let (_, s, v) = rgb_to_hsv(hex_rgb(&this.skin_ui.paint_color));
+                let (r, g, b) = hsv_to_rgb(x * 360.0, s, v);
+                this.skin_ui.paint_color = rgb_hex(r, g, b);
+                if this.skin_ui.paint_tool == "eraser" || this.skin_ui.paint_tool == "picker" {
+                    this.skin_ui.paint_tool = "pencil".into();
+                }
+                cx.notify();
+            });
+        })
+        .on_mouse_move(move |event, _, cx| {
+            let Some(point) = hue_move
+                .borrow()
+                .as_ref()
+                .and_then(|bounds| bounds.localize(&event.position))
+            else {
+                return;
+            };
+            let x = (f32::from(point.x) / 198.0).clamp(0.0, 1.0);
+            let _ = hue_view_down.update(cx, |this, cx| {
+                if this.skin_ui.paint_color_drag != "hue" {
+                    return;
+                }
+                let (_, s, v) = rgb_to_hsv(hex_rgb(&this.skin_ui.paint_color));
+                let (r, g, b) = hsv_to_rgb(x * 360.0, s, v);
+                this.skin_ui.paint_color = rgb_hex(r, g, b);
+                cx.notify();
+            });
+        })
+        .on_mouse_up(gpui::MouseButton::Left, move |_, _, cx| {
+            let _ = hue_up.update(cx, |this, cx| {
+                this.skin_ui.paint_color_drag.clear();
+                cx.notify();
+            });
+        });
+    let alpha_widget = div()
+        .on_children_prepainted(move |children, _, _| {
+            if let Some(first) = children.first() {
+                *alpha_bounds_set.borrow_mut() = Some(*first);
+            }
+        })
+        .id("alpha-slider")
+        .relative()
+        .w_full()
+        .h(px(12.0))
+        .rounded(px(4.0))
+        .overflow_hidden()
+        .border_1()
+        .border_color(theme.border)
+        .cursor_crosshair()
+        .child(gpui::img(std::sync::Arc::new(gpui::RenderImage::new(vec![image::Frame::new(alpha_image)]))).size_full())
+        .on_mouse_down(gpui::MouseButton::Left, move |event, _, cx| {
+            let Some(point) = alpha_down
+                .borrow()
+                .as_ref()
+                .and_then(|bounds| bounds.localize(&event.position))
+            else {
+                return;
+            };
+            let x = (f32::from(point.x) / 198.0).clamp(0.0, 1.0);
+            let _ = alpha_view_move.update(cx, |this, cx| {
+                this.skin_ui.paint_color_drag = "alpha".into();
+                this.skin_ui.paint_alpha = (x * 255.0).round() as u8;
+                cx.notify();
+            });
+        })
+        .on_mouse_move(move |event, _, cx| {
+            let Some(point) = alpha_move
+                .borrow()
+                .as_ref()
+                .and_then(|bounds| bounds.localize(&event.position))
+            else {
+                return;
+            };
+            let x = (f32::from(point.x) / 198.0).clamp(0.0, 1.0);
+            let _ = alpha_view_down.update(cx, |this, cx| {
+                if this.skin_ui.paint_color_drag != "alpha" {
+                    return;
+                }
+                this.skin_ui.paint_alpha = (x * 255.0).round() as u8;
+                cx.notify();
+            });
+        })
+        .on_mouse_up(gpui::MouseButton::Left, move |_, _, cx| {
+            let _ = alpha_up.update(cx, |this, cx| {
+                this.skin_ui.paint_color_drag.clear();
+                cx.notify();
+            });
+        });
     let view_colors = view.clone();
     let colors_panel = div()
         .absolute()
@@ -838,15 +1020,17 @@ pub fn render(app: &mut LauncherApp, cx: &mut Context<LauncherApp>) -> AnyElemen
                         .child(color.clone()),
                 ),
         )
-        .child(palette_grid)
+        .child(sv_widget)
+        .child(hue_widget)
         .child(
             div()
                 .text_size(px(8.5))
                 .font_weight(FontWeight::BOLD)
                 .text_color(theme.faint)
-                .child("ĐỘ ĐỤC"),
+                .child(format!("ĐỘ ĐỤC · {}", alpha)),
         )
-        .child(alpha_row)
+        .child(alpha_widget)
+        .child(palette_grid)
         .child(
             div()
                 .flex_1()
@@ -926,7 +1110,7 @@ pub fn render(app: &mut LauncherApp, cx: &mut Context<LauncherApp>) -> AnyElemen
         );
     }
     let mut mirror_row = div().flex().items_center().gap(px(3.0));
-    for (key, label) in [("off", "Off"), ("x", "X"), ("y", "Y")] {
+    for (key, label) in [("off", "Off"), ("x", "X"), ("y", "Y"), ("z", "Z")] {
         let view = view.clone();
         let key = key.to_string();
         let active = mirror == key;
@@ -1016,6 +1200,55 @@ pub fn render(app: &mut LauncherApp, cx: &mut Context<LauncherApp>) -> AnyElemen
                 .child("Đối xứng"),
         )
         .child(mirror_row)
+        .child({
+            let view = view.clone();
+            let active = app.skin_ui.paint_soft;
+            div()
+                .id("editor-soft")
+                .h(px(24.0))
+                .px(px(7.0))
+                .rounded(px(5.0))
+                .bg(if active { theme.accent_dim } else { theme.elevated })
+                .border_1()
+                .border_color(if active { theme.accent } else { theme.border_soft })
+                .flex()
+                .items_center()
+                .text_size(px(9.0))
+                .text_color(if active { theme.accent_soft } else { theme.muted })
+                .cursor_pointer()
+                .on_click(move |_, _, cx| {
+                    let _ = view.update(cx, |this, cx| {
+                        this.skin_ui.paint_soft = !this.skin_ui.paint_soft;
+                        cx.notify();
+                    });
+                })
+                .child(if active { "Cọ mềm" } else { "Cọ pixel" })
+        })
+        .child({
+            let view = view.clone();
+            let active = app.skin_ui.paint_model_grid;
+            div()
+                .id("editor-grid")
+                .h(px(24.0))
+                .px(px(7.0))
+                .rounded(px(5.0))
+                .bg(if active { theme.accent_dim } else { theme.elevated })
+                .border_1()
+                .border_color(if active { theme.accent } else { theme.border_soft })
+                .flex()
+                .items_center()
+                .text_size(px(9.0))
+                .text_color(if active { theme.accent_soft } else { theme.muted })
+                .cursor_pointer()
+                .on_click(move |_, _, cx| {
+                    let _ = view.update(cx, |this, cx| {
+                        this.skin_ui.paint_model_grid = !this.skin_ui.paint_model_grid;
+                        this.refresh_paint_preview();
+                        cx.notify();
+                    });
+                })
+                .child("Lưới")
+        })
         .child(
             div()
                 .id("editor-settings")
@@ -1311,6 +1544,76 @@ pub fn render(app: &mut LauncherApp, cx: &mut Context<LauncherApp>) -> AnyElemen
             )
     });
 
+    let loupe = app.skin_ui.paint_loupe.clone().map(|image| {
+        div()
+            .absolute()
+            .bottom(px(58.0))
+            .right(px(if colors_open { 238.0 } else { 12.0 }))
+            .w(px(120.0))
+            .h(px(120.0))
+            .rounded(px(8.0))
+            .overflow_hidden()
+            .bg(theme.elevated)
+            .border_2()
+            .border_color(theme.border)
+            .shadow_lg()
+            .child(gpui::img(image).size_full())
+    });
+    let axis_layout = [
+        ("X", (1.0f32, 0.0, 0.0), gpui::rgb(0xef5350), -std::f32::consts::FRAC_PI_2, 0.0),
+        ("Y", (0.0, 1.0, 0.0), gpui::rgb(0x4ade80), 0.0, std::f32::consts::FRAC_PI_2),
+        ("Z", (0.0, 0.0, 1.0), gpui::rgb(0x60a5fa), 0.0, 0.0),
+        ("−X", (-1.0, 0.0, 0.0), gpui::rgba(0xef535099), std::f32::consts::FRAC_PI_2, 0.0),
+        ("−Y", (0.0, -1.0, 0.0), gpui::rgba(0x4ade8099), 0.0, -std::f32::consts::FRAC_PI_2),
+        ("−Z", (0.0, 0.0, -1.0), gpui::rgba(0x60a5fa99), std::f32::consts::PI, 0.0),
+    ];
+    let mut gizmo = div()
+        .absolute()
+        .bottom(px(10.0))
+        .left(px(if tools_open { 300.0 } else { 12.0 }))
+        .size(px(112.0))
+        .rounded_full()
+        .bg(gpui::rgba(0x0d0d10cc))
+        .border_1()
+        .border_color(theme.border_soft);
+    for (label, vector, color, yaw, pitch) in axis_layout {
+        let (sin_y, cos_y) = app.skin_ui.angle.sin_cos();
+        let (sin_p, cos_p) = app.skin_ui.paint_pitch.sin_cos();
+        let xr = vector.0 * cos_y + vector.2 * sin_y;
+        let zr = -vector.0 * sin_y + vector.2 * cos_y;
+        let yr = vector.1 * cos_p - zr * sin_p;
+        let center = 56.0;
+        let x = (center + xr * 34.0).clamp(8.0, 96.0);
+        let y = (center - yr * 34.0).clamp(8.0, 96.0);
+        let view_axis = view.clone();
+        gizmo = gizmo.child(
+            div()
+                .id(gpui::SharedString::from(format!("gizmo-{label}")))
+                .absolute()
+                .left(px(x - 9.0))
+                .top(px(y - 9.0))
+                .size(px(18.0))
+                .rounded_full()
+                .bg(color)
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_size(px(8.0))
+                .font_weight(FontWeight::BOLD)
+                .text_color(gpui::rgb(0x0a0a0a))
+                .cursor_pointer()
+                .on_click(move |_, _, cx| {
+                    let _ = view_axis.update(cx, |this, cx| {
+                        this.skin_ui.angle = yaw;
+                        this.skin_ui.paint_pitch = pitch.clamp(-1.1, 1.1);
+                        this.refresh_paint_preview();
+                        cx.notify();
+                    });
+                })
+                .child(label),
+        );
+    }
+
     let viewer = div()
         .relative()
         .flex_1()
@@ -1324,6 +1627,8 @@ pub fn render(app: &mut LauncherApp, cx: &mut Context<LauncherApp>) -> AnyElemen
         .when(colors_open, |el| el.child(colors_panel))
         .children(collapsed_tools)
         .children(collapsed_colors)
+        .children(loupe)
+        .child(gizmo)
         .children(settings_panel);
 
     let overlay = div()
@@ -1341,3 +1646,104 @@ pub fn render(app: &mut LauncherApp, cx: &mut Context<LauncherApp>) -> AnyElemen
 }
 
 fn tools_panel_hidden(_app: &LauncherApp, _theme: &Theme, _view: gpui::WeakEntity<LauncherApp>) {}
+
+
+fn hex_rgb(hex: &str) -> (u8, u8, u8) {
+    let hex = hex.trim_start_matches('#');
+    let r = u8::from_str_radix(hex.get(0..2).unwrap_or("ff"), 16).unwrap_or(255);
+    let g = u8::from_str_radix(hex.get(2..4).unwrap_or("ff"), 16).unwrap_or(255);
+    let b = u8::from_str_radix(hex.get(4..6).unwrap_or("ff"), 16).unwrap_or(255);
+    (r, g, b)
+}
+
+fn rgb_hex(r: u8, g: u8, b: u8) -> String {
+    format!("#{r:02X}{g:02X}{b:02X}")
+}
+
+fn rgb_to_hsv((r, g, b): (u8, u8, u8)) -> (f32, f32, f32) {
+    let r = r as f32 / 255.0;
+    let g = g as f32 / 255.0;
+    let b = b as f32 / 255.0;
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let delta = max - min;
+    let h = if delta <= f32::EPSILON {
+        0.0
+    } else if max == r {
+        60.0 * (((g - b) / delta) % 6.0)
+    } else if max == g {
+        60.0 * ((b - r) / delta + 2.0)
+    } else {
+        60.0 * ((r - g) / delta + 4.0)
+    };
+    let h = if h < 0.0 { h + 360.0 } else { h };
+    let s = if max <= f32::EPSILON { 0.0 } else { delta / max };
+    (h, s, max)
+}
+
+fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (u8, u8, u8) {
+    let c = v * s;
+    let hp = (h % 360.0) / 60.0;
+    let x = c * (1.0 - (hp % 2.0 - 1.0).abs());
+    let (r, g, b) = if hp < 1.0 {
+        (c, x, 0.0)
+    } else if hp < 2.0 {
+        (x, c, 0.0)
+    } else if hp < 3.0 {
+        (0.0, c, x)
+    } else if hp < 4.0 {
+        (0.0, x, c)
+    } else if hp < 5.0 {
+        (x, 0.0, c)
+    } else {
+        (c, 0.0, x)
+    };
+    let m = v - c;
+    (
+        ((r + m) * 255.0).round() as u8,
+        ((g + m) * 255.0).round() as u8,
+        ((b + m) * 255.0).round() as u8,
+    )
+}
+
+fn build_sv_image(hue: f32, width: u32, height: u32) -> image::RgbaImage {
+    let mut image = image::RgbaImage::new(width, height);
+    for y in 0..height {
+        for x in 0..width {
+            let s = x as f32 / (width - 1).max(1) as f32;
+            let v = 1.0 - y as f32 / (height - 1).max(1) as f32;
+            let (r, g, b) = hsv_to_rgb(hue, s, v);
+            image.put_pixel(x, y, image::Rgba([r, g, b, 255]));
+        }
+    }
+    image
+}
+
+fn build_hue_image(width: u32, height: u32) -> image::RgbaImage {
+    let mut image = image::RgbaImage::new(width, height);
+    for x in 0..width {
+        let h = x as f32 / (width - 1).max(1) as f32 * 360.0;
+        let (r, g, b) = hsv_to_rgb(h, 1.0, 1.0);
+        for y in 0..height {
+            image.put_pixel(x, y, image::Rgba([r, g, b, 255]));
+        }
+    }
+    image
+}
+
+fn build_alpha_image(color: &str, width: u32, height: u32) -> image::RgbaImage {
+    let (r, g, b) = hex_rgb(color);
+    let mut image = image::RgbaImage::new(width, height);
+    for x in 0..width {
+        let alpha = (x as f32 / (width - 1).max(1) as f32 * 255.0).round() as u8;
+        for y in 0..height {
+            let checker = if ((x / 6) + (y / 6)) % 2 == 0 { 80u8 } else { 45u8 };
+            let a = alpha as f32 / 255.0;
+            let cr = (r as f32 * a + checker as f32 * (1.0 - a)) as u8;
+            let cg = (g as f32 * a + checker as f32 * (1.0 - a)) as u8;
+            let cb = (b as f32 * a + checker as f32 * (1.0 - a)) as u8;
+            image.put_pixel(x, y, image::Rgba([cr, cg, cb, 255]));
+        }
+    }
+    image
+}
