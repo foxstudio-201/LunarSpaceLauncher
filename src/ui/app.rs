@@ -162,6 +162,8 @@ pub struct SkinState {
     pub paint_model_grid: bool,
     pub paint_loupe: Option<Arc<gpui::RenderImage>>,
     pub paint_color_drag: String,
+    pub paint_recent: Vec<String>,
+    pub paint_hex_sync: String,
     pub loaded_uuid: String,
 }
 
@@ -455,6 +457,7 @@ pub struct LauncherApp {
     pub skin_ui: SkinState,
     pub skin_preview: Option<Arc<gpui::RenderImage>>,
     pub paint_preview: Option<Arc<gpui::RenderImage>>,
+    pub paint_hex_input: Entity<TextField>,
     pub skin_drag_x: f32,
     pub content: ContentState,
     pub settings_ui: SettingsUi,
@@ -688,6 +691,24 @@ impl LauncherApp {
                 ..Default::default()
             },
             discord_ui: DiscordUi::default(),
+            paint_hex_input: {
+                let view = view.clone();
+                cx.new(|cx| {
+                    TextField::new(cx, "#FFFFFF").on_submit(move |text, _, app| {
+                        let text = text.to_string();
+                        let _ = view.update(app, |this, cx| {
+                            let clean = text.trim().trim_start_matches('#');
+                            if clean.len() == 6 && clean.chars().all(|c| c.is_ascii_hexdigit()) {
+                                this.skin_ui.paint_color = format!("#{}", clean.to_uppercase());
+                                if this.skin_ui.paint_tool == "eraser" || this.skin_ui.paint_tool == "picker" {
+                                    this.skin_ui.paint_tool = "pencil".into();
+                                }
+                            }
+                            cx.notify();
+                        });
+                    })
+                })
+            },
             skin_ui: SkinState {
                 model: "classic".into(),
                 paint_pitch: 0.12,
@@ -1098,6 +1119,16 @@ impl LauncherApp {
         let frame = image::Frame::new(scaled);
         self.skin_ui.paint_loupe = Some(Arc::new(gpui::RenderImage::new(vec![frame])));
         cx.notify();
+    }
+
+    pub fn note_recent_color(&mut self) {
+        let color = self.skin_ui.paint_color.to_uppercase();
+        if color.len() != 7 {
+            return;
+        }
+        self.skin_ui.paint_recent.retain(|item| !item.eq_ignore_ascii_case(&color));
+        self.skin_ui.paint_recent.insert(0, color);
+        self.skin_ui.paint_recent.truncate(10);
     }
 
     pub fn load_skin_editor(&mut self, cx: &mut Context<Self>) {
@@ -3944,6 +3975,18 @@ impl Render for LauncherApp {
             .relative()
             .when_some(titlebar, |el, bar| el.child(bar))
             .on_action(cx.listener(|this, _: &crate::GoHome, _window, cx| this.set_page(Page::Home, cx)))
+            .on_action(cx.listener(|this, _: &crate::PaintUndo, _window, cx| {
+                if this.accounts_tab == "skin" && matches!(this.modal, Modal::None) {
+                    this.paint_undo();
+                    cx.notify();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &crate::PaintRedo, _window, cx| {
+                if this.accounts_tab == "skin" && matches!(this.modal, Modal::None) {
+                    this.paint_redo();
+                    cx.notify();
+                }
+            }))
             .on_action(cx.listener(|this, _: &crate::GoVersions, _window, cx| {
                 crate::ui::pages::versions::open_versions(this, cx, None, None)
             }))

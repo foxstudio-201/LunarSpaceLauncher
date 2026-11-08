@@ -487,6 +487,7 @@ pub fn render(app: &mut LauncherApp, cx: &mut Context<LauncherApp>) -> AnyElemen
                 this.skin_ui.paint_painting = false;
                 this.skin_ui.dragging = false;
                 this.skin_ui.paint_last = None;
+                this.note_recent_color();
                 cx.notify();
             });
         })
@@ -726,6 +727,12 @@ pub fn render(app: &mut LauncherApp, cx: &mut Context<LauncherApp>) -> AnyElemen
         "#f59e0b", "#eab308", "#84cc16", "#22c55e", "#10b981", "#14b8a6",
         "#06b6d4", "#3b82f6", "#6366f1", "#8b5cf6", "#d946ef", "#ec4899",
     ];
+    let hex_input = app.paint_hex_input.clone();
+    if app.skin_ui.paint_hex_sync != color {
+        hex_input.update(cx, |input, cx| input.set_text(color.clone(), cx));
+        app.skin_ui.paint_hex_sync = color.clone();
+    }
+    let recent_colors = app.skin_ui.paint_recent.clone();
     let mut palette_grid = div().flex().flex_wrap().gap(px(4.0));
     for hex in palette {
         let view = view.clone();
@@ -734,7 +741,7 @@ pub fn render(app: &mut LauncherApp, cx: &mut Context<LauncherApp>) -> AnyElemen
         palette_grid = palette_grid.child(
             div()
                 .id(gpui::SharedString::from(format!("editor-color-{hex}")))
-                .size(px(24.0))
+                .size(px(20.0))
                 .rounded(px(4.0))
                 .bg(swatch(hex))
                 .border_2()
@@ -748,6 +755,30 @@ pub fn render(app: &mut LauncherApp, cx: &mut Context<LauncherApp>) -> AnyElemen
                         if this.skin_ui.paint_tool == "eraser" || this.skin_ui.paint_tool == "picker" {
                             this.skin_ui.paint_tool = "pencil".into();
                         }
+                        cx.notify();
+                    });
+                }),
+        );
+    }
+    let mut recent_row = div().flex().flex_wrap().gap(px(4.0));
+    for hex in recent_colors.iter().take(10) {
+        let view = view.clone();
+        let value = hex.clone();
+        recent_row = recent_row.child(
+            div()
+                .id(gpui::SharedString::from(format!("recent-{hex}")))
+                .size(px(18.0))
+                .rounded(px(4.0))
+                .bg(swatch(hex))
+                .border_1()
+                .border_color(theme.border_soft)
+                .cursor_pointer()
+                .on_click(move |_, _, cx| {
+                    let value = value.clone();
+                    let _ = view.update(cx, |this, cx| {
+                        this.skin_ui.paint_color = value;
+                        this.skin_ui.paint_alpha = 255;
+                        this.note_recent_color();
                         cx.notify();
                     });
                 }),
@@ -1011,13 +1042,19 @@ pub fn render(app: &mut LauncherApp, cx: &mut Context<LauncherApp>) -> AnyElemen
                 .flex()
                 .items_center()
                 .gap(px(6.0))
-                .child(div().size(px(26.0)).rounded(px(5.0)).bg(swatch(&color)).border_1().border_color(theme.border))
                 .child(
                     div()
-                        .text_size(px(9.5))
-                        .font_family(MONO)
-                        .text_color(theme.muted)
-                        .child(color.clone()),
+                        .size(px(30.0))
+                        .rounded(px(6.0))
+                        .bg(swatch(&color))
+                        .border_1()
+                        .border_color(theme.border),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .child(widgets::text_input_box(&theme).child(app.paint_hex_input.clone())),
                 ),
         )
         .child(sv_widget)
@@ -1031,6 +1068,16 @@ pub fn render(app: &mut LauncherApp, cx: &mut Context<LauncherApp>) -> AnyElemen
         )
         .child(alpha_widget)
         .child(palette_grid)
+        .when(!recent_colors.is_empty(), |el| {
+            el.child(
+                div()
+                    .text_size(px(8.5))
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(theme.faint)
+                    .child("GẦN ĐÂY"),
+            )
+            .child(recent_row)
+        })
         .child(
             div()
                 .flex_1()

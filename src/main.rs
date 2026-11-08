@@ -33,7 +33,9 @@ actions!(
         GoAccounts,
         GoSettings,
         GoHost,
-        GoServers
+        GoServers,
+        PaintUndo,
+        PaintRedo
     ]
 );
 use std::sync::Arc;
@@ -108,6 +110,9 @@ fn main() {
                 KeyBinding::new("ctrl-5", GoSettings, None),
                 KeyBinding::new("ctrl-6", GoHost, None),
                 KeyBinding::new("ctrl-7", GoServers, None),
+                KeyBinding::new("ctrl-z", PaintUndo, None),
+                KeyBinding::new("ctrl-shift-z", PaintRedo, None),
+                KeyBinding::new("ctrl-y", PaintRedo, None),
             ]);
             let exit_backend = backend.clone();
             cx.on_window_closed(move |cx| {
