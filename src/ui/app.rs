@@ -154,6 +154,12 @@ pub struct SkinState {
     pub paint_alpha: u8,
     pub paint_mirror: String,
     pub paint_drag_y: f32,
+    pub editor_mode: String,
+    pub tools_open: bool,
+    pub colors_open: bool,
+    pub settings_open: bool,
+    pub paint_soft: bool,
+    pub loaded_uuid: String,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -687,6 +693,9 @@ impl LauncherApp {
                 paint_brush: 1,
                 paint_alpha: 255,
                 paint_mirror: "off".into(),
+                editor_mode: "draw".into(),
+                tools_open: true,
+                colors_open: true,
                 ..Default::default()
             },
             skin_preview: None,
@@ -889,8 +898,8 @@ impl LauncherApp {
     }
 
     pub fn refresh_paint_preview(&mut self) {
-        const WIDTH: u32 = 440;
-        const HEIGHT: u32 = 540;
+        const WIDTH: u32 = 640;
+        const HEIGHT: u32 = 560;
         let Some(skin) = image::RgbaImage::from_raw(64, 64, self.skin_ui.paint_skin.clone()) else {
             return;
         };
@@ -925,8 +934,8 @@ impl LauncherApp {
     }
 
     pub fn paint_screen(&mut self, sx: f32, sy: f32, cx: &mut Context<Self>) {
-        const WIDTH: u32 = 440;
-        const HEIGHT: u32 = 540;
+        const WIDTH: u32 = 640;
+        const HEIGHT: u32 = 560;
         let model = self.paint_model();
         let camera = self.paint_camera(WIDTH, HEIGHT);
         let Some(hit) = crate::mc::skin3d::pick(&model, camera, sx, sy) else {
@@ -1012,6 +1021,58 @@ impl LauncherApp {
         cx.notify();
     }
 
+    pub fn load_skin_editor(&mut self, cx: &mut Context<Self>) {
+        let uuid = self.skin_ui.uuid.clone();
+        if uuid.is_empty() {
+            return;
+        }
+        let skin = self.backend.skin_read(&uuid);
+        let load = |key: &str, width: u32, height: u32| -> Vec<u8> {
+            let path = skin.get(key).and_then(serde_json::Value::as_str);
+            if let Some(path) = path {
+                if let Ok(image) = image::open(&path) {
+                    let image = image.to_rgba8();
+                    if image.width() == width && image.height() == height {
+                        return image.into_raw();
+                    }
+                }
+            }
+            vec![0u8; (width * height * 4) as usize]
+        };
+        self.skin_ui.paint_skin = load("skinPath", 64, 64);
+        self.skin_ui.paint_cape = load("capePath", 64, 32);
+        if self.skin_ui.paint_tool.is_empty() {
+            self.skin_ui.paint_tool = "pencil".into();
+        }
+        if self.skin_ui.paint_color.is_empty() {
+            self.skin_ui.paint_color = "#E9B872".into();
+        }
+        if self.skin_ui.paint_alpha == 0 {
+            self.skin_ui.paint_alpha = 255;
+        }
+        if self.skin_ui.paint_asset.is_empty() {
+            self.skin_ui.paint_asset = "skin".into();
+        }
+        if self.skin_ui.paint_layer.is_empty() {
+            self.skin_ui.paint_layer = "inner".into();
+        }
+        if self.skin_ui.paint_mirror.is_empty() {
+            self.skin_ui.paint_mirror = "off".into();
+        }
+        self.skin_ui.paint_outer = true;
+        self.skin_ui.paint_undo.clear();
+        self.skin_ui.paint_redo.clear();
+        self.skin_ui.paint_last = None;
+        self.skin_ui.paint_painting = false;
+        self.skin_ui.paint_pitch = 0.12;
+        self.skin_ui.paint_zoom = 0.85;
+        self.skin_ui.paint_pan_x = 0.0;
+        self.skin_ui.paint_pan_y = 0.0;
+        self.skin_ui.loaded_uuid = uuid;
+        self.refresh_paint_preview();
+        cx.notify();
+    }
+
     pub fn open_skin_painter(&mut self, cx: &mut Context<Self>) {
         let uuid = self.skin_ui.uuid.clone();
         if uuid.is_empty() {
@@ -1053,7 +1114,7 @@ impl LauncherApp {
         }
         self.skin_ui.paint_grid = false;
         self.skin_ui.paint_pitch = 0.12;
-        self.skin_ui.paint_zoom = 1.0;
+        self.skin_ui.paint_zoom = 0.85;
         self.skin_ui.paint_pan_x = 0.0;
         self.skin_ui.paint_pan_y = 0.0;
         self.skin_ui.paint_layer = "inner".into();
@@ -3859,7 +3920,9 @@ impl Render for LauncherApp {
                                 .min_h(px(0.0))
                                 .overflow_hidden()
                                 .child(body)
-                        } else if self.page == Page::Modpacks {
+                        } else if self.page == Page::Modpacks
+                            || (self.page == Page::Accounts && self.accounts_tab == "skin")
+                        {
                             div()
                                 .id("modpack-page")
                                 .flex_1()

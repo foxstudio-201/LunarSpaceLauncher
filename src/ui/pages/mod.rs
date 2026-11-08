@@ -5,6 +5,7 @@ pub mod host;
 pub mod instance;
 pub mod modpack;
 pub mod servers;
+pub mod skin_editor;
 pub mod settings;
 pub mod versions;
 

@@ -7,6 +7,10 @@ use serde_json::{Value, json};
 use std::path::Path;
 
 pub fn render(app: &mut LauncherApp, _window: &mut Window, cx: &mut Context<LauncherApp>) -> AnyElement {
+    if app.accounts_tab == "skin" {
+        crate::ui::pages::skin_editor::ensure(app, cx);
+        return crate::ui::pages::skin_editor::render(app, cx);
+    }
     let theme = app.theme.clone();
     let view = cx.entity().downgrade();
     let add_view = view.clone();
