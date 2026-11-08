@@ -1463,7 +1463,7 @@ fn list_page(app: &mut LauncherApp, cx: &mut Context<LauncherApp>) -> AnyElement
             .and_then(|id| app.instances.iter().find(|entry| &entry.id == id))
             .map(|entry| entry.version.clone())
             .unwrap_or_default();
-        for hit in app.content.hits.iter().take(PAGE as usize).cloned().collect::<Vec<_>>() {
+        for hit in app.content.hits.iter().cloned().collect::<Vec<_>>() {
             let owned = owned_for(app, &hit);
             let id = text_of(&hit, "id");
             let icon = text_of(&hit, "icon");
@@ -3834,7 +3834,7 @@ fn pack_list(app: &mut LauncherApp, cx: &mut Context<LauncherApp>) -> AnyElement
                 ),
         );
     } else {
-        for hit in app.content.hits.iter().take(PAGE as usize).cloned().collect::<Vec<_>>() {
+        for hit in app.content.hits.iter().cloned().collect::<Vec<_>>() {
             let id = text_of(&hit, "id");
             let icon = text_of(&hit, "icon");
             let name = text_of(&hit, "name");
