@@ -759,6 +759,7 @@ impl LauncherApp {
         app.refresh_settings();
         app.refresh_instances();
         app.refresh_accounts();
+        app.warm_account(cx);
         app.load_versions(false, true, cx);
         app.load_system(cx);
         app.listen_events(events, cx);
@@ -1224,6 +1225,22 @@ impl LauncherApp {
             if !avatars.is_empty() {
                 this.cache_icons(avatars, cx);
             }
+            cx.notify();
+        });
+    }
+
+    pub fn warm_account(&mut self, cx: &mut Context<Self>) {
+        let rx = self.backend.warm_account();
+        self.on_result(cx, rx, |this, value, cx| {
+            if let Some(error) = value.get("error").and_then(Value::as_str) {
+                this.toast(
+                    "warn",
+                    "Phiên đăng nhập cần làm mới",
+                    error.to_string(),
+                    cx,
+                );
+            }
+            this.refresh_accounts();
             cx.notify();
         });
     }

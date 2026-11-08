@@ -1998,6 +1998,26 @@ impl Backend {
         ok(json!({"accounts": accounts, "activeAccountId": active}))
     }
 
+    pub fn warm_account(self: &Arc<Self>) -> Receiver<Value> {
+        let this = self.clone();
+        self.request(async move {
+            let Some(account) = this.store.active_account() else {
+                return ok(json!({"warmed": false}));
+            };
+            if account.kind != "microsoft" && account.kind != "ely" {
+                return ok(json!({"warmed": false}));
+            }
+            match auth::auth_for(&this.store, Some(&account)).await {
+                Ok(session) => ok(json!({
+                    "warmed": true,
+                    "name": session.name,
+                    "uuid": session.uuid,
+                })),
+                Err(err) => ok(json!({"warmed": false, "error": err.to_string()})),
+            }
+        })
+    }
+
     pub fn account_add_offline(&self, name: &str) -> Value {
         let clean = name.trim();
         if !store::validate_mc_name(clean) {
