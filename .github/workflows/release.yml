@@ -92,42 +92,43 @@ jobs:
           body: |
             # XyoLauncher 2.0
 
-            Ban cap nhat lon: doi ten, doi giao dien, doi cach khoi dong va toan bo hieu ung moi.
+            Bản cập nhật lớn: đổi tên, đổi giao diện, đổi cách khởi động và toàn bộ hiệu ứng mới.
 
-            ## Khoi dong (launcher startup)
-            - Logo Xyo moi, titlebar tu ve (logo + ten + thu nho/phong to/dong).
-            - Splash 156 khung hinh 30fps, chuyen sang man loading bang hieu ung tach doi.
-            - Man loading moi: dem % + thanh tien trinh + **hieu ung hat tao chu** (XyoLauncher / Almost ready / Minecraft), tu chuyen chu moi 5.2s.
-            - Cua so khoi tao 1180x760 (toi thieu 980x640), cho phep thu nho/phong to.
+            ## Khởi động
+            - Logo Xyo mới, titlebar tự vẽ (logo + tên + thu nhỏ/phóng to/đóng).
+            - Splash 156 khung hình 30fps, chuyển sang màn hình loading bằng hiệu ứng tách đôi.
+            - Màn loading mới: đếm % + thanh tiến trình + **hiệu ứng hạt tạo chữ** (XyoLauncher / Almost ready / Minecraft), tự chuyển chữ mỗi 5.2 giây.
+            - Cửa sổ khởi tạo 1180×760 (tối thiểu 980×640), cho phép thu nhỏ/phóng to.
 
-            ## Tham so khoi dong da loai bo
-            - Bo hoan toan co `-XX:MaxGCPauseMillis` khoi JVM mac dinh.
-            - JVM mac dinh rut gon con `-XX:+UseG1GC -XX:+DisableExplicitGC`.
-            - Launcher tu loc cac co cu (`MaxGCPauseMillis`, `AlwaysPreTouch`) neu con trong cau hinh cu.
-            - Xoa muc "Toi uu" (boost) trong cai dat instance.
+            ## Tham số đã loại bỏ
+            - Bỏ hoàn toàn cờ `-XX:MaxGCPauseMillis` khỏi JVM mặc định.
+            - JVM mặc định rút gọn còn `-XX:+UseG1GC -XX:+DisableExplicitGC`.
+            - Launcher tự lọc các cờ cũ (`MaxGCPauseMillis`, `AlwaysPreTouch`) nếu còn trong cấu hình cũ.
+            - Xoá mục "Tối ưu" (boost) trong cài đặt instance.
 
-            ## Anh nen
-            - Them muc **Anh nen** trong Cai dat he thong.
-            - Mac dinh dung san anh `1123121` (dong goi trong app).
-            - Cac anh khac (984658, 1224149, 1265740, 1373816, 1402908) hien thi dang "Chua tai", chi ap dung duoc sau khi bam **Tai ve** (tai tu GitHub, luu vao userData).
-            - Che do "Theo giao dien": tat anh nen, quay ve nen dac theo sang/toi.
+            ## Ảnh nền
+            - Thêm mục **Ảnh nền** trong Cài đặt hệ thống.
+            - Mặc định dùng sẵn ảnh `1123121` (đóng gói trong app).
+            - 5 ảnh còn lại (984658, 1224149, 1265740, 1373816, 1402908) hiển thị dạng "Chưa tải", chỉ áp dụng được sau khi bấm **Tải về** (tải từ GitHub, lưu vào userData).
+            - Chế độ "Theo giao diện": tắt ảnh nền, quay về nền đặc theo sáng/tối.
 
-            ## Hieu ung moi
-            - Hieu ung **pixel dissolve hinh khoi co** (xanh la + nâu dat) khi **vao/ra instance**; chuyen qua lai giua 4 trang chinh thi khong co hieu ung.
-            - Cong tac **Hieu ung chuyen canh** trong Cai dat de bat/tat.
-            - **Toast xep chong** moi: toast moi noi len truoc, toast cu lui sau va thu nho, re chuot vao de bang ra, vuot ngang de xoa, toast "dang tai" xoay roi chuyen thanh "xong".
-            - Che do nen anh: panel/sidebar/card la **kinh mo** (blur), anh nen **net**, modal/tooltip/toast/menu **duc hoan toan**, khong phu thuoc sang/toi.
+            ## Hiệu ứng mới
+            - **Pixel dissolve khối cỏ** (xanh lá + nâu đất) khi **vào/ra instance**; chuyển qua lại giữa 4 trang chính thì không có hiệu ứng.
+            - Công tắc **Hiệu ứng chuyển cảnh** trong Cài đặt để bật/tắt.
+            - **Toast xếp chồng**: toast mới nổi lên trước, toast cũ lùi sau và thu nhỏ; rê chuột để bung thành danh sách; vuốt ngang để xoá; toast "đang tải" xoay rồi chuyển thành "xong".
+            - Chế độ nền ảnh: panel/sidebar/card là **kính mờ**, ảnh nền **nét**, modal/tooltip/toast/menu **đục hoàn toàn**, không phụ thuộc sáng/tối.
+            - Console khi chưa có log: hiệu ứng hạt tạo chữ (XyoLauncher / Almost ready / No log yet) thay cho chữ tĩnh.
 
-            ## Giao dien moi
-            - Sidebar kieu Rust: rail 200 <-> 76px, pill truot, nut thu gon, the tai khoan.
-            - Gop Cai dat + Tai khoan vao menu tha xuong cua the tai khoan (dung vi tri nut, khong bi cat).
-            - Titlebar/PageHeader toi gian, font nho hon mac dinh.
-            - Cong tac **sang/toi** kieu troi/dem (ThemeSwitch).
-            - Toan bo icon/logo, favicon, anh nen installer duoc thay bang bo nhan XyoLauncher.
+            ## Giao diện mới
+            - Sidebar kiểu Rust: rail 200 ↔ 76px, pill trượt, nút thu gọn, thẻ tài khoản.
+            - Gộp Cài đặt + Tài khoản vào menu thả xuống của thẻ tài khoản (bám đúng vị trí nút, không bị cắt).
+            - Titlebar/PageHeader tối giản, font nhỏ hơn mặc định.
+            - Công tắc **sáng/tối** kiểu trời/đêm (ThemeSwitch).
+            - Toàn bộ icon, logo, favicon, ảnh nền installer được thay bằng bộ nhận diện XyoLauncher.
 
-            ## Loai bo kieu cu
-            - Bo giao dien pixel (khung vien pixel, font pixel).
-            - Bo hieu ung wipe toan man hinh cu (`themeWipe.js`).
-            - Bo muc "Toi uu"/boost va cac file `boost.cjs`.
-            - Bo co JVM `-XX:MaxGCPauseMillis`, `-XX:+AlwaysPreTouch`.
-            - Bo toast kieu cu (thanh ngan o goc man hinh) - thay bang toast xep chong.
+            ## Loại bỏ kiểu cũ
+            - Bỏ giao diện pixel (khung viền pixel, font pixel).
+            - Bỏ hiệu ứng wipe toàn màn hình cũ (`themeWipe.js`).
+            - Bỏ mục "Tối ưu"/boost và file `boost.cjs`.
+            - Bỏ cờ JVM `-XX:MaxGCPauseMillis`, `-XX:+AlwaysPreTouch`.
+            - Bỏ toast kiểu cũ (thanh ngắn ở góc màn hình) — thay bằng toast xếp chồng.
