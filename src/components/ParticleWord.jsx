@@ -9,7 +9,7 @@ const MAX_PARTICLES = 1500
  * Hàng trăm hạt sáng bay vào xếp thành chữ, rê chuột thì bị đẩy ra,
  * bấm (hoặc tự động) thì bay sang chữ kế tiếp.
  */
-export default function ParticleWord({ words = WORDS, intervalMs = 2600, maxParticles = MAX_PARTICLES, passive = false }) {
+export default function ParticleWord({ words = WORDS, intervalMs = 5200, maxParticles = MAX_PARTICLES, passive = false }) {
   const canvasRef = useRef(null)
   const stateRef = useRef({ wi: 0, timer: 0, ptr: null })
 

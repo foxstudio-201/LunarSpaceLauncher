@@ -11,6 +11,8 @@ import { t } from '../../i18n/translations'
 import { useApp } from '../../i18n/AppContext'
 import { palette } from '../../lib/palette'
 import ParticleWord from '../ParticleWord'
+
+const CONSOLE_WORDS = ['XyoLauncher', 'Almost ready', 'No log yet']
 import { statusColor, statusKey } from '../../lib/status'
 import { BANNER_MARK } from '../../lib/asciiLogo'
 
@@ -420,7 +422,7 @@ export default function ConsolePage({ instance, theme, lang, logs, launchError, 
             <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
               <div className="w-full" style={{ height: '42%', maxHeight: 260 }}>
                 <ParticleWord
-                  words={['XyoLauncher', 'Almost ready', 'No log yet']}
+                  words={CONSOLE_WORDS}
                   maxParticles={900}
                   passive
                 />
