@@ -89,4 +89,4 @@ jobs:
           files: artifacts/**
           draft: false
           make_latest: ${{ steps.latest.outputs.make_latest }}
-          generate_release_notes: true
+          body_path: RELEASE_NOTES_2.0.md

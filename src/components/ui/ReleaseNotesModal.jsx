@@ -60,7 +60,7 @@ export default function ReleaseNotesModal({ theme, lang, version, onClose }) {
       >
         <div className="shrink-0 flex items-center gap-2 px-4 py-3" style={{ borderBottom: `1px solid ${c.border}` }}>
           <Sparkle size={16} weight="duotone" style={{ color: c.accent }} />
-          <p className="text-[12px] font-bold flex-1" style={{ color: c.text }}>{t(lang, 'whatsnew.title')}</p>
+          <p className="flex-1 text-center text-[12px] font-bold" style={{ color: c.text }}>{t(lang, 'whatsnew.title')}</p>
           {version && (
             <span className="px-2 py-0.5 rounded-md text-[10px] font-bold font-mono" style={{ background: c.input, border: `1px solid ${c.border}`, color: c.accent }}>
               v{version}
