@@ -10,6 +10,7 @@ import { SearchAddon } from '@xterm/addon-search'
 import { t } from '../../i18n/translations'
 import { useApp } from '../../i18n/AppContext'
 import { palette } from '../../lib/palette'
+import ParticleWord from '../ParticleWord'
 import { statusColor, statusKey } from '../../lib/status'
 import { BANNER_MARK } from '../../lib/asciiLogo'
 
@@ -416,8 +417,15 @@ export default function ConsolePage({ instance, theme, lang, logs, launchError, 
         <div className="flex-1 min-h-0 relative overflow-hidden" style={{ background: '#0a0a0a', borderRadius: '8px', border: `1px solid ${c.border}` }}>
           <div ref={termElRef} className="absolute inset-0 px-2 py-1.5" />
           {live.length === 0 && !busy && (
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <span className="text-[11px]" style={{ color: 'rgba(255,255,255,0.32)' }}>{t(lang, 'instance.console.empty')}</span>
+            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+              <div className="w-full" style={{ height: '42%', maxHeight: 260 }}>
+                <ParticleWord
+                  words={['XyoLauncher', 'Almost ready', 'No log yet']}
+                  maxParticles={900}
+                  passive
+                />
+              </div>
+              <span className="mt-1 text-[11px]" style={{ color: 'rgba(255,255,255,0.34)' }}>{t(lang, 'instance.console.empty')}</span>
             </div>
           )}
           {hasSelection && (

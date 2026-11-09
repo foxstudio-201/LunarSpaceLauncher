@@ -9,7 +9,7 @@ const MAX_PARTICLES = 1500
  * Hàng trăm hạt sáng bay vào xếp thành chữ, rê chuột thì bị đẩy ra,
  * bấm (hoặc tự động) thì bay sang chữ kế tiếp.
  */
-export default function ParticleWord({ words = WORDS, intervalMs = 2600 }) {
+export default function ParticleWord({ words = WORDS, intervalMs = 2600, maxParticles = MAX_PARTICLES, passive = false }) {
   const canvasRef = useRef(null)
   const stateRef = useRef({ wi: 0, timer: 0, ptr: null })
 
@@ -81,7 +81,7 @@ export default function ParticleWord({ words = WORDS, intervalMs = 2600 }) {
     })
 
     const assign = () => {
-      const pts = targets(words[stateRef.current.wi % words.length]).slice(0, MAX_PARTICLES)
+      const pts = targets(words[stateRef.current.wi % words.length]).slice(0, maxParticles)
       // Chỉ dùng đúng số hạt cho các điểm của chữ — không còn hạt bay vòng quanh.
       while (P.length < pts.length) P.push(spawn(Math.random() * W, Math.random() * H))
       P.length = pts.length
@@ -171,9 +171,11 @@ export default function ParticleWord({ words = WORDS, intervalMs = 2600 }) {
     }
     const onClick = () => nextWord()
 
-    cv.addEventListener('pointermove', onMove)
-    cv.addEventListener('pointerleave', onLeave)
-    cv.addEventListener('click', onClick)
+    if (!passive) {
+      cv.addEventListener('pointermove', onMove)
+      cv.addEventListener('pointerleave', onLeave)
+      cv.addEventListener('click', onClick)
+    }
 
     let io = null
     if ('IntersectionObserver' in window) {
@@ -200,11 +202,13 @@ export default function ParticleWord({ words = WORDS, intervalMs = 2600 }) {
       if (raf) cancelAnimationFrame(raf)
       io?.disconnect()
       window.removeEventListener('resize', onResize)
-      cv.removeEventListener('pointermove', onMove)
-      cv.removeEventListener('pointerleave', onLeave)
-      cv.removeEventListener('click', onClick)
+      if (!passive) {
+        cv.removeEventListener('pointermove', onMove)
+        cv.removeEventListener('pointerleave', onLeave)
+        cv.removeEventListener('click', onClick)
+      }
     }
-  }, [words, intervalMs])
+  }, [words, intervalMs, maxParticles, passive])
 
   return (
     <div className="u378">
@@ -215,6 +219,7 @@ export default function ParticleWord({ words = WORDS, intervalMs = 2600 }) {
       <canvas
         ref={canvasRef}
         className="u378-cv"
+        style={passive ? { pointerEvents: 'none', cursor: 'default' } : undefined}
         role="img"
         aria-label="XyoLauncher, Almost ready, Minecraft — hạt sáng xếp thành chữ"
       />
