@@ -2,6 +2,8 @@
 
 Bản cập nhật lớn: đổi tên, đổi giao diện, đổi cách khởi động và toàn bộ hiệu ứng mới.
 
+![Loading mới](https://raw.githubusercontent.com/foxstudio-201/LunarSpaceLauncher/main/docs/release/console.png)
+
 ## Khởi động
 - Logo Xyo mới, titlebar tự vẽ (logo + tên + thu nhỏ/phóng to/đóng).
 - Splash 156 khung hình 30fps, chuyển sang màn hình loading bằng hiệu ứng tách đôi.
@@ -20,6 +22,8 @@ Bản cập nhật lớn: đổi tên, đổi giao diện, đổi cách khởi �
 - 5 ảnh còn lại (984658, 1224149, 1265740, 1373816, 1402908) hiển thị dạng "Chưa tải", chỉ áp dụng được sau khi bấm **Tải về** (tải từ GitHub, lưu vào userData).
 - Chế độ "Theo giao diện": tắt ảnh nền, quay về nền đặc theo sáng/tối.
 
+![Chế độ nền ảnh](https://raw.githubusercontent.com/foxstudio-201/LunarSpaceLauncher/main/docs/release/glass-mode.png)
+
 ## Hiệu ứng mới
 - **Pixel dissolve khối cỏ** (xanh lá + nâu đất) khi **vào/ra instance**; chuyển qua lại giữa 4 trang chính thì không có hiệu ứng.
 - Công tắc **Hiệu ứng chuyển cảnh** trong Cài đặt để bật/tắt.
@@ -30,8 +34,15 @@ Bản cập nhật lớn: đổi tên, đổi giao diện, đổi cách khởi �
 ## Giao diện mới
 - Sidebar kiểu Rust: rail 200 ↔ 76px, pill trượt, nút thu gọn, thẻ tài khoản.
 - Gộp Cài đặt + Tài khoản vào menu thả xuống của thẻ tài khoản (bám đúng vị trí nút, không bị cắt).
+
+![Menu tài khoản](https://raw.githubusercontent.com/foxstudio-201/LunarSpaceLauncher/main/docs/release/account-menu.png)
+
 - Titlebar/PageHeader tối giản, font nhỏ hơn mặc định.
 - Công tắc **sáng/tối** kiểu trời/đêm (ThemeSwitch).
+- Tooltip custom dùng chung một kiểu: nền đục, không blur, hoạt động cả khi sidebar thu gọn.
+
+![Tooltip khi sidebar thu gọn](https://raw.githubusercontent.com/foxstudio-201/LunarSpaceLauncher/main/docs/release/tooltip-rail.png)
+
 - Toàn bộ icon, logo, favicon, ảnh nền installer được thay bằng bộ nhận diện XyoLauncher.
 
 ## Loại bỏ kiểu cũ
