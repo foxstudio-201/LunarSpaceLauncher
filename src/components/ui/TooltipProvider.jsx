@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 const PARKED = 'data-tip-parked'
 
@@ -100,7 +101,7 @@ export default function TooltipProvider() {
   else if (dir === 'left') pos = { left: r.left - GAP, top: centerY, transform: 'translate(-100%, -50%)' }
   else pos = { left: r.right + GAP, top: centerY, transform: 'translate(0, -50%)' }
 
-  const ARROW = 'rgba(26,22,37,0.92)'
+  const ARROW = '#1a1625'
   const triBase = {
     position: 'absolute',
     width: 0,
@@ -116,17 +117,18 @@ export default function TooltipProvider() {
     : dir === 'left' ? <span style={{ ...triBase, borderLeft: `6px solid ${ARROW}`, top: '50%', right: '-6px', transform: 'translateY(-50%)' }} />
     : <span style={{ ...triBase, borderRight: `6px solid ${ARROW}`, top: '50%', left: '-6px', transform: 'translateY(-50%)' }} />
 
-  return (
+  return createPortal(
     <div className="fixed z-[2147483000] pointer-events-none" style={pos}>
       <div
-        className={`px-3 py-1.5 rounded-lg border border-white/10 text-[11px] font-semibold text-white/95 ${
+        className={`xyo-tip px-3 py-1.5 rounded-lg border border-white/10 text-[11px] font-semibold text-white/95 ${
           long ? 'max-w-[300px] leading-relaxed' : 'whitespace-nowrap'
         }`}
-        style={{ background: ARROW, backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)', boxShadow: '0 10px 30px rgba(0,0,0,0.5), 0 0 0 1px rgba(167,139,250,0.08)' }}
+        style={{ background: ARROW, boxShadow: '0 10px 30px rgba(0,0,0,0.5), 0 0 0 1px rgba(233,184,114,0.08)' }}
       >
         {tip.text}
         {arrowEl}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
-  House, Gear, List, Terminal, Files, Archive, User, Trash,
-  Cube, PuzzlePiece, Stack, GearSix, ArrowLeft, ChartLineUp, SidebarSimple, Image, PaintBrush, Plus, Cloud, HardDrives,
+  House, Gear, Terminal, Files, Archive, User, Trash,
+  PuzzlePiece, Stack, GearSix, ArrowLeft, ChartLineUp, SidebarSimple, CaretRight, Check, Image, PaintBrush, Plus, Cloud, HardDrives,
   Database, Clock, Users, Network, Play, MapTrifold } from '@phosphor-icons/react'
 import { t } from '../i18n/translations'
 import { statusColor } from '../lib/status'
@@ -9,25 +9,17 @@ import { palette } from '../lib/palette'
 import { loaderIcon } from '../api/client.js'
 import HeadSkin from './ui/HeadSkin'
 
-export const RAIL_W = 180
-export const RAIL_W_COLLAPSED = 64
+// Số đo lấy đúng từ sidebar bản Rust (src/ui/app.rs::sidebar).
+export const RAIL_W = 200
+export const RAIL_W_COLLAPSED = 76
 
-const ACCENT = '#a78bfa'
-const ICON = 28
-const HEAD = 28
-const LABEL_W = 124
-const FILLET = 14
-const EDGE = 8
-const RADIUS = 10
-const HOOK = 14
-const GAP = 12
-const SWEEP_MS = 300
-const SWEEP = `${SWEEP_MS}ms cubic-bezier(0.4, 0, 0.2, 1)`
-const LINE_TOP = -44
+const ROW_H = 48
+const ANIM_MS = 320
+const SPRING = 'cubic-bezier(0.34, 1.45, 0.64, 1)'
+const clamp01 = (v) => Math.max(0, Math.min(1, v))
 
 const MAIN_PAGES = [
   { key: 'home', icon: House, label: 'Home', labelVi: 'Trang chủ' },
-  { key: 'versions', icon: Cube, label: 'Versions', labelVi: 'Phiên bản' },
   { key: 'host', icon: Cloud, label: 'Host', labelVi: 'Host' },
   { key: 'server-test', icon: HardDrives, label: 'ServerLocalHost', labelVi: 'ServerLocalHost' },
   { key: 'modpacks', icon: Stack, label: 'Modpack', labelVi: 'Modpack' },
@@ -61,522 +53,505 @@ const SERVER_LOCAL_PAGES = [
   { key: 'server-settings', icon: GearSix, label: 'Settings', labelVi: 'Cài đặt' },
 ]
 
+const loaderSlot = (inst) => (inst?.game === 'terraria' ? './terraria_slot.png' : loaderIcon(inst?.loader))
+
+function Label({ text, progress, size, collapsed }) {
+  return (
+    <span
+      className="relative min-w-0 flex-1 truncate text-left"
+      style={{
+        opacity: progress,
+        transform: `translateX(${-8 * (1 - progress)}px)`,
+        transition: 'opacity 110ms linear, transform 110ms linear',
+        fontSize: size,
+        fontWeight: 600,
+        pointerEvents: collapsed ? 'none' : undefined,
+      }}
+    >
+      {text}
+    </span>
+  )
+}
+
+function Pill({ y, show, c }) {
+  return (
+    <span
+      aria-hidden
+      className="pointer-events-none absolute left-0 right-0 z-0"
+      style={{
+        top: y,
+        height: ROW_H,
+        borderRadius: 15,
+        background: c.surfaceActive,
+        opacity: show ? 1 : 0,
+        transition: `top 500ms ${SPRING}, opacity 180ms ease`,
+      }}
+    >
+      <span
+        aria-hidden
+        className="absolute left-0"
+        style={{
+          top: 12,
+          bottom: 12,
+          width: 4,
+          borderTopRightRadius: 4,
+          borderBottomRightRadius: 4,
+          background: `linear-gradient(120deg, ${c.accent}, ${c.accentHover})`,
+        }}
+      />
+    </span>
+  )
+}
+
+function NavRow({ c, icon: Icon, text, active, progress, onClick, rowKey, size = 14.5, collapsed }) {
+  const [hover, setHover] = useState(false)
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      data-nav-key={rowKey}
+      data-active={active ? 'true' : 'false'}
+      data-tip={collapsed ? text : undefined}
+      aria-label={collapsed ? text : undefined}
+      aria-current={active ? 'page' : undefined}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      className="relative z-10 flex w-full shrink-0 cursor-pointer items-center"
+      style={{
+        height: ROW_H,
+        paddingLeft: 16,
+        paddingRight: 10,
+        borderRadius: 15,
+        gap: 14,
+        opacity: active || hover ? 1 : 0.62,
+        transition: 'opacity 150ms ease',
+        color: c.text,
+      }}
+    >
+      <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center">
+        <Icon size={22} weight="duotone" />
+      </span>
+      <Label text={text} progress={progress} size={size} collapsed={collapsed} />
+    </button>
+  )
+}
+
 export default function Sidebar({
   theme, lang, version, account,
   instances, selectedInstance, onSelectInstance,
   isInInstance, displayPage, activePage, onNavigate, onBack,
   inLocalServer, onExitLocalServer,
   collapsed, onToggleCollapsed,
+  accounts = [], activeAccountId, onSelectAccount,
 }) {
-  const navRef = useRef(null)
-  const listRef = useRef(null)
-  const [pill, setPill] = useState({ y: 0, h: 0, show: false })
-
   const c = palette(theme)
-  const px = c.pixel
-  const sidebarBg = px ? c.bg : theme === 'light' ? '#f5f5f5' : '#0a0a0a'
-  const labelColor = px ? c.label : theme === 'light' ? '#555' : 'rgba(255,255,255,0.6)'
-  const borderColor = px ? c.border : theme === 'light' ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.08)'
-  const pillBg = px ? c.surface : theme === 'light' ? '#ece8f6' : '#1d1927'
-  const handleBg = px ? c.input : theme === 'light' ? '#ffffff' : '#1a1a1a'
-  const accent = px ? c.accent : ACCENT
+  const [width, setWidth] = useState(collapsed ? RAIL_W_COLLAPSED : RAIL_W)
+  const widthRef = useRef(width)
+  const rafRef = useRef(0)
+  const [railHover, setRailHover] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [menuPos, setMenuPos] = useState(null)
+  const menuRef = useRef(null)
+  const accBtnRef = useRef(null)
+
+  // Vị trí menu tài khoản: bám theo nút, dùng position fixed để không bị card cắt.
+  useEffect(() => {
+    if (!menuOpen) return undefined
+    const place = () => {
+      const node = accBtnRef.current
+      if (!node) return
+      const r = node.getBoundingClientRect()
+      setMenuPos({
+        left: Math.round(r.left),
+        bottom: Math.round(window.innerHeight - r.top + 6),
+        width: collapsed ? 240 : Math.max(Math.round(r.width), 160),
+      })
+    }
+    place()
+    window.addEventListener('resize', place)
+    return () => window.removeEventListener('resize', place)
+  }, [menuOpen, collapsed])
+
+  const topGroup = useRef(null)
+  const midGroup = useRef(null)
+  const [hl, setHl] = useState({ top: { y: 0, show: false }, mid: { y: 0, show: false } })
+
+  const p = clamp01((width - RAIL_W_COLLAPSED) / (RAIL_W - RAIL_W_COLLAPSED))
+  const labelT = (order = 0) => clamp01((p - (0.15 + Math.min(order, 5) * 0.05)) / 0.45)
+  const itemT = clamp01((p - 0.15) / 0.45)
+  const nameT = clamp01((p - 0.3) / 0.5)
+
+  useEffect(() => {
+    cancelAnimationFrame(rafRef.current)
+    const from = widthRef.current
+    const to = collapsed ? RAIL_W_COLLAPSED : RAIL_W
+    if (from === to) return undefined
+    const started = performance.now()
+    const step = (now) => {
+      const t = Math.min(1, (now - started) / ANIM_MS)
+      const eased = 1 - Math.pow(1 - t, 3)
+      const next = from + (to - from) * eased
+      widthRef.current = next
+      setWidth(next)
+      if (t < 1) rafRef.current = requestAnimationFrame(step)
+    }
+    rafRef.current = requestAnimationFrame(step)
+    return () => cancelAnimationFrame(rafRef.current)
+  }, [collapsed])
+
+  useEffect(() => () => cancelAnimationFrame(rafRef.current), [])
+
+  // Menu tài khoản kiểu Rust: đóng khi bấm ra ngoài hoặc nhấn Esc.
+  useEffect(() => {
+    if (!menuOpen) return undefined
+    const onDown = (event) => {
+      if (menuRef.current && !menuRef.current.contains(event.target)) setMenuOpen(false)
+    }
+    const onKey = (event) => {
+      if (event.key === 'Escape') setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [menuOpen])
 
   const activeKey = inLocalServer
     ? displayPage
     : isInInstance
       ? SUB_PAGE_PARENT[displayPage] || displayPage
       : activePage
-  const railW = collapsed ? RAIL_W_COLLAPSED : RAIL_W
-
-  const measure = useCallback(() => {
-    const nav = navRef.current
-    if (!nav) return
-    const el = nav.querySelector(`[data-nav-key="${activeKey}"]`)
-    if (!el) {
-      setPill((p) => (p.show ? { ...p, show: false } : p))
-      return
-    }
-    const navBox = nav.getBoundingClientRect()
-    const box = el.getBoundingClientRect()
-    const group = el.closest('[data-nav-group]')
-    const rows = group ? [...group.querySelectorAll('[data-nav-row]')] : []
-    setPill({
-      y: box.top - navBox.top,
-      h: box.height,
-      show: true,
-      flareTop: rows.length > 0 && rows[0] !== el,
-      flareBottom: rows.length > 0 && rows[rows.length - 1] !== el,
-    })
-  }, [activeKey])
 
   useLayoutEffect(() => {
-    measure()
-  }, [measure, collapsed, lang, instances.length, isInInstance, version])
+    const measure = (container) => {
+      if (!container) return { y: 0, show: false }
+      const el = container.querySelector('[data-active="true"]')
+      if (!el) return { y: 0, show: false }
+      const box = container.getBoundingClientRect()
+      const row = el.getBoundingClientRect()
+      return { y: row.top - box.top, show: true }
+    }
+    setHl((prev) => {
+      const top = measure(topGroup.current)
+      const mid = measure(midGroup.current)
+      if (prev.top.show === top.show && Math.abs(prev.top.y - top.y) < 0.5 && prev.mid.show === mid.show && Math.abs(prev.mid.y - mid.y) < 0.5) {
+        return prev
+      }
+      return { top, mid }
+    })
+  }, [activeKey, lang, collapsed, inLocalServer, isInInstance, instances.length])
 
-  useEffect(() => {
-    const list = listRef.current
-    if (!list) return undefined
-    list.addEventListener('scroll', measure, { passive: true })
-    return () => list.removeEventListener('scroll', measure)
-  }, [measure])
-
-  useEffect(() => {
-    const nav = navRef.current
-    if (!nav || typeof ResizeObserver === 'undefined') return undefined
-    const observer = new ResizeObserver(() => measure())
-    for (const group of nav.querySelectorAll('[data-nav-group]')) observer.observe(group)
-    return () => observer.disconnect()
-  }, [measure])
-
-  const rowClass = (tall, extra = '') =>
-    `group relative w-full shrink-0 flex items-center pl-5.5 pr-3.5 text-left cursor-pointer ` +
-    `[&:first-of-type_.flare-top]:hidden [&:last-of-type_.flare-bottom]:hidden ` +
-    `focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[${accent}] ` +
-    `${tall ? 'h-10' : 'h-9'} ${extra}`
-
-  const flare = (top, bottom, color) => (
-    <>
-      {top && (
-        <span
-          data-px-hair
-          className="flare-top absolute right-0"
-          style={{
-            width: FILLET,
-            height: FILLET,
-            top: -FILLET,
-            background: `radial-gradient(circle at 0% 0%, transparent ${FILLET}px, ${color} ${FILLET}px)`,
-          }}
-        />
-      )}
-      {bottom && (
-        <span
-          data-px-hair
-          className="flare-bottom absolute right-0"
-          style={{
-            width: FILLET,
-            height: FILLET,
-            bottom: -FILLET,
-            background: `radial-gradient(circle at 0% 100%, transparent ${FILLET}px, ${color} ${FILLET}px)`,
-          }}
-        />
-      )}
-    </>
-  )
-
-  const block = (color) => (
-    <span
-      data-px-hair
-      className="absolute inset-y-0 left-0 right-0"
-      style={{
-        background: color,
-        borderTopLeftRadius: RADIUS,
-        borderBottomLeftRadius: RADIUS,
-      }}
+  const row = (key, icon, text, active, order, onClick) => (
+    <NavRow
+      key={key}
+      c={c}
+      icon={icon}
+      text={text}
+      active={active}
+      progress={labelT(order)}
+      onClick={onClick}
+      rowKey={key}
+      collapsed={collapsed}
     />
   )
 
-  const blockOutline = (color, flareTop, flareBottom) => (
-    <>
-      <span
-        data-nav-tab
-        className="absolute inset-y-0 left-0"
-        style={{
-          right: FILLET + 1,
-          borderTop: `1px solid ${color}`,
-          borderBottom: `1px solid ${color}`,
-          borderLeft: `1px solid ${color}`,
-          borderRight: 'none',
-          borderTopLeftRadius: RADIUS,
-          borderBottomLeftRadius: RADIUS,
-        }}
+  const instanceRow = (inst) => {
+    const selected = selectedInstance?.id === inst.id
+    return (
+      <InstanceRow
+        key={inst.id}
+        c={c}
+        inst={inst}
+        selected={selected}
+        progress={itemT}
+        collapsed={collapsed}
+        onSelect={() => onSelectInstance(inst)}
       />
-      {!flareTop && (
-        <span data-nav-tab className="absolute right-0" style={{ top: 0, width: FILLET + 1, height: 1, background: color }} />
-      )}
-      {!flareBottom && (
-        <span data-nav-tab className="absolute right-0" style={{ bottom: 0, width: FILLET + 1, height: 1, background: color }} />
-      )}
-    </>
-  )
+    )
+  }
 
-  const flareOutline = (top, bottom, color) => (
-    <>
-      {top && (
-        <span
-          data-nav-tab
-          className="flare-top absolute"
-          style={{
-            right: 1, width: FILLET, height: FILLET, top: -FILLET + 1,
-            borderBottom: `1px solid ${color}`,
-            borderRight: `1px solid ${color}`,
-            borderTop: 'none',
-            borderLeft: 'none',
-            borderBottomRightRadius: '100%',
-          }}
-        />
-      )}
-      {bottom && (
-        <span
-          data-nav-tab
-          className="flare-bottom absolute"
-          style={{
-            right: 1, width: FILLET, height: FILLET, bottom: -FILLET + 1,
-            borderTop: `1px solid ${color}`,
-            borderRight: `1px solid ${color}`,
-            borderBottom: 'none',
-            borderLeft: 'none',
-            borderTopRightRadius: '100%',
-          }}
-        />
-      )}
-    </>
-  )
-
-  const rowTint = () => (
-    <span aria-hidden className="absolute inset-y-0 right-[-1px]" style={{ left: EDGE }}>
-      {block(pillBg)}
-      {flare(true, true, pillBg)}
-    </span>
-  )
-
-  const hoverBar = (inset = EDGE) => (
-    <span
-      aria-hidden
-      className="nav-bar-grow absolute rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-150"
-      style={{ left: inset, width: 3, height: 18, top: 'calc(50% - 9px)', background: accent }}
-    />
-  )
-
-  const rowPad = (iconW) =>
-    collapsed
-      ? { paddingLeft: Math.max(0, (RAIL_W_COLLAPSED - iconW) / 2), transition: `padding-left ${SWEEP}` }
-      : undefined
-
-  const label = (text, active) => (
-    <span
-      className="relative z-20 overflow-hidden whitespace-nowrap"
-      style={{ maxWidth: collapsed ? 0 : LABEL_W, transition: `max-width ${SWEEP}` }}
-    >
-      <span className={`pl-2.5 text-xs ${active ? 'font-semibold' : 'font-medium'}`}>{text}</span>
-    </span>
-  )
-
-  const navKeyProps = (key, text) => ({
-    'data-nav-key': key,
-    'data-tip': collapsed ? text : undefined,
-    'aria-current': activeKey === key ? 'page' : undefined,
-  })
-
-  const loaderSlot = (inst) => (inst?.game === 'terraria' ? './terraria_slot.png' : loaderIcon(inst?.loader))
-  const slotIcon = (inst) => inst?.icon || loaderSlot(inst)
-
-  const list = (
-    <div ref={listRef} className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col gap-0.5">
-      {(
-        INSTANCE_PAGES.map((p) => {
-          const Icon = p.icon
-          const text = lang === 'vi' ? p.labelVi : p.label
-          const isActive = activeKey === p.key
-          return (
-            <button
-              type="button"
-              key={p.key}
-              onClick={() => onNavigate(p.key)}
-              {...navKeyProps(p.key, text)}
-              data-nav-row
-              className={rowClass(false)}
-              style={{ ...rowPad(ICON), color: isActive ? accent : labelColor }}
-            >
-              {!isActive && hoverBar()}
-              <Icon size={ICON} weight="duotone" className="relative z-20 shrink-0" />
-              {label(text, isActive)}
-            </button>
-          )
-        })
-      )}
-    </div>
+  const separator = (
+    <div className="mx-[14px] h-px shrink-0" style={{ background: c.borderSoft }} />
   )
 
   return (
-    <nav
-      ref={navRef}
-      className="absolute left-0 top-11 bottom-0 z-50 flex flex-col py-3"
-      data-surface
-      style={{ width: railW, backgroundColor: sidebarBg, gap: GAP, transition: `width ${SWEEP}` }}
+    <div
+      className="xyo-rise absolute left-0 top-11 bottom-0 py-2 pl-2"
+      style={{ width: width + 8, '--d': '.15s' }}
+      onMouseEnter={() => setRailHover(true)}
+      onMouseLeave={() => setRailHover(false)}
     >
       <div
-        aria-hidden
-        data-nav-pill
-        className="absolute z-10 pointer-events-none"
-        style={{
-          left: EDGE,
-          right: px ? 8 : -1,
-          top: 0,
-          height: pill.h,
-          opacity: pill.show ? 1 : 0,
-          transform: `translateY(${pill.y}px)`,
-          border: px ? `2px solid ${c.border}` : undefined,
-          borderRadius: px ? RADIUS : undefined,
-          boxShadow: px ? c.shadowSm : undefined,
-          transition: `transform ${SWEEP}, height ${SWEEP}, opacity 150ms linear`,
-        }}
+        className="xyo-glass relative flex h-full flex-col overflow-hidden rounded-3xl"
+        style={{ width, background: c.bar, border: `1px solid ${c.border}` }}
       >
-        <span className="absolute inset-0" style={px ? { display: 'none' } : undefined}>
-          <span
-            aria-hidden
-            className="absolute"
+        <div className="h-11 w-full shrink-0" />
+
+        <div className="relative flex flex-col px-[10px] pb-[9px] pt-[2px]">
+          <div ref={topGroup} className="relative flex w-full flex-col gap-1">
+            <Pill y={hl.top.y} show={hl.top.show} c={c} />
+            {inLocalServer
+              ? row('server-list', ArrowLeft, lang === 'vi' ? 'Danh sách server' : 'Server list', false, 0, onExitLocalServer)
+              : isInInstance
+                ? row('back', ArrowLeft, t(lang, 'sidebar.home'), true, 0, onBack)
+                : MAIN_PAGES.map((item, index) =>
+                    row(
+                      item.key,
+                      item.icon,
+                      lang === 'vi' ? item.labelVi : item.label,
+                      activeKey === item.key,
+                      index,
+                      () => onNavigate(item.key),
+                    ),
+                  )}
+          </div>
+        </div>
+
+        {separator}
+
+        <div className="relative flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden px-[10px] py-[9px]">
+          <div ref={midGroup} className="relative flex w-full flex-col gap-1">
+            <Pill y={hl.mid.y} show={hl.mid.show} c={c} />
+            {inLocalServer
+              ? SERVER_LOCAL_PAGES.map((item, index) =>
+                  row(
+                    item.key,
+                    item.icon,
+                    lang === 'vi' ? item.labelVi : item.label,
+                    activeKey === item.key,
+                    index,
+                    () => onNavigate(item.key),
+                  ),
+                )
+              : isInInstance
+                ? INSTANCE_PAGES.map((item, index) =>
+                    row(
+                      item.key,
+                      item.icon,
+                      lang === 'vi' ? item.labelVi : item.label,
+                      activeKey === item.key,
+                      index,
+                      () => onNavigate(item.key),
+                    ),
+                  )
+                : (
+                  <>
+                    {row('versions', Plus, t(lang, 'sidebar.newInstance'), false, 0, () => onNavigate('versions'))}
+                    {instances.length === 0 ? (
+                      collapsed ? null : (
+                        <p className="px-3 py-3 text-[11px] leading-relaxed" style={{ color: c.label }}>
+                          {t(lang, 'sidebar.noInstances')}
+                        </p>
+                      )
+                    ) : (
+                      instances.map(instanceRow)
+                    )}
+                  </>
+                )}
+          </div>
+        </div>
+
+        {separator}
+
+        <div className="flex shrink-0 flex-col gap-1.5 px-[10px] pb-3 pt-[9px]">
+          <button
+            ref={accBtnRef}
+            type="button"
+            onClick={() => setMenuOpen((v) => !v)}
+            aria-expanded={menuOpen}
+            className="flex w-full cursor-pointer items-center"
             style={{
-              right: 0,
-              width: 4,
-              top: pill.flareTop ? -FILLET : 0,
-              bottom: pill.flareBottom ? -FILLET : 0,
-              backgroundColor: sidebarBg,
-              backgroundImage: px ? 'var(--px-dither)' : undefined,
-              backgroundSize: px ? '4px 4px' : undefined,
+              height: 52,
+              borderRadius: 16,
+              paddingLeft: 10,
+              paddingRight: 8,
+              gap: 8,
+              background: activeKey === 'accounts' || menuOpen ? c.surfaceActive : `${c.text}14`,
+              transition: 'background 160ms ease',
             }}
-          />
-          <span data-nav-pill-outline className="absolute inset-0">
-            {blockOutline(borderColor, pill.flareTop, pill.flareBottom)}
-            {flareOutline(pill.flareTop, pill.flareBottom, borderColor)}
-          </span>
-        </span>
-      </div>
-
-      <button
-        type="button"
-        onClick={onToggleCollapsed}
-        aria-expanded={!collapsed}
-        data-tip={t(lang, collapsed ? 'sidebar.expand' : 'sidebar.collapse')}
-        className={`absolute top-[14px] left-[calc(100%-12px)] z-50 w-6 h-6 rounded-md flex items-center justify-center cursor-pointer transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[${accent}]`}
-        style={{ background: handleBg, border: `1px solid ${borderColor}`, color: labelColor }}
-      >
-        <SidebarSimple
-          size={14}
-          weight="duotone"
-          className={`transition-transform duration-300 ${collapsed ? 'rotate-180' : ''}`}
-        />
-      </button>
-
-      <div data-nav-group className="relative shrink-0 flex flex-col gap-1 pb-2">
-        <span
-          aria-hidden
-          data-nav-ornament
-          className="absolute right-0 w-px pointer-events-none"
-          style={{ top: LINE_TOP, bottom: HOOK, background: borderColor }}
-        />
-        <span
-          aria-hidden
-          data-nav-ornament
-          className="absolute left-0 right-0 bottom-0 h-3.5 border-b border-r rounded-br-[14px] pointer-events-none"
-          style={{ borderColor }}
-        />
-
-        {!isInInstance && !inLocalServer && MAIN_PAGES.filter((p) => p.key !== 'versions').map((p) => {
-          const Icon = p.icon
-          const text = lang === 'vi' ? p.labelVi : p.label
-          const isActive = activeKey === p.key
-          return (
-            <button
-              type="button"
-              key={p.key}
-              onClick={() => onNavigate(p.key)}
-              {...navKeyProps(p.key, text)}
-              data-nav-row
-              className={rowClass(true)}
-              style={{ ...rowPad(ICON), color: isActive ? accent : labelColor }}
+            onMouseEnter={(event) => { event.currentTarget.style.background = c.hover }}
+            onMouseLeave={(event) => {
+              event.currentTarget.style.background = activeKey === 'accounts' || menuOpen ? c.surfaceActive : `${c.text}14`
+            }}
+          >
+            {account ? (
+              <HeadSkin name={account.name} uuid={account.uuid} type={account.type} size={34} radius={999} theme={theme} />
+            ) : (
+              <span
+                className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full text-[13px] font-bold"
+                style={{ background: `linear-gradient(140deg, ${c.accent}, ${c.accentHover})`, color: c.onAccent }}
+              >
+                ?
+              </span>
+            )}
+            <span
+              className="relative flex min-w-0 flex-1 flex-col overflow-hidden text-left"
+              style={{ opacity: nameT, transform: `translateX(${-8 * (1 - nameT)}px)`, transition: 'opacity 110ms linear' }}
             >
-              {!isActive && hoverBar()}
-              <Icon size={ICON} weight="duotone" className="relative z-20 shrink-0" />
-              {label(text, isActive)}
-            </button>
-          )
-        })}
-
-        {inLocalServer && (
-          <button
-            type="button"
-            onClick={onExitLocalServer}
-            data-tip={collapsed ? (lang === 'vi' ? 'Danh sách server' : 'Server list') : undefined}
-            data-nav-row
-            className={rowClass(true)}
-            style={{ ...rowPad(ICON), color: labelColor }}
-          >
-            {hoverBar()}
-            <ArrowLeft size={ICON} weight="duotone" className="relative z-20 shrink-0" />
-            {label(lang === 'vi' ? 'Danh sách server' : 'Server list', false)}
+              <span className="truncate text-[12.5px] font-semibold" style={{ color: c.text }}>
+                {account ? account.name : t(lang, 'sidebar.noAccount')}
+              </span>
+              <span className="truncate text-[11px]" style={{ color: c.label }}>
+                {lang === 'vi' ? 'Tài khoản' : 'Account'} · {version ? `v${version}` : 'v2.0.0'}
+              </span>
+            </span>
+            <CaretRight
+              size={16}
+              weight="duotone"
+              style={{
+                color: c.label,
+                transform: `rotate(${menuOpen ? 180 : 0}deg)`,
+                transition: `transform 220ms ${SPRING}`,
+                flexShrink: 0,
+              }}
+            />
           </button>
-        )}
+        </div>
 
-        {isInInstance && (
-          <button
-            type="button"
-            onClick={onBack}
-            data-tip={collapsed ? t(lang, 'sidebar.home') : undefined}
-            data-nav-row
-            className={rowClass(true)}
-            style={{ ...rowPad(ICON), color: labelColor }}
-          >
-            {hoverBar()}
-            <ArrowLeft size={ICON} weight="duotone" className="relative z-20 shrink-0" />
-            {label(t(lang, 'sidebar.home'), false)}
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={onToggleCollapsed}
+          aria-expanded={!collapsed}
+          data-tip={collapsed ? 'Mở rộng thanh bên' : 'Thu gọn thanh bên'}
+            aria-label={collapsed ? 'Mở rộng thanh bên' : 'Thu gọn thanh bên'}
+          className="absolute right-0 top-[14px] z-20 flex h-9 w-8 items-center justify-center rounded-l-[10px]"
+          style={{
+            background: `${c.text}24`,
+            opacity: collapsed && !railHover ? 0 : 1,
+            transition: 'opacity 180ms ease, background 150ms ease',
+            color: c.text,
+          }}
+          onMouseEnter={(event) => { event.currentTarget.style.background = `${c.text}38` }}
+          onMouseLeave={(event) => { event.currentTarget.style.background = `${c.text}24` }}
+        >
+          <SidebarSimple
+            size={16}
+            weight="duotone"
+            style={{ transform: `rotate(${collapsed ? 0 : 180}deg)`, transition: `transform 320ms ${SPRING}` }}
+          />
+        </button>
       </div>
 
-      <div data-nav-group className="relative flex-1 min-h-0 flex flex-col py-3.5">
-        <span
-          aria-hidden
-          data-nav-ornament
-          className="absolute left-0 right-0 top-0 h-3.5 border-t border-r rounded-tr-[14px] pointer-events-none"
-          style={{ borderColor }}
-        />
-        <span
-          aria-hidden
-          data-nav-ornament
-          className="absolute right-0 w-px pointer-events-none"
-          style={{ top: HOOK, bottom: HOOK, background: borderColor }}
-        />
-        <span
-          aria-hidden
-          data-nav-ornament
-          className="absolute left-0 right-0 bottom-0 h-3.5 border-b border-r rounded-br-[14px] pointer-events-none"
-          style={{ borderColor }}
-        />
-        {inLocalServer ? (
-          <div ref={listRef} className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col gap-0.5">
-            {SERVER_LOCAL_PAGES.map((p) => {
-              const Icon = p.icon
-              const text = lang === 'vi' ? p.labelVi : p.label
-              const isActive = activeKey === p.key
+      {menuOpen && (
+        <div
+          ref={menuRef}
+          className="xyo-menu-in fixed z-[60] flex flex-col gap-0.5 rounded-[18px] p-1"
+          style={{
+            left: menuPos?.left ?? 18,
+            bottom: menuPos?.bottom ?? 78,
+            width: menuPos?.width ?? (collapsed ? 240 : Math.max(width - 20, 160)),
+            background: c.surface,
+            border: `1px solid ${c.border}`,
+            boxShadow: c.shadow,
+          }}
+        >
+          <div className="flex h-6 items-center px-2.5 text-[10.5px] font-bold" style={{ color: c.faint }}>
+            {lang === 'vi' ? 'TÀI KHOẢN' : 'ACCOUNTS'}
+          </div>
+
+          {accounts.length === 0 ? (
+            <div className="flex h-10 items-center px-2.5 text-[12px]" style={{ color: c.label }}>
+              {t(lang, 'sidebar.noAccount')}
+            </div>
+          ) : (
+            accounts.map((acc) => {
+              const active = acc.id === activeAccountId
               return (
                 <button
+                  key={acc.id}
                   type="button"
-                  key={p.key}
-                  onClick={() => onNavigate(p.key)}
-                  {...navKeyProps(p.key, text)}
-                  data-nav-row
-                  className={rowClass(false)}
-                  style={{ ...rowPad(ICON), color: isActive ? accent : labelColor }}
+                  onClick={() => {
+                    setMenuOpen(false)
+                    onSelectAccount?.(acc)
+                  }}
+                  className="flex h-[46px] w-full cursor-pointer items-center gap-2 rounded-xl px-1.5 text-left"
+                  style={{ background: 'transparent' }}
+                  onMouseEnter={(event) => { event.currentTarget.style.background = c.hover }}
+                  onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent' }}
                 >
-                  {!isActive && hoverBar()}
-                  <Icon size={ICON} weight="duotone" className="relative z-20 shrink-0" />
-                  {label(text, isActive)}
+                  <HeadSkin name={acc.name} uuid={acc.uuid} type={acc.type} size={30} radius={999} theme={theme} />
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate text-[13px] font-semibold" style={{ color: c.text }}>{acc.name}</span>
+                    <span className="text-[10.5px]" style={{ color: c.label }}>
+                      {acc.type === 'microsoft' ? 'Microsoft' : acc.type === 'ely' ? 'Ely.by' : 'Offline'}
+                    </span>
+                  </span>
+                  {active && <Check size={16} weight="bold" style={{ color: c.accent, flexShrink: 0 }} />}
                 </button>
               )
-            })}
-          </div>
-        ) : isInInstance ? list : (
-          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col gap-0.5">
-            <button
-              type="button"
-              onClick={() => onNavigate('versions')}
-              data-tip={collapsed ? t(lang, 'sidebar.newInstance') : undefined}
-              data-nav-row
-              className={rowClass(false)}
-              style={{ ...rowPad(ICON), color: labelColor }}
-            >
-              {hoverBar()}
-              <Plus size={ICON} weight="duotone" className="relative z-20 shrink-0" />
-              {label(t(lang, 'sidebar.newInstance'), false)}
-            </button>
-            {instances.length === 0 ? (
-              <p className="px-3 py-3 text-[11px] leading-relaxed" style={{ color: labelColor }}>
-                {t(lang, 'sidebar.noInstances')}
-              </p>
-            ) : (
-              instances.map((inst) => {
-                const isSelected = selectedInstance?.id === inst.id
-                return (
-                  <button
-                    type="button"
-                    key={inst.id}
-                    onClick={() => onSelectInstance(inst)}
-                    data-tip={collapsed ? inst.name : undefined}
-                    data-nav-row
-                    className={rowClass(false)}
-                    style={{ ...rowPad(ICON), color: isSelected ? accent : labelColor, background: isSelected ? pillBg : undefined, borderRadius: RADIUS }}
-                  >
-                    {!isSelected && hoverBar()}
-                    <img
-                      src={slotIcon(inst)}
-                      alt=""
-                      className="relative z-20 w-7 h-7 rounded-md object-cover shrink-0"
-                      onError={(event) => {
-                        const el = event.currentTarget
-                        if (el.dataset.fallback) return
-                        el.dataset.fallback = '1'
-                        el.src = loaderSlot(inst)
-                      }}
-                    />
-                    {label(inst.name, isSelected)}
-                    <span className="relative z-20 ml-auto w-2 h-2 rounded-full shrink-0" style={{ background: statusColor(inst.status) }} />
-                  </button>
-                )
-              })
-            )}
-          </div>
-        )}
-      </div>
-
-      <div data-nav-group className="relative shrink-0 flex flex-col gap-1 pt-2">
-        <span
-          aria-hidden
-          data-nav-ornament
-          className="absolute left-0 right-0 top-0 h-3.5 border-t border-r rounded-tr-[14px] pointer-events-none"
-          style={{ borderColor }}
-        />
-        <span
-          aria-hidden
-          data-nav-ornament
-          className="absolute right-0 w-px pointer-events-none"
-          style={{ top: HOOK, bottom: 0, background: borderColor }}
-        />
-
-        <button
-          type="button"
-          onClick={() => onNavigate('accounts')}
-          {...navKeyProps('accounts', account ? account.name : t(lang, 'accounts.title'))}
-          data-nav-row
-          className={rowClass(true)}
-          style={{ ...rowPad(HEAD), color: activeKey === 'accounts' ? accent : labelColor }}
-        >
-          {activeKey !== 'accounts' && hoverBar()}
-          {account ? (
-            <HeadSkin
-              name={account.name}
-              uuid={account.uuid}
-              type={account.type}
-              size={HEAD}
-              radius={8}
-              theme={theme}
-              style={{ position: 'relative', zIndex: 20 }}
-            />
-          ) : (
-            <User size={ICON} weight="duotone" className="relative z-20 shrink-0" />
+            })
           )}
-          {label(account ? account.name : t(lang, 'sidebar.noAccount'), activeKey === 'accounts')}
-        </button>
 
-        <button
-          type="button"
-          onClick={() => onNavigate('settings')}
-          {...navKeyProps('settings', t(lang, 'sidebar.settings'))}
-          data-nav-row
-          className={rowClass(true)}
-          style={{ ...rowPad(ICON), color: activeKey === 'settings' ? accent : labelColor }}
-        >
-          {activeKey !== 'settings' && hoverBar()}
-          <Gear size={ICON} weight="duotone" className="relative z-20 shrink-0" />
-          {label(t(lang, 'sidebar.settings'), activeKey === 'settings')}
-        </button>
+          <div className="my-1 h-px" style={{ background: c.borderSoft }} />
 
-        <span
-          className="text-[9px] font-mono leading-none whitespace-nowrap select-none overflow-hidden self-center"
-          style={{ color: labelColor, maxWidth: collapsed ? 0 : 60, transition: `max-width ${SWEEP}` }}
-        >
-          {version ? `v${version}` : 'v1.0.0'}
-        </span>
-      </div>
-    </nav>
+          {[
+            { key: 'accounts', icon: User, label: lang === 'vi' ? 'Quản lý tài khoản' : 'Manage accounts' },
+            { key: 'settings', icon: Gear, label: lang === 'vi' ? 'Cài đặt hệ thống' : 'System settings' },
+          ].map((item) => {
+            const Icon = item.icon
+            return (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false)
+                  onNavigate(item.key)
+                }}
+                className="flex h-[46px] w-full cursor-pointer items-center gap-2 rounded-xl px-1.5 text-left"
+                style={{ background: 'transparent' }}
+                onMouseEnter={(event) => { event.currentTarget.style.background = c.hover }}
+                onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent' }}
+              >
+                <span className="flex h-[30px] w-[30px] shrink-0 items-center justify-center">
+                  <Icon size={17} weight="duotone" style={{ color: c.label }} />
+                </span>
+                <span className="truncate whitespace-nowrap text-[13px] font-medium" style={{ color: c.text }}>{item.label}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function InstanceRow({ c, inst, selected, progress, collapsed, onSelect }) {
+  const [hover, setHover] = useState(false)
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      data-nav-key={inst.id}
+      data-active={selected ? 'true' : 'false'}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      className="relative z-10 flex w-full shrink-0 cursor-pointer items-center"
+      style={{
+        height: ROW_H,
+        paddingLeft: 14,
+        paddingRight: 10,
+        borderRadius: 15,
+        gap: 10,
+        opacity: selected || hover ? 1 : 0.62,
+        transition: 'opacity 150ms ease',
+        color: c.text,
+      }}
+    >
+      <img
+        src={loaderSlot(inst)}
+        alt=""
+        className="h-[26px] w-[26px] shrink-0 rounded-md object-cover"
+        onError={(event) => {
+          const el = event.currentTarget
+          if (el.dataset.fallback) return
+          el.dataset.fallback = '1'
+          el.src = loaderSlot(inst)
+        }}
+      />
+      <Label text={inst.name} progress={progress} size={13.5} collapsed={collapsed} />
+      <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: statusColor(inst.status) }} />
+    </button>
   )
 }

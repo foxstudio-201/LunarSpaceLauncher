@@ -6,7 +6,7 @@ export const TYPE_TONE = {
   float: '#fbbf24',
   double: '#fb923c',
   string: '#4ade80',
-  list: '#a78bfa',
+  list: '#e9b872',
   compound: '#f472b6',
   byteArray: '#94a3b8',
   intArray: '#94a3b8',

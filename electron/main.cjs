@@ -4,12 +4,34 @@ const fs = require('fs')
 
 const isDev = process.env.NODE_ENV === 'development'
 
+// Giữ mức RAM của launcher thấp: chặn heap V8 phình to và gắn AppUserModelId đúng tên mới.
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=512')
+if (process.platform === 'win32') app.setAppUserModelId('com.xyolauncher.launcher')
+
+// Đổi tên sản phẩm làm thư mục userData đổi theo => chép dữ liệu từ bản LunarSpace cũ
+// sang một lần để người dùng không mất danh sách instance/cài đặt.
+function migrateLegacyUserData() {
+  try {
+    const target = app.getPath('userData')
+    const legacy = path.join(app.getPath('appData'), 'LunarSpace Launcher')
+    if (legacy === target) return
+    if (!fs.existsSync(legacy)) return
+    if (fs.existsSync(path.join(target, 'instances.json')) || fs.existsSync(path.join(target, 'settings.json'))) return
+    fs.mkdirSync(target, { recursive: true })
+    fs.cpSync(legacy, target, { recursive: true, force: true })
+  } catch {
+    // bỏ qua: launcher vẫn chạy với dữ liệu mới
+  }
+}
+migrateLegacyUserData()
+
 let mainWindow = null
 let settingsCache = null
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'lsicon', privileges: { standard: true, secure: true, supportFetchAPI: true, bypassCSP: false } },
   { scheme: 'lsmap', privileges: { standard: true, secure: true, supportFetchAPI: true, bypassCSP: false } },
+  { scheme: 'lsbg', privileges: { standard: true, secure: true, supportFetchAPI: true, bypassCSP: false } },
 ])
 
 const ICON_MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' }
@@ -30,6 +52,67 @@ function serveCache(request, folder) {
   } catch {
     return new Response('', { status: 404 })
   }
+}
+
+const BG_MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' }
+
+const backgroundsDir = () => path.join(app.getPath('userData'), 'backgrounds')
+
+function backgroundManifest() {
+  const candidates = [
+    path.join(__dirname, '..', 'dist', 'backgrounds', 'index.json'),
+    path.join(__dirname, '..', 'public', 'backgrounds', 'index.json'),
+  ]
+  for (const file of candidates) {
+    try {
+      return JSON.parse(fs.readFileSync(file, 'utf8'))
+    } catch {}
+  }
+  return { default: '1123121', items: [] }
+}
+
+function backgroundItems() {
+  const manifest = backgroundManifest()
+  const dir = backgroundsDir()
+  return (manifest.items || []).map((item) => {
+    const ext = item.ext || 'png'
+    const file = `${item.id}.${ext}`
+    const downloaded = fs.existsSync(path.join(dir, file))
+    const bundled = Boolean(item.local) || fs.existsSync(path.join(__dirname, '..', 'public', 'backgrounds', file))
+    const ready = downloaded || bundled
+    return {
+      id: item.id,
+      name: item.name || item.id,
+      ext,
+      ready,
+      local: Boolean(item.local),
+      url: ready ? `lsbg://bg/${file}` : '',
+      remote: item.remote || `${manifest.repo || ''}/${file}`,
+    }
+  })
+}
+
+function serveBackground(request) {
+  let name = ''
+  try {
+    name = decodeURIComponent(new URL(request.url).pathname).replace(/^\/+/, '').replace(/[^A-Za-z0-9._-]/g, '')
+  } catch {
+    name = ''
+  }
+  const ext = path.extname(name).toLowerCase()
+  if (!name || !BG_MIME[ext]) return new Response('', { status: 404 })
+  const candidates = [
+    path.join(backgroundsDir(), name),
+    path.join(__dirname, '..', 'dist', 'backgrounds', name),
+    path.join(__dirname, '..', 'public', 'backgrounds', name),
+  ]
+  for (const file of candidates) {
+    try {
+      const data = fs.readFileSync(file)
+      return new Response(data, { status: 200, headers: { 'Content-Type': BG_MIME[ext], 'Cache-Control': 'no-cache' } })
+    } catch {}
+  }
+  return new Response('', { status: 404 })
 }
 
 function serveIcon(request) {
@@ -847,31 +930,87 @@ function registerIpc() {
   ipcMain.handle('win:minimize', () => { mainWindow?.minimize(); return { ok: true } })
   ipcMain.handle('win:close', () => { mainWindow?.close(); return { ok: true } })
   ipcMain.handle('win:quit', () => { app.quit(); return { ok: true } })
+  ipcMain.handle('win:maximize', () => {
+    if (!mainWindow) return { ok: false, maximized: false }
+    if (mainWindow.isMaximized()) mainWindow.unmaximize()
+    else mainWindow.maximize()
+    return { ok: true, maximized: mainWindow.isMaximized() }
+  })
+  ipcMain.handle('win:isMaximized', () => Boolean(mainWindow?.isMaximized()))
+
+  ipcMain.handle('launcher:backgrounds', () => {
+    const manifest = backgroundManifest()
+    const items = backgroundItems()
+    const current = readSettings().background || manifest.default || ''
+    return { ok: true, items, default: manifest.default || '', current }
+  })
+
+  ipcMain.handle('launcher:background-download', async (_e, id) => {
+    const items = backgroundItems()
+    const item = items.find((x) => x.id === id)
+    if (!item) return { ok: false, error: 'Không tìm thấy ảnh nền.' }
+    if (item.ready) return { ok: true, items }
+    if (!item.remote) return { ok: false, error: 'Thiếu đường dẫn tải.' }
+    try {
+      const res = await fetch(item.remote, { signal: AbortSignal.timeout(60000) })
+      if (!res.ok) return { ok: false, error: `HTTP ${res.status}` }
+      const buffer = Buffer.from(await res.arrayBuffer())
+      fs.mkdirSync(backgroundsDir(), { recursive: true })
+      fs.writeFileSync(path.join(backgroundsDir(), `${item.id}.${item.ext}`), buffer)
+      return { ok: true, items: backgroundItems() }
+    } catch (err) {
+      return { ok: false, error: err?.message || 'Tải ảnh nền thất bại.' }
+    }
+  })
+
+  ipcMain.handle('launcher:background-set', (_e, id) => {
+    const items = backgroundItems()
+    const item = items.find((x) => x.id === id)
+    if (!item || !item.ready) return { ok: false, error: 'Ảnh nền chưa được tải về.' }
+    writeSettings({ background: item.id })
+    return { ok: true, id: item.id }
+  })
+  // Chụp nhanh nội dung cửa sổ, dùng cho hiệu ứng pixel-dissolve khi chuyển view.
+  ipcMain.handle('win:capture', async () => {
+    try {
+      if (!mainWindow) return { ok: false }
+      const image = await mainWindow.webContents.capturePage()
+      return { ok: true, dataUrl: image.toDataURL() }
+    } catch (err) {
+      return { ok: false, error: err?.message || 'capture failed' }
+    }
+  })
 }
 
 function createWindow() {
   const saved = readSettings()
   const bootTheme = saved.theme === 'light' ? 'light' : 'dark'
   const bootLang = saved.language === 'en' ? 'en' : 'vi'
-  const bootFont = saved.font === 'pixel' ? 'pixel' : 'default'
-  const BOOT_BG = { dark: '#0a0d12', light: '#edf2f9' }
+  const BOOT_BG = { dark: '#0c0e12', light: '#f4f5f8' }
   const withBootParams = (raw) => {
     const url = new URL(raw)
     url.searchParams.set('theme', bootTheme)
     url.searchParams.set('lang', bootLang)
-    url.searchParams.set('font', bootFont)
     return url.toString()
   }
 
+  const clamp = (value, min, max, fallback) => {
+    const n = Number(value)
+    return Number.isFinite(n) && n >= min && n <= max ? Math.round(n) : fallback
+  }
+  const windowWidth = clamp(saved.windowWidth, 980, 3200, 1180)
+  const windowHeight = clamp(saved.windowHeight, 640, 2000, 760)
+
   mainWindow = new BrowserWindow({
-    width: 1145,
-    height: 720,
-    resizable: false,
-    maximizable: false,
+    width: windowWidth,
+    height: windowHeight,
+    minWidth: 980,
+    minHeight: 640,
+    resizable: true,
+    maximizable: true,
     show: false,
-    backgroundColor: BOOT_BG[bootTheme] || '#0a0d12',
+    backgroundColor: BOOT_BG[bootTheme] || '#0c0e12',
     frame: false,
-    titleBarStyle: 'hidden',
     autoHideMenuBar: true,
     icon: path.join(__dirname, '..', 'public', 'icon.png'),
     webPreferences: {
@@ -882,6 +1021,28 @@ function createWindow() {
       spellcheck: false,
     },
   })
+
+  // Nhớ kích thước cửa sổ giữa các lần mở (giống windowWidth/windowHeight của bản Rust).
+  let saveSizeTimer = null
+  const rememberSize = () => {
+    if (!mainWindow || mainWindow.isMaximized() || mainWindow.isMinimized()) return
+    if (saveSizeTimer) clearTimeout(saveSizeTimer)
+    saveSizeTimer = setTimeout(() => {
+      try {
+        if (!mainWindow || mainWindow.isDestroyed()) return
+        const [w, h] = mainWindow.getSize()
+        writeSettings({ ...readSettings(), windowWidth: w, windowHeight: h })
+      } catch {}
+    }, 400)
+  }
+  mainWindow.on('resize', rememberSize)
+
+  const sendMaximized = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    mainWindow.webContents.send('win:maximized', mainWindow.isMaximized())
+  }
+  mainWindow.on('maximize', sendMaximized)
+  mainWindow.on('unmaximize', sendMaximized)
 
   mainWindow.once('ready-to-show', () => mainWindow.show())
 
@@ -896,7 +1057,7 @@ function createWindow() {
     mainWindow.webContents.openDevTools({ mode: 'detach' })
   } else {
     mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'), {
-      query: { theme: bootTheme, lang: bootLang, font: bootFont },
+      query: { theme: bootTheme, lang: bootLang },
     })
   }
 
@@ -942,6 +1103,7 @@ if (MODE !== 'app') {
   app.whenReady().then(() => {
     protocol.handle('lsicon', serveIcon)
     protocol.handle('lsmap', (request) => serveCache(request, 'map-cache'))
+    protocol.handle('lsbg', serveBackground)
     registerIpc()
     createWindow()
     tray.create({

@@ -495,7 +495,7 @@ export default function ContentDownloadPage({ instance, theme, lang, kind, progr
                     style={{
                       background: on ? c.surface : 'transparent',
                       color: on ? c.accent : c.label,
-                      border: `1px solid ${on ? 'rgba(167,139,250,0.32)' : 'transparent'}`,
+                      border: `1px solid ${on ? 'rgba(233,184,114,0.32)' : 'transparent'}`,
                     }}
                   >
                     {s.name}
@@ -882,7 +882,7 @@ export default function ContentDownloadPage({ instance, theme, lang, kind, progr
                                       {v.versionNumber}
                                     </p>
                                     {i === 0 && (
-                                      <span className="text-[9px] font-bold px-1 py-0.5 rounded shrink-0 uppercase" style={{ background: 'rgba(167,139,250,0.16)', color: c.accent }}>
+                                      <span className="text-[9px] font-bold px-1 py-0.5 rounded shrink-0 uppercase" style={{ background: 'rgba(233,184,114,0.16)', color: c.accent }}>
                                         {vn(lang, 'mới nhất', 'latest')}
                                       </span>
                                     )}
@@ -1281,14 +1281,14 @@ function VersionRow({ c, lang, version, game, first, installing, disabled, onIns
   return (
     <div
       className="flex items-center gap-3 px-3 py-2"
-      style={{ borderTop: first ? 'none' : `1px solid ${c.border}`, background: first ? 'rgba(167,139,250,0.06)' : 'transparent' }}
+      style={{ borderTop: first ? 'none' : `1px solid ${c.border}`, background: first ? 'rgba(233,184,114,0.06)' : 'transparent' }}
     >
       <span className="w-[3px] h-7 rounded-full shrink-0" style={{ background: first ? c.accent : c.border }} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <p className="text-[11px] font-semibold truncate" style={{ color: c.text }} title={version.versionNumber}>{version.versionNumber}</p>
           {first && (
-            <span className="text-[9px] font-bold px-1 py-0.5 rounded shrink-0 uppercase" style={{ background: 'rgba(167,139,250,0.16)', color: c.accent }}>
+            <span className="text-[9px] font-bold px-1 py-0.5 rounded shrink-0 uppercase" style={{ background: 'rgba(233,184,114,0.16)', color: c.accent }}>
               {vn(lang, 'mới nhất', 'latest')}
             </span>
           )}

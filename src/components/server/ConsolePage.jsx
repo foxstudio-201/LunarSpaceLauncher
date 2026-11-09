@@ -11,7 +11,7 @@ const isElectron = typeof window !== 'undefined' && window.electronAPI
 const TERM_THEME = {
   background: '#0a0a0a',
   foreground: '#22c55e',
-  cursor: '#a78bfa',
+  cursor: '#e9b872',
   cursorAccent: '#0a0a0a',
   selectionBackground: 'rgba(255,255,255,0.3)',
   selectionInactiveBackground: 'rgba(255,255,255,0.2)',
@@ -20,7 +20,7 @@ const TERM_THEME = {
   green: '#22c55e',
   yellow: '#eab308',
   blue: '#3b82f6',
-  magenta: '#a78bfa',
+  magenta: '#e9b872',
   cyan: '#06b6d4',
   white: '#e5e5e5',
   brightBlack: '#6b7280',
@@ -28,7 +28,7 @@ const TERM_THEME = {
   brightGreen: '#4ade80',
   brightYellow: '#facc15',
   brightBlue: '#60a5fa',
-  brightMagenta: '#c4b5fd',
+  brightMagenta: '#f3c98a',
   brightCyan: '#67e8f9',
   brightWhite: '#ffffff',
 }
@@ -612,7 +612,7 @@ function isTpsProbeNoise(text) {
             <button
               onClick={() => setSearchOpen((v) => !v)}
               className="p-1.5 rounded transition-colors hover:opacity-80"
-              style={{ background: searchOpen ? 'rgba(167,139,250,0.15)' : 'transparent', color: searchOpen ? '#a78bfa' : labelColor }}
+              style={{ background: searchOpen ? 'rgba(233,184,114,0.15)' : 'transparent', color: searchOpen ? '#e9b872' : labelColor }}
               title={lang === 'vi' ? 'Tìm trong console' : 'Search console'}
             >
               <MagnifyingGlass size={14} />
@@ -711,7 +711,7 @@ function isTpsProbeNoise(text) {
             onClick={handleSendCommand}
             disabled={!command.trim() || !wsConnected || isOffline}
             className="px-4 py-2 rounded-lg text-[11px] font-semibold transition-all hover:opacity-85 active:scale-95 disabled:opacity-40"
-            style={{ background: '#a78bfa', color: '#fff' }}
+            style={{ background: '#e9b872', color: '#1b1409' }}
           >
             {lang === 'vi' ? 'Gửi' : 'Send'}
           </button>

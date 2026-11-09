@@ -1,24 +1,38 @@
-export const LOGO_ROWS = [
-  '█                              ████',
-  '█     █   █ ████   ███  ████  █     ████   ███   ████  ███',
-  '█     █   █ █   █ █   █ █   █  ███  █   █ █   █ █     █   █',
-  '█     █   █ █   █ █   █ █         █ ████  █   █ █     █████',
-  '█████  ███  █   █  ████ █     ████  █      ████  ████  ███',
-  '                                    █',
-]
+// Wordmark dạng khối cho XyoLauncher (thay cho logo chữ "XyoLauncher" cũ).
+const GLYPHS = {
+  X: ['█   █', ' █ █ ', '  █  ', ' █ █ ', '█   █'],
+  Y: ['█   █', ' █ █ ', '  █  ', '  █  ', '  █  '],
+  O: [' ███ ', '█   █', '█   █', '█   █', ' ███ '],
+  L: ['█    ', '█    ', '█    ', '█    ', '█████'],
+  A: [' ███ ', '█   █', '█████', '█   █', '█   █'],
+  U: ['█   █', '█   █', '█   █', '█   █', ' ███ '],
+  N: ['█   █', '██  █', '█ █ █', '█  ██', '█   █'],
+  C: [' ████', '█    ', '█    ', '█    ', ' ████'],
+  H: ['█   █', '█   █', '█████', '█   █', '█   █'],
+  E: ['█████', '█    ', '████ ', '█    ', '█████'],
+  R: ['████ ', '█   █', '████ ', '█  █ ', '█   █'],
+}
 
-const ROW_COLORS = [189, 183, 177, 141, 135, 129]
+const WORD = 'XYOLAUNCHER'
+
+export const LOGO_ROWS = Array.from({ length: 5 }, (_, row) =>
+  WORD.split('')
+    .map((ch) => GLYPHS[ch][row])
+    .join(' '),
+)
+
+const ROW_COLORS = [223, 216, 179, 214, 208]
 const RESET = '\x1b[0m'
 const DIM = '\x1b[38;5;240m'
 const SOFT = '\x1b[38;5;245m'
-const LABEL = '\x1b[38;5;183m'
+const LABEL = '\x1b[38;5;179m'
 
 export const BANNER_MARK = '\u200b\u200b'
 
 const dot = () => `${DIM}·${RESET}`
 
 export function bannerVersion(appVersion) {
-  return appVersion ? `v${appVersion}` : 'v1.0.0'
+  return appVersion ? `v${appVersion}` : 'v2.0.0'
 }
 
 export function launchBannerLines(instance, appVersion) {
@@ -34,7 +48,7 @@ export function launchBannerLines(instance, appVersion) {
   return [
     '',
     ...rows,
-    `  ${LABEL}LunarSpace${RESET} ${DIM}${bannerVersion(appVersion)}${RESET}`,
+    `  ${LABEL}XyoLauncher${RESET} ${DIM}${bannerVersion(appVersion)}${RESET}`,
     `  ${parts}`,
     '',
   ].map((line) => `${BANNER_MARK}${line}`)

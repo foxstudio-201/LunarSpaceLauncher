@@ -7,6 +7,7 @@ import {
 import { useApp } from '../../i18n/AppContext'
 import { t } from '../../i18n/translations'
 import { palette } from '../../lib/palette'
+import ThemeSwitch from '../ui/ThemeSwitch'
 import { formatBytes, formatDate } from '../../lib/status'
 import PageHeader from '../ui/PageHeader'
 import Switch from '../ui/Switch'
@@ -65,11 +66,83 @@ function Segmented({ c, value, onChange, options }) {
 const smallBtn = (c) => ({ background: c.input, border: `1px solid ${c.border}`, color: c.label })
 
 export default function SettingsPage({ theme, lang, version, system, storage, onSave, onShowWhatsNew, update: updateEvent }) {
-  const { setLang, setTheme, font, setFont } = useApp()
+  const { setLang } = useApp()
   const c = palette(theme)
   const [javaPath, setJavaPath] = useState(storage?.javaPath || '')
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
+  const [effects, setEffects] = useState(true)
+  const [bgItems, setBgItems] = useState([])
+  const [bgCurrent, setBgCurrent] = useState('')
+  const [bgBusy, setBgBusy] = useState('')
+  const [bgError, setBgError] = useState('')
+
+  useEffect(() => {
+    let alive = true
+    const load = async () => {
+      try {
+        const saved = window.electronAPI?.getSettings ? await window.electronAPI.getSettings() : null
+        const res = await api.listBackgrounds()
+        if (!alive) return
+        if (saved && saved.effects !== undefined) setEffects(saved.effects !== false)
+        if (res?.ok) {
+          setBgItems(res.items || [])
+          setBgCurrent(saved?.background || res.default || '')
+        }
+      } catch {}
+    }
+    load()
+    return () => { alive = false }
+  }, [])
+
+  const toggleEffects = async (next) => {
+    setEffects(next)
+    try {
+      await window.electronAPI?.saveSettings?.({ effects: next })
+    } catch {}
+    window.dispatchEvent(new CustomEvent('xyo:effects', { detail: next }))
+  }
+
+  const downloadBg = async (id) => {
+    setBgBusy(id)
+    setBgError('')
+    try {
+      const res = await api.downloadBackground(id)
+      if (!res?.ok) setBgError(res?.error || vn(lang, 'Tải ảnh nền thất bại.', 'Background download failed.'))
+      else setBgItems(res.items || [])
+    } catch (err) {
+      setBgError(err?.message || 'error')
+    } finally {
+      setBgBusy('')
+    }
+  }
+
+  const applyThemeBackground = async () => {
+    setBgError('')
+    try {
+      await window.electronAPI?.saveSettings?.({ background: 'theme' })
+      setBgCurrent('theme')
+      window.dispatchEvent(new CustomEvent('xyo:background', { detail: '' }))
+    } catch (err) {
+      setBgError(err?.message || 'error')
+    }
+  }
+
+  const applyBg = async (item) => {
+    setBgError('')
+    try {
+      const res = await api.setBackground(item.id)
+      if (!res?.ok) {
+        setBgError(res?.error || vn(lang, 'Không áp dụng được.', 'Could not apply.'))
+        return
+      }
+      setBgCurrent(item.id)
+      window.dispatchEvent(new CustomEvent('xyo:background', { detail: item.url }))
+    } catch (err) {
+      setBgError(err?.message || 'error')
+    }
+  }
+
   const [runtimes, setRuntimes] = useState([])
   const [javaOpts, setJavaOpts] = useState({ managed: [], zulu: [], external: [], selected: '' })
   const [zuluMajor, setZuluMajor] = useState('21')
@@ -354,35 +427,113 @@ export default function SettingsPage({ theme, lang, version, system, storage, on
                   c={c}
                   icon={theme === 'light' ? <Sun size={15} weight="duotone" /> : <MoonStars size={15} weight="duotone" />}
                   title={t(lang, 'settings.theme')}
+                  desc={vn(lang, 'Bật/tắt chế độ tối', 'Toggle dark mode')}
                 >
-                  <Segmented
-                    c={c}
-                    value={theme}
-                    onChange={setTheme}
-                    options={[
-                      { value: 'dark', label: t(lang, 'settings.theme.dark') },
-                      { value: 'light', label: t(lang, 'settings.theme.light') },
-                    ]}
-                  />
+                  <ThemeSwitch size="lg" />
                 </Row>
                 <Row
                   c={c}
-                  icon={<TextAa size={15} weight="duotone" />}
-                  title={t(lang, 'settings.font')}
-                  desc={t(lang, 'settings.fontHint')}
+                  icon={<Sparkle size={15} weight="duotone" />}
+                  title={vn(lang, 'Hiệu ứng chuyển cảnh', 'Transition effects')}
+                  desc={vn(lang, 'Bật hiệu ứng khi mở instance và khi quay lại', 'Animate when opening an instance and going back')}
                 >
-                  <Segmented
-                    c={c}
-                    value={font}
-                    onChange={setFont}
-                    options={[
-                      { value: 'default', label: t(lang, 'settings.font.default') },
-                      { value: 'pixel', label: t(lang, 'settings.font.pixel') },
-                    ]}
-                  />
+                  <Switch c={c} checked={effects} onChange={() => toggleEffects(!effects)} />
                 </Row>
               </div>
             </Card>
+
+            <div className="mt-3">
+              <Card c={c}>
+                <div className="flex items-center justify-between gap-3 px-4 pb-2 pt-3.5">
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold" style={{ color: c.text }}>{vn(lang, 'Ảnh nền', 'Background')}</p>
+                    <p className="mt-0.5 text-[10px]" style={{ color: c.faint }}>
+                      {vn(lang, 'Ảnh mặc định có sẵn; ảnh khác cần tải về rồi mới áp dụng được.', 'Default is bundled; other images must be downloaded before use.')}
+                    </p>
+                  </div>
+                  {bgError ? <span className="shrink-0 text-[10px]" style={{ color: c.bad }}>{bgError}</span> : null}
+                </div>
+                <div className="grid grid-cols-3 gap-2 px-4 pb-4">
+                  <div
+                    className="overflow-hidden rounded-xl"
+                    style={{ border: `1px solid ${bgCurrent === 'theme' ? c.accent : c.border}`, background: c.input }}
+                  >
+                    <div className="relative h-16" style={{ background: c.bg === 'transparent' ? c.input : c.bg }}>
+                      <span className="absolute inset-0 flex items-center justify-center text-[10px]" style={{ color: c.faint }}>
+                        {vn(lang, 'Sáng / Tối', 'Light / Dark')}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-1 px-2 py-1.5">
+                      <span className="truncate text-[10px] font-semibold" style={{ color: c.text }}>{vn(lang, 'Theo giao diện', 'Theme only')}</span>
+                      {bgCurrent === 'theme' ? (
+                        <span className="shrink-0 text-[9px] font-bold" style={{ color: c.accent }}>{vn(lang, 'Đang dùng', 'In use')}</span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={applyThemeBackground}
+                          className="h-6 shrink-0 rounded-md px-2 text-[10px] font-semibold"
+                          style={{ background: c.input, border: `1px solid ${c.border}`, color: c.label }}
+                        >
+                          {vn(lang, 'Áp dụng', 'Apply')}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {bgItems.map((item) => {
+                    const active = item.id === bgCurrent
+                    const busy = bgBusy === item.id
+                    return (
+                      <div
+                        key={item.id}
+                        className="overflow-hidden rounded-xl"
+                        style={{ border: `1px solid ${active ? c.accent : c.border}`, background: c.input }}
+                      >
+                        <div
+                          className="relative h-16"
+                          style={{
+                            backgroundImage: item.ready ? `url("${item.url}")` : undefined,
+                            backgroundSize: 'cover',
+                            backgroundPosition: 'center',
+                          }}
+                        >
+                          {!item.ready && (
+                            <span className="absolute inset-0 flex items-center justify-center text-[10px]" style={{ color: c.faint }}>
+                              {vn(lang, 'Chưa tải', 'Not downloaded')}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center justify-between gap-1 px-2 py-1.5">
+                          <span className="truncate text-[10px] font-semibold" style={{ color: c.text }}>{item.name}</span>
+                          {active ? (
+                            <span className="shrink-0 text-[9px] font-bold" style={{ color: c.accent }}>{vn(lang, 'Đang dùng', 'In use')}</span>
+                          ) : item.ready ? (
+                            <button
+                              type="button"
+                              onClick={() => applyBg(item)}
+                              className="h-6 shrink-0 rounded-md px-2 text-[10px] font-semibold"
+                              style={{ background: c.input, border: `1px solid ${c.border}`, color: c.label }}
+                            >
+                              {vn(lang, 'Áp dụng', 'Apply')}
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => downloadBg(item.id)}
+                              disabled={busy}
+                              className="flex h-6 shrink-0 items-center gap-1 rounded-md px-2 text-[10px] font-bold disabled:opacity-60"
+                              style={{ background: c.accent, color: c.onAccent }}
+                            >
+                              {busy ? <SpinnerGap size={10} className="animate-spin" /> : <DownloadSimple size={10} weight="bold" />}
+                              {vn(lang, 'Tải về', 'Download')}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </Card>
+            </div>
           </Section>
 
           <Section c={c} title={vn(lang, 'Trò chơi', 'Game')} hint={hideOnLaunch ? vn(lang, 'đang bật', 'on') : vn(lang, 'đang tắt', 'off')}>
@@ -420,7 +571,7 @@ export default function SettingsPage({ theme, lang, version, system, storage, on
                 <Row
                   c={c}
                   icon={<DiscordLogo size={15} weight="duotone" />}
-                  title={vn(lang, 'Cộng đồng LunarSpace', 'LunarSpace community')}
+                  title={vn(lang, 'Cộng đồng XyoLauncher', 'XyoLauncher community')}
                   desc={discord.invite || vn(lang, 'Tham gia server Discord để nhận hỗ trợ và bản cập nhật', 'Join the Discord server for support and updates')}
                 >
                   <button
@@ -818,11 +969,11 @@ export default function SettingsPage({ theme, lang, version, system, storage, on
             </div>
           </Section>
 
-          <Section c={c} title={vn(lang, 'Về LunarSpace', 'About LunarSpace')} hint={version ? `v${version}` : undefined}>
+          <Section c={c} title={vn(lang, 'Về XyoLauncher', 'About XyoLauncher')} hint={version ? `v${version}` : undefined}>
             <Card c={c} className="p-4 flex flex-col gap-2.5">
               <Fact c={c} label={vn(lang, 'Phiên bản launcher', 'Launcher version')} value={version ? `v${version}` : '—'} />
               <Fact c={c} label={vn(lang, 'Nền tảng', 'Platform')} value={system ? `${system.platform} ${system.arch}` : '—'} />
-              <Fact c={c} label={vn(lang, 'Nhà phát triển', 'Made by')} value="LunarSpace" mono={false} />
+              <Fact c={c} label={vn(lang, 'Nhà phát triển', 'Made by')} value="XyoLauncher" mono={false} />
               <p className="pt-2 text-[10px] leading-relaxed" style={{ color: c.faint, borderTop: `1px solid ${c.border}` }}>
                 {vn(
                   lang,

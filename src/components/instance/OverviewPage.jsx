@@ -128,7 +128,7 @@ export default function OverviewPage({
   const packSourceName = pack?.source === 'curseforge'
     ? 'CurseForge'
     : pack?.source === 'lunar'
-      ? 'LunarSpace'
+      ? 'XyoLauncher'
       : 'Modrinth'
   const pageLink = packDetail?.links?.[0]?.url || (pack?.source === 'curseforge'
     ? `https://www.curseforge.com/minecraft/modpacks/${packDetail?.slug || pack?.projectId || ''}`
@@ -207,15 +207,15 @@ export default function OverviewPage({
                     <span
                       className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide"
                       style={{
-                        background: pack?.source === 'curseforge' ? 'rgba(245,158,11,0.16)' : pack?.source === 'lunar' ? 'rgba(167,139,250,0.16)' : 'rgba(34,197,94,0.16)',
-                        border: `1px solid ${pack?.source === 'curseforge' ? 'rgba(245,158,11,0.4)' : pack?.source === 'lunar' ? 'rgba(167,139,250,0.4)' : 'rgba(34,197,94,0.4)'}`,
-                        color: pack?.source === 'curseforge' ? '#fbbf24' : pack?.source === 'lunar' ? '#c4b5fd' : '#4ade80',
+                        background: pack?.source === 'curseforge' ? 'rgba(245,158,11,0.16)' : pack?.source === 'lunar' ? 'rgba(233,184,114,0.16)' : 'rgba(34,197,94,0.16)',
+                        border: `1px solid ${pack?.source === 'curseforge' ? 'rgba(245,158,11,0.4)' : pack?.source === 'lunar' ? 'rgba(233,184,114,0.4)' : 'rgba(34,197,94,0.4)'}`,
+                        color: pack?.source === 'curseforge' ? '#fbbf24' : pack?.source === 'lunar' ? '#f3c98a' : '#4ade80',
                       }}
                     >
                       {packSourceName}
                     </span>
                     {hasUpdate && (
-                      <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide" style={{ background: 'rgba(167,139,250,0.16)', border: `1px solid ${c.accent}55`, color: c.accent }}>
+                      <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide" style={{ background: 'rgba(233,184,114,0.16)', border: `1px solid ${c.accent}55`, color: c.accent }}>
                         {vn(lang, 'Có bản mới', 'Update available')}
                       </span>
                     )}
@@ -419,7 +419,7 @@ export default function OverviewPage({
                         {loader.name}{instance.loaderVersion ? ` ${instance.loaderVersion}` : ''}
                       </span>
                       <span className="px-2 py-0.5 rounded-md text-[10px] font-mono"
-                        style={{ background: 'rgba(167,139,250,0.16)', border: '1px solid rgba(167,139,250,0.3)', color: '#c4b5fd' }}>
+                        style={{ background: 'rgba(233,184,114,0.16)', border: '1px solid rgba(233,184,114,0.3)', color: '#f3c98a' }}>
                         {instance.version}
                       </span>
                       <span className="px-2 py-0.5 rounded-md text-[10px] font-mono"

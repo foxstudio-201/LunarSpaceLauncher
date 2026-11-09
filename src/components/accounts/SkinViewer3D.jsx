@@ -530,12 +530,12 @@ export default function SkinViewer3D({
         }
         if (current.brushSoft) {
           ctx.setLineDash([3, 2])
-          ctx.strokeStyle = ghost ? 'rgba(167,139,250,0.8)' : 'rgba(255,255,255,0.55)'
+          ctx.strokeStyle = ghost ? 'rgba(233,184,114,0.8)' : 'rgba(255,255,255,0.55)'
           ctx.lineWidth = 1
           ctx.strokeRect(boxX - cell, boxY - cell, box + cell * 2, box + cell * 2)
           ctx.setLineDash([])
         }
-        ctx.strokeStyle = ghost ? 'rgba(167,139,250,0.95)' : 'rgba(255,255,255,0.95)'
+        ctx.strokeStyle = ghost ? 'rgba(233,184,114,0.95)' : 'rgba(255,255,255,0.95)'
         ctx.lineWidth = 1.4
         ctx.strokeRect(boxX, boxY, box, box)
       }
@@ -613,7 +613,7 @@ export default function SkinViewer3D({
         ctx.strokeStyle = 'rgba(0,0,0,0.55)'
         ctx.stroke()
         ctx.lineWidth = 1
-        ctx.strokeStyle = ghost ? 'rgba(167,139,250,0.95)' : 'rgba(255,255,255,0.95)'
+        ctx.strokeStyle = ghost ? 'rgba(233,184,114,0.95)' : 'rgba(255,255,255,0.95)'
         ctx.stroke()
         if (ghost) ctx.setLineDash([])
       }
@@ -1158,7 +1158,7 @@ export default function SkinViewer3D({
           onClick={resetView}
           data-tip={t(lang, 'accounts.skin.view.reset')}
           className="w-8 h-8 rounded-lg flex items-center justify-center"
-          style={{ background: 'rgba(255,255,255,0.88)', border: `1px solid ${c.border}`, color: '#1f2937', backdropFilter: 'blur(6px)' }}
+          style={{ background: 'rgba(255,255,255,0.88)', border: `1px solid ${c.border}`, color: '#1f2937', backdropFilter: 'none' }}
         >
           <ArrowCounterClockwise size={15} weight="bold" />
         </button>
@@ -1166,7 +1166,7 @@ export default function SkinViewer3D({
       {!wide && (
       <div
         className="absolute bottom-2.5 left-2.5 text-[9px] font-mono px-2 py-1 rounded-md pointer-events-none"
-        style={{ background: 'rgba(255,255,255,0.88)', color: '#475569', border: `1px solid ${c.border}`, backdropFilter: 'blur(6px)', zIndex: 3 }}
+        style={{ background: 'rgba(255,255,255,0.88)', color: '#475569', border: `1px solid ${c.border}`, backdropFilter: 'none', zIndex: 3 }}
       >
         {t(lang, 'accounts.skin.view.hint')}
       </div>

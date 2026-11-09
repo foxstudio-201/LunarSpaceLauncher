@@ -511,7 +511,7 @@ async function modlistExtras({ html, coveredIds, coveredNames, coveredKeys, over
       if (coveredNames.has(name.toLowerCase())) return null
       const key = modKey(name)
       if (coveredKeys.has(key)) {
-        onLog?.(`[LunarSpace] Bỏ qua ${name}: mod đã có trong modpack`)
+        onLog?.(`[XyoLauncher] Bỏ qua ${name}: mod đã có trong modpack`)
         return null
       }
       const urls = cfFileUrls(file)
@@ -523,7 +523,7 @@ async function modlistExtras({ html, coveredIds, coveredNames, coveredKeys, over
         from: slug || String(mod.id),
       }
     } catch (err) {
-      onLog?.(`[LunarSpace] Bỏ qua ${entry.slug || entry.id}: ${err.message}`)
+      onLog?.(`[XyoLauncher] Bỏ qua ${entry.slug || entry.id}: ${err.message}`)
       return { unresolved: entry.slug || entry.id }
     } finally {
       done += 1
@@ -563,7 +563,7 @@ async function planFromMrpack({ zipPath, onLog }) {
     }
     files.push({ rel, url, sha1: entry.hashes?.sha1 || null, size: entry.fileSize || 0 })
   }
-  if (missing.length) onLog?.(`[LunarSpace] ${missing.length} tệp trong index không có link tải: ${missing.slice(0, 6).join(', ')}`)
+  if (missing.length) onLog?.(`[XyoLauncher] ${missing.length} tệp trong index không có link tải: ${missing.slice(0, 6).join(', ')}`)
   return {
     name: index.name || 'Modpack',
     summary: index.summary || '',
@@ -605,13 +605,13 @@ async function resolveManifestFiles(entries, { onLog, onProgress }) {
       const body = await res.json()
       for (const file of body?.data || []) resolved.set(String(file.id), file)
     } catch (err) {
-      onLog?.(`[LunarSpace] Lô CurseForge lỗi: ${err.message}`)
+      onLog?.(`[XyoLauncher] Lô CurseForge lỗi: ${err.message}`)
     }
     onProgress?.({ label: 'modpack', done: resolved.size, total: wanted.length, file: 'CurseForge' })
   }
   const pending = wanted.filter((c) => !resolved.has(String(c.fileId)))
   if (pending.length) {
-    onLog?.(`[LunarSpace] ${pending.length} tệp chưa có trong lô, hỏi từng tệp…`)
+    onLog?.(`[XyoLauncher] ${pending.length} tệp chưa có trong lô, hỏi từng tệp…`)
     await mapLimit(pending, 3, async (item) => {
       if (!item.projectId) return
       try {
@@ -688,13 +688,13 @@ async function planFromCurseforgeZip({ zipPath, onLog, onPlan }) {
     extraUnresolved = extra.unresolved
     extraNoMatch = extra.noMatch
     for (const file of extra.files) files.push(file)
-    if (extras) onLog?.(`[LunarSpace] modlist.html: thêm ${extras} mod ngoài manifest.json`)
+    if (extras) onLog?.(`[XyoLauncher] modlist.html: thêm ${extras} mod ngoài manifest.json`)
     if (missing.length) {
-      if (extraNoMatch.length) onLog?.(`[LunarSpace] ${extraNoMatch.length} mod trong modlist.html không có bản cho ${mc} ${loader}: ${extraNoMatch.slice(0, 6).join(', ')}`)
-      if (extraUnresolved.length) onLog?.(`[LunarSpace] ${extraUnresolved.length} mục trong modlist.html không xác định được: ${extraUnresolved.slice(0, 6).join(', ')}`)
+      if (extraNoMatch.length) onLog?.(`[XyoLauncher] ${extraNoMatch.length} mod trong modlist.html không có bản cho ${mc} ${loader}: ${extraNoMatch.slice(0, 6).join(', ')}`)
+      if (extraUnresolved.length) onLog?.(`[XyoLauncher] ${extraUnresolved.length} mục trong modlist.html không xác định được: ${extraUnresolved.slice(0, 6).join(', ')}`)
     }
   }
-  if (missing.length) onLog?.(`[LunarSpace] Không tải được ${missing.length} mod: ${missing.slice(0, 6).join(', ')}`)
+  if (missing.length) onLog?.(`[XyoLauncher] Không tải được ${missing.length} mod: ${missing.slice(0, 6).join(', ')}`)
 
   return {
     name: manifest.name || 'Modpack',
@@ -719,7 +719,7 @@ const PROFILE_FILE = 'lunarspace-profile.json'
 
 function profilePlan({ zipPath, entries, onLog }) {
   const raw = readEntryText(entries, PROFILE_FILE)
-  if (!raw) throw new Error('Tệp zip không có lunarspace-profile.json (không phải bản xuất profile của LunarSpace).')
+  if (!raw) throw new Error('Tệp zip không có lunarspace-profile.json (không phải bản xuất profile của XyoLauncher).')
   let profile = {}
   try {
     profile = JSON.parse(raw) || {}
@@ -740,10 +740,10 @@ function profilePlan({ zipPath, entries, onLog }) {
     const top = (name.includes('/') ? name.split('/')[0] : name).toLowerCase()
     if (top && !overrides.includes(top)) overrides.push(top)
   }
-  onLog?.(`[LunarSpace] Profile: ${count} tệp, ${overrides.length} mục gốc.`)
+  onLog?.(`[XyoLauncher] Profile: ${count} tệp, ${overrides.length} mục gốc.`)
   return {
     name: String(profile.name || 'Profile'),
-    summary: 'Xuất từ LunarSpace Launcher',
+    summary: 'Xuất từ XyoLauncher',
     version: '',
     mc,
     loader,
@@ -834,7 +834,7 @@ async function repairPlan({ planPath, onProgress, onLog }) {
     }
   }
   const failed = [...new Set(errors.map((e) => path.basename(e.file)))]
-  onLog?.(`[LunarSpace] Kiểm tra modpack: thiếu ${missing} tệp, đã tải bù ${missing - failed.length}, còn lỗi ${failed.length}.`)
+  onLog?.(`[XyoLauncher] Kiểm tra modpack: thiếu ${missing} tệp, đã tải bù ${missing - failed.length}, còn lỗi ${failed.length}.`)
   return { ok: true, total: tasks.length, missing, downloaded: tasks.length - failed.length, repaired: missing - failed.length, failed }
 }
 
@@ -905,7 +905,7 @@ async function applyPlan({ plan, instanceDir, onProgress, onLog }) {
     const retry = errors
       .flatMap((err) => (byDest.get(err.file)?.alts || []).map((url) => ({ ...byDest.get(err.file), url, alts: [] })))
     if (retry.length) {
-      onLog?.(`[LunarSpace] Thử lại ${retry.length} tệp bằng máy chủ dự phòng…`)
+      onLog?.(`[XyoLauncher] Thử lại ${retry.length} tệp bằng máy chủ dự phòng…`)
       const second = await downloadAll(retry, { concurrency: 6, onProgress, label: 'modpack' })
       const fixed = new Set(retry.map((t) => t.dest))
       const stillBad = new Set(second.errors.map((e) => e.file))
@@ -913,7 +913,7 @@ async function applyPlan({ plan, instanceDir, onProgress, onLog }) {
         ...errors.filter((e) => !fixed.has(e.file)),
         ...second.errors,
       ]
-      if (stillBad.size) onLog?.(`[LunarSpace] Còn ${stillBad.size} tệp vẫn lỗi.`)
+      if (stillBad.size) onLog?.(`[XyoLauncher] Còn ${stillBad.size} tệp vẫn lỗi.`)
     }
   }
   const zip = new AdmZip(plan.zipPath)
@@ -924,7 +924,7 @@ async function applyPlan({ plan, instanceDir, onProgress, onLog }) {
     tree: !!plan.tree,
   })
   const failed = [...new Set(errors.map((e) => path.basename(e.file)))]
-  if (failed.length) onLog?.(`[LunarSpace] Tải lỗi ${failed.length} tệp: ${failed.slice(0, 6).join(', ')}`)
+  if (failed.length) onLog?.(`[XyoLauncher] Tải lỗi ${failed.length} tệp: ${failed.slice(0, 6).join(', ')}`)
   const owned = []
   for (const task of tasks) {
     if (failed.includes(path.basename(task.dest))) continue

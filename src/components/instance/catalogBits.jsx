@@ -16,7 +16,7 @@ export function Box({ c, title, icon: Icon, children }) {
 }
 
 const ENV_KINDS = {
-  client: { vi: 'Máy khách', en: 'Client', color: '#a78bfa', bg: 'rgba(167,139,250,0.16)', icons: ['client'] },
+  client: { vi: 'Máy khách', en: 'Client', color: '#e9b872', bg: 'rgba(233,184,114,0.16)', icons: ['client'] },
   server: { vi: 'Máy chủ', en: 'Server', color: '#22d3ee', bg: 'rgba(34,211,238,0.14)', icons: ['server'] },
   both: { vi: 'Cả hai', en: 'Both', color: '#4ade80', bg: 'rgba(74,222,128,0.14)', icons: ['client', 'server'] },
 }

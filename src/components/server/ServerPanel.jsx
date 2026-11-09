@@ -19,17 +19,17 @@ function InstallingOverlay({ theme, lang, progress, message }) {
     <div className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-4 backdrop-blur-sm" style={{ background: theme === 'light' ? 'rgba(245,245,245,0.92)' : 'rgba(10,10,10,0.92)' }}>
       <svg className="w-10 h-10 animate-spin" viewBox="0 0 50 50">
         <circle cx="25" cy="25" r="20" fill="none" stroke={theme === 'light' ? 'rgba(0,0,0,0.1)' : 'rgba(255,255,255,0.1)'} strokeWidth="4" />
-        <path d="M25 5 A20 20 0 0 1 45 25" fill="none" stroke="#a78bfa" strokeWidth="4" strokeLinecap="round" />
+        <path d="M25 5 A20 20 0 0 1 45 25" fill="none" stroke="#e9b872" strokeWidth="4" strokeLinecap="round" />
       </svg>
       <p className="text-sm font-bold" style={{ color: textColor }}>{t(lang, 'install.wait')}</p>
       <p className="text-[11px] max-w-xs text-center" style={{ color: labelColor }}>{t(lang, 'install.pleaseWait')}</p>
       <div className="w-64 max-w-[80vw]">
         <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: theme === 'light' ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.1)' }}>
-          <div className="h-full rounded-full transition-all duration-300" style={{ width: `${pct}%`, background: '#a78bfa' }} />
+          <div className="h-full rounded-full transition-all duration-300" style={{ width: `${pct}%`, background: '#e9b872' }} />
         </div>
         <div className="flex justify-between mt-1.5">
           <span className="text-[10px]" style={{ color: labelColor }}>{message || ''}</span>
-          <span className="text-[10px] font-semibold" style={{ color: '#a78bfa' }}>{pct}%</span>
+          <span className="text-[10px] font-semibold" style={{ color: '#e9b872' }}>{pct}%</span>
         </div>
       </div>
     </div>

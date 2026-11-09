@@ -60,7 +60,7 @@ export default function StartupPage({ server, theme, lang }) {
         <button
           onClick={handleSave}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all duration-150 hover:opacity-80 active:scale-95"
-          style={{ background: saved ? '#22c55e' : '#8b5cf6', color: '#fff' }}
+          style={{ background: saved ? '#22c55e' : '#c9903f', color: '#fff' }}
         >
           {saved ? (lang === 'vi' ? 'Đã lưu!' : 'Saved!') : (lang === 'vi' ? 'Lưu' : 'Save')}
         </button>
@@ -69,13 +69,13 @@ export default function StartupPage({ server, theme, lang }) {
       {/* Startup Command */}
       <div>
         <label className="text-[11px] font-semibold mb-1 block" style={{ color: labelColor }}>{lang === 'vi' ? 'Lệnh khởi động' : 'Startup Command'}</label>
-        <input value={startup} onChange={e => setStartup(e.target.value)} className="w-full px-3 py-2 rounded-lg text-[11px] font-mono outline-none transition-colors focus:border-[#8b5cf6]" style={{ background: theme === 'light' ? '#fff' : '#1a1a1a', border: `1px solid ${borderColor}`, color: textColor }} />
+        <input value={startup} onChange={e => setStartup(e.target.value)} className="w-full px-3 py-2 rounded-lg text-[11px] font-mono outline-none transition-colors focus:border-[#c9903f]" style={{ background: theme === 'light' ? '#fff' : '#1a1a1a', border: `1px solid ${borderColor}`, color: textColor }} />
       </div>
 
       {/* Docker Image */}
       <div>
         <label className="text-[11px] font-semibold mb-1 block" style={{ color: labelColor }}>Docker Image</label>
-        <input value={dockerImage} onChange={e => setDockerImage(e.target.value)} className="w-full px-3 py-2 rounded-lg text-[11px] font-mono outline-none transition-colors focus:border-[#8b5cf6]" style={{ background: theme === 'light' ? '#fff' : '#1a1a1a', border: `1px solid ${borderColor}`, color: textColor }} />
+        <input value={dockerImage} onChange={e => setDockerImage(e.target.value)} className="w-full px-3 py-2 rounded-lg text-[11px] font-mono outline-none transition-colors focus:border-[#c9903f]" style={{ background: theme === 'light' ? '#fff' : '#1a1a1a', border: `1px solid ${borderColor}`, color: textColor }} />
       </div>
 
       {/* Environment Variables */}
@@ -84,13 +84,13 @@ export default function StartupPage({ server, theme, lang }) {
         {Object.entries(envVars).map(([key, val], i) => (
           <div key={i} className="flex gap-2 mb-2">
             <input value={key} readOnly className="flex-1 px-3 py-1.5 rounded-lg text-[11px] font-mono outline-none" style={{ background: theme === 'light' ? 'rgba(0,0,0,0.03)' : 'rgba(255,255,255,0.04)', border: `1px solid ${borderColor}`, color: labelColor }} />
-            <input value={val} onChange={e => { const n = {...envVars}; n[key] = e.target.value; setEnvVars(n) }} className="flex-1 px-3 py-1.5 rounded-lg text-[11px] font-mono outline-none transition-colors focus:border-[#8b5cf6]" style={{ background: theme === 'light' ? '#fff' : '#1a1a1a', border: `1px solid ${borderColor}`, color: textColor }} />
+            <input value={val} onChange={e => { const n = {...envVars}; n[key] = e.target.value; setEnvVars(n) }} className="flex-1 px-3 py-1.5 rounded-lg text-[11px] font-mono outline-none transition-colors focus:border-[#c9903f]" style={{ background: theme === 'light' ? '#fff' : '#1a1a1a', border: `1px solid ${borderColor}`, color: textColor }} />
           </div>
         ))}
         <button
           onClick={() => setEnvVars(prev => ({...prev, '': ''}))}
           className="text-[11px] font-semibold mt-1 transition-all duration-150 hover:opacity-70 active:scale-95"
-          style={{ color: '#a78bfa' }}
+          style={{ color: '#e9b872' }}
         >+ {lang === 'vi' ? 'Thêm biến' : 'Add variable'}</button>
       </div>
       <div className="mb-6">
@@ -107,7 +107,7 @@ export default function StartupPage({ server, theme, lang }) {
             onClick={pruneMods}
             disabled={pruning}
             className="px-3 py-1.5 rounded-lg text-[11px] font-semibold disabled:opacity-50"
-            style={{ background: '#8b5cf6', color: '#fff' }}
+            style={{ background: '#e9b872', color: '#1b1409' }}
           >
             {pruning
               ? (lang === 'vi' ? 'Đang dò…' : 'Scanning…')

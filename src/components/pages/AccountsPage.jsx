@@ -141,7 +141,7 @@ export default function AccountsPage({ theme, lang, accounts, activeAccountId, o
           <span
             className="text-[10px] px-2 py-1 rounded-md font-semibold"
             style={{
-              background: flash.tone === 'bad' ? 'rgba(239,68,68,0.14)' : 'rgba(167,139,250,0.14)',
+              background: flash.tone === 'bad' ? 'rgba(239,68,68,0.14)' : 'rgba(233,184,114,0.14)',
               color: flash.tone === 'bad' ? '#f87171' : c.accent,
             }}
           >
@@ -247,7 +247,7 @@ export default function AccountsPage({ theme, lang, accounts, activeAccountId, o
                         <p className="text-xs font-bold truncate" style={{ color: c.text }}>{account.name}</p>
                         <span
                           className="text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded shrink-0"
-                          style={{ background: online ? 'rgba(167,139,250,0.14)' : c.input, color: online ? c.accent : c.label }}
+                          style={{ background: online ? 'rgba(233,184,114,0.14)' : c.input, color: online ? c.accent : c.label }}
                         >
                           {t(lang, TYPE_LABELS[account.type] || 'accounts.kind.offline')}
                         </span>
@@ -303,7 +303,7 @@ export default function AccountsPage({ theme, lang, accounts, activeAccountId, o
                       </button>
                     )}
                     {active ? (
-                      <span className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold shrink-0" style={{ background: 'rgba(167,139,250,0.15)', color: c.accent }}>
+                      <span className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold shrink-0" style={{ background: 'rgba(233,184,114,0.15)', color: c.accent }}>
                         <Check size={11} weight="bold" />
                         {t(lang, 'accounts.active')}
                       </span>

@@ -73,7 +73,7 @@ function ModalShell({ open, title, icon, theme, lang, onClose, children, footer 
       className={`modal-backdrop fixed inset-0 z-[80] flex items-center justify-center p-4${closing ? ' closing' : ''}`}
       style={{
         background: 'rgba(0,0,0,0.7)',
-        backdropFilter: 'blur(4px)',
+        backdropFilter: 'none',
         WebkitBackdropFilter: 'blur(4px)',
         pointerEvents: closing ? 'none' : 'auto',
       }}
@@ -85,7 +85,7 @@ function ModalShell({ open, title, icon, theme, lang, onClose, children, footer 
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center gap-2 px-4 py-3" style={{ borderBottom: `1px solid ${borderColor}` }}>
-          {icon || <Archive size={15} weight="duotone" style={{ color: '#a78bfa' }} />}
+          {icon || <Archive size={15} weight="duotone" style={{ color: '#e9b872' }} />}
           <h3 className="text-xs font-bold" style={{ color: textColor }}>{title}</h3>
           <div className="flex-1" />
           <button onClick={onClose} className="p-1 rounded-lg" style={{ color: labelColor }}>
@@ -415,7 +415,7 @@ export default function BackupPage({ server, theme, lang }) {
   return (
     <div className="h-full flex flex-col overflow-hidden p-4 gap-4" style={{ color: textColor }}>
       <div className="flex items-center gap-3 flex-wrap">
-        <Archive size={16} weight="duotone" style={{ color: '#a78bfa' }} />
+        <Archive size={16} weight="duotone" style={{ color: '#e9b872' }} />
         <h2 className="text-sm font-bold">
           {lang === 'vi' ? 'Sao lưu' : 'Backups'}
         </h2>
@@ -434,7 +434,7 @@ export default function BackupPage({ server, theme, lang }) {
           onClick={openCreate}
           disabled={creating}
           className={btnPrimary}
-          style={{ background: '#8b5cf6', color: '#fff' }}
+          style={{ background: '#e9b872', color: '#1b1409' }}
         >
           <Plus size={13} weight="duotone" />
           {creating
@@ -470,7 +470,7 @@ export default function BackupPage({ server, theme, lang }) {
               </span>
             )}
             {!search && (
-              <button onClick={openCreate} className={btnPrimary} style={{ background: '#8b5cf6', color: '#fff' }}>
+              <button onClick={openCreate} className={btnPrimary} style={{ background: '#e9b872', color: '#1b1409' }}>
                 <Plus size={13} weight="duotone" />
                 {lang === 'vi' ? 'Tạo backup' : 'Create backup'}
               </button>
@@ -519,8 +519,8 @@ export default function BackupPage({ server, theme, lang }) {
                   }}
                 >
                   <div className="min-w-0 flex items-center gap-2">
-                    <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: '#8b5cf620' }}>
-                      <HardDrive size={12} weight="duotone" style={{ color: '#8b5cf6' }} />
+                    <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: '#c9903f20' }}>
+                      <HardDrive size={12} weight="duotone" style={{ color: '#c9903f' }} />
                     </div>
                     <div className="min-w-0">
                       <p className="font-semibold truncate">{b.name}</p>
@@ -541,7 +541,7 @@ export default function BackupPage({ server, theme, lang }) {
                   </span>
                   <span style={{ color: labelColor }}>
                     {isRunning && prog ? (
-                      <span style={{ color: '#a78bfa' }}>
+                      <span style={{ color: '#e9b872' }}>
                         {pct === null ? '…' : `${pct}%`}
                       </span>
                     ) : (
@@ -613,19 +613,19 @@ export default function BackupPage({ server, theme, lang }) {
                   </div>
                   {isRunning && (
                     <div className="col-span-7 -mt-1">
-                      <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(139,92,246,0.15)' }}>
+                      <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(201,144,63,0.15)' }}>
                         <div
                           className="h-full rounded-full transition-all"
                           style={{
                             width: prog && prog.total > 0
                               ? `${Math.min(100, (prog.bytes / prog.total) * 100)}%`
                               : '40%',
-                            background: '#8b5cf6',
+                            background: '#c9903f',
                             opacity: prog && prog.total > 0 ? 1 : 0.5,
                           }}
                         />
                       </div>
-                      <div className="flex justify-between mt-0.5 text-[9px]" style={{ color: '#a78bfa' }}>
+                      <div className="flex justify-between mt-0.5 text-[9px]" style={{ color: '#e9b872' }}>
                         <span>
                           {prog
                             ? `${formatBytes(prog.bytes)} / ${formatBytes(prog.total)} · ${prog.files || 0} files`
@@ -647,7 +647,7 @@ export default function BackupPage({ server, theme, lang }) {
       <ModalShell
         open={createOpen}
         title={lang === 'vi' ? 'Tạo backup' : 'Create backup'}
-        icon={<Archive size={15} weight="duotone" style={{ color: '#a78bfa' }} />}
+        icon={<Archive size={15} weight="duotone" style={{ color: '#e9b872' }} />}
         theme={theme}
         lang={lang}
         onClose={() => !creating && setCreateOpen(false)}
@@ -656,7 +656,7 @@ export default function BackupPage({ server, theme, lang }) {
             <button onClick={() => setCreateOpen(false)} disabled={creating} className={btnGhost} style={{ background: borderColor, color: labelColor }}>
               {lang === 'vi' ? 'Hủy' : 'Cancel'}
             </button>
-            <button onClick={handleCreate} disabled={creating} className={btnPrimary} style={{ background: '#a78bfa', color: '#fff' }}>
+            <button onClick={handleCreate} disabled={creating} className={btnPrimary} style={{ background: '#e9b872', color: '#1b1409' }}>
               {creating ? '…' : (lang === 'vi' ? 'Tạo' : 'Create')}
             </button>
           </>
@@ -694,7 +694,7 @@ export default function BackupPage({ server, theme, lang }) {
       <ModalShell
         open={!!editTarget}
         title={lang === 'vi' ? 'Sửa backup' : 'Edit backup'}
-        icon={<PencilSimple size={15} weight="duotone" style={{ color: '#a78bfa' }} />}
+        icon={<PencilSimple size={15} weight="duotone" style={{ color: '#e9b872' }} />}
         theme={theme}
         lang={lang}
         onClose={() => !savingEdit && setEditTarget(null)}
@@ -703,7 +703,7 @@ export default function BackupPage({ server, theme, lang }) {
             <button onClick={() => setEditTarget(null)} disabled={savingEdit} className={btnGhost} style={{ background: borderColor, color: labelColor }}>
               {lang === 'vi' ? 'Hủy' : 'Cancel'}
             </button>
-            <button onClick={handleEdit} disabled={savingEdit || !editForm.name.trim()} className={btnPrimary} style={{ background: '#a78bfa', color: '#fff' }}>
+            <button onClick={handleEdit} disabled={savingEdit || !editForm.name.trim()} className={btnPrimary} style={{ background: '#e9b872', color: '#1b1409' }}>
               {savingEdit ? '…' : (lang === 'vi' ? 'Lưu' : 'Save')}
             </button>
           </>
@@ -748,7 +748,7 @@ export default function BackupPage({ server, theme, lang }) {
               onClick={handleRestore}
               disabled={restoring}
               className={btnPrimary}
-              style={{ background: restoreOpts.truncateDirectory ? '#ef4444' : '#a78bfa', color: '#fff' }}
+              style={{ background: restoreOpts.truncateDirectory ? '#ef4444' : '#e9b872', color: '#fff' }}
             >
               {restoring ? '…' : (lang === 'vi' ? 'Khôi phục' : 'Restore')}
             </button>

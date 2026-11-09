@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { AppProvider, useApp } from './i18n/AppContext'
 import TitleBar from './components/TitleBar'
+import { setBackgroundMode } from './lib/palette'
 import Sidebar, { RAIL_W, RAIL_W_COLLAPSED } from './components/Sidebar'
 import SplashScreen from './components/SplashScreen'
+import PixelDissolve from './components/PixelDissolve'
 import TooltipProvider from './components/ui/TooltipProvider'
 import CrashModal from './components/ui/CrashModal'
 import { ToastProvider, useToast } from './components/ui/Toast'
@@ -19,9 +21,8 @@ import InstancePanel from './components/instance/InstancePanel'
 import { launchBannerLines } from './lib/asciiLogo'
 import * as api from './api/client.js'
 
-const SPLASH_MIN_MS = 1000
-const SPLASH_MAX_HOLD_MS = 180000
-const SPLASH_FADE_MS = 380
+// Splash: 156 frame @30fps (5.2s) rồi preloader đếm % tự quyết định thời điểm đóng.
+const SPLASH_GUARD_MS = 30000
 const PAGE_FADE_MS = 200
 const DEFAULT_MEMORY = 4096
 
@@ -69,9 +70,11 @@ function AppContent() {
   const [whatsNew, setWhatsNew] = useState(null)
 
   const [boot, setBoot] = useState('splash')
-  const [bootStatus, setBootStatus] = useState('boot')
-  const [bootMin, setBootMin] = useState(false)
-  const [bootHoldOver, setBootHoldOver] = useState(false)
+  const [dissolve, setDissolve] = useState(null)
+  const [bgUrl, setBgUrl] = useState('')
+  const [effectsOn, setEffectsOn] = useState(true)
+  const effectsRef = useRef(true)
+  effectsRef.current = effectsOn
 
   const selectedRef = useRef(null)
   const snapshotsRef = useRef(false)
@@ -230,7 +233,7 @@ function AppContent() {
           const done = Number(ev.done) || 0
           toast.download(key, {
             title: upload
-              ? vn(L, 'Đang tải modpack lên LunarSpace', 'Uploading modpack to LunarSpace')
+              ? vn(L, 'Đang tải modpack lên XyoLauncher', 'Uploading modpack to XyoLauncher')
               : vn(L, 'Đang nén instance', 'Packing instance'),
             message: who,
             percent: total ? Math.max(0, Math.min(100, (done / total) * 100)) : 0,
@@ -406,51 +409,102 @@ function AppContent() {
     update.phase === 'ready' ||
     update.phase === 'installing'
 
+  const finishBoot = useCallback(() => setBoot('done'), [])
+
   useEffect(() => {
-    const minTimer = setTimeout(() => setBootMin(true), SPLASH_MIN_MS)
     api.updateStatus().then((res) => {
       if (res?.ok) setUpdate((u) => ({ ...u, ...res }))
     }).catch(() => {})
-    return () => clearTimeout(minTimer)
+    // Chốt an toàn: preloader mà không báo xong thì vẫn phải vào app.
+    const guard = setTimeout(() => setBoot('done'), SPLASH_GUARD_MS)
+    return () => clearTimeout(guard)
   }, [])
 
-  useEffect(() => {
-    if (!updateBusy) {
-      setBootHoldOver(false)
-      return undefined
+  // Chuyển view bằng lưới pixel: phủ kín màu nền rồi tan dần để lộ nội dung mới.
+  const dissolveRef = useRef(false)
+  const pendingApplyRef = useRef(null)
+  const runDissolve = useCallback((apply) => {
+    const reduced =
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    if (reduced || !effectsRef.current || dissolveRef.current) {
+      apply()
+      return
     }
-    const holdTimer = setTimeout(() => {
-      setBootHoldOver(true)
-      api.updateAutoApply(false).catch(() => {})
-    }, SPLASH_MAX_HOLD_MS)
-    return () => clearTimeout(holdTimer)
-  }, [updateBusy])
+    dissolveRef.current = true
+    pendingApplyRef.current = apply
+    setDissolve({ id: Date.now() })
+  }, [])
 
-  useEffect(() => {
-    if (boot === 'done' || boot === 'leaving') return undefined
-    if (!bootMin) return undefined
-    if (updateBusy && !bootHoldOver) return undefined
-    const fadeTimer = setTimeout(() => {
-      setBoot('leaving')
-      setTimeout(() => setBoot('done'), SPLASH_FADE_MS)
-    }, 80)
-    return () => clearTimeout(fadeTimer)
-  }, [boot, bootMin, updateBusy, bootHoldOver])
+  const handleDissolveMid = useCallback(() => {
+    const apply = pendingApplyRef.current
+    pendingApplyRef.current = null
+    apply?.()
+  }, [])
 
+  const finishDissolve = useCallback(() => {
+    dissolveRef.current = false
+    pendingApplyRef.current = null
+    setDissolve(null)
+  }, [])
+
+  // Chỉ chuyển vào/ra khỏi instance mới có hiệu ứng; đi lại giữa 4 trang chính thì đổi ngay.
+  const pageRef = useRef(displayPage)
+  pageRef.current = displayPage
+  const isInstancePage = (page) => typeof page === 'string' && page.startsWith('instance-')
+  // Tải ảnh nền đang chọn + trạng thái hiệu ứng; đồng bộ khi đổi trong Cài đặt.
   useEffect(() => {
-    if (boot === 'done') return
-    setBootStatus(versionsLoading ? 'versions' : 'ready')
-  }, [versionsLoading, boot])
+    let alive = true
+    const apply = (url) => {
+      setBackgroundMode(Boolean(url))
+      setBgUrl(url || '')
+      if (url) {
+        document.documentElement.setAttribute('data-xyo-bg', '')
+        document.documentElement.style.setProperty('--xyo-bg-url', `url("${url}")`)
+      } else {
+        document.documentElement.removeAttribute('data-xyo-bg')
+        document.documentElement.style.removeProperty('--xyo-bg-url')
+      }
+    }
+    const load = async () => {
+      try {
+        const saved = window.electronAPI?.getSettings ? await window.electronAPI.getSettings() : null
+        const list = await api.listBackgrounds()
+        if (!alive) return
+        if (saved && saved.effects !== undefined) setEffectsOn(saved.effects !== false)
+        if (list?.ok) {
+          const id = saved?.background || list.default
+          const item = (list.items || []).find((x) => x.id === id)
+          apply(id === 'theme' ? '' : item?.url || '')
+        }
+      } catch {}
+    }
+    load()
+    const onBg = (event) => apply(event?.detail)
+    const onEffects = (event) => setEffectsOn(event?.detail !== false)
+    window.addEventListener('xyo:background', onBg)
+    window.addEventListener('xyo:effects', onEffects)
+    return () => {
+      alive = false
+      window.removeEventListener('xyo:background', onBg)
+      window.removeEventListener('xyo:effects', onEffects)
+    }
+  }, [])
 
   const navigateTo = useCallback((page) => {
-    setPhase('fading-out')
-    setTimeout(() => {
+    const apply = () => {
       setDisplayPage(page)
       setActivePage(page)
-      setPhase('fading-in')
-      setTimeout(() => setPhase('idle'), PAGE_FADE_MS)
-    }, PAGE_FADE_MS)
-  }, [])
+    }
+    const fromInstance = isInstancePage(pageRef.current)
+    const toInstance = isInstancePage(page)
+    if (!fromInstance && !toInstance) {
+      apply()
+      return
+    }
+    runDissolve(apply)
+  }, [runDissolve])
 
   useEffect(() => {
     if (!version) return
@@ -473,10 +527,13 @@ function AppContent() {
   }, [whatsNew])
 
   const handleSelectInstance = useCallback((inst) => {
-    setSelectedInstance(inst)
     setShowDropdown(false)
-    navigateTo('instance-overview')
-  }, [navigateTo])
+    runDissolve(() => {
+      setSelectedInstance(inst)
+      setDisplayPage('instance-overview')
+      setActivePage('instance-overview')
+    })
+  }, [runDissolve])
 
   const handleBack = useCallback(() => {
     setSelectedInstance(null)
@@ -519,15 +576,12 @@ function AppContent() {
     await refreshInstances()
     setSelectedInstance(res.instance)
     setProgress((p) => ({ ...p, [res.instance.id]: { phase: 'start', label: 'start', done: 0, total: 0 } }))
-    setPhase('fading-out')
-    setTimeout(() => {
+    runDissolve(() => {
       setDisplayPage('instance-overview')
       setActivePage('instance-overview')
-      setPhase('fading-in')
-      setTimeout(() => setPhase('idle'), PAGE_FADE_MS)
-    }, PAGE_FADE_MS)
+    })
     return res
-  }, [refreshInstances])
+  }, [refreshInstances, runDissolve])
 
   const handleLaunch = useCallback(async (instance, username, quickPlay = null) => {
     setLaunchError((e) => ({ ...e, [instance.id]: '' }))
@@ -601,6 +655,17 @@ function AppContent() {
 
   const activeAccount = accounts.find((a) => a.id === activeAccountId) || null
 
+  const switchAccount = async (acc) => {
+    if (!acc?.id || acc.id === activeAccountId) return
+    try {
+      const res = await api.setActiveAccount({ id: acc.id })
+      if (res?.ok) {
+        setAccounts(res.accounts || [])
+        setActiveAccountId(res.activeAccountId || acc.id)
+      }
+    } catch {}
+  }
+
   const shared = {
     theme,
     lang,
@@ -629,7 +694,24 @@ function AppContent() {
 
   return (
     <div className="w-screen h-screen flex flex-col overflow-hidden relative z-10" style={{ background: 'transparent' }}>
-      <TitleBar />
+      {bgUrl ? (
+        <>
+          <div
+            aria-hidden
+            style={{
+              position: 'fixed',
+              inset: 0,
+              zIndex: 0,
+              backgroundImage: `url("${bgUrl}")`,
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+              pointerEvents: 'none',
+            }}
+          />
+        </>
+      ) : null}
+
+      {boot !== 'splash' && <TitleBar />}
 
       {instancesError && (
         <div
@@ -648,6 +730,9 @@ function AppContent() {
           version={version}
           instances={instancesWithLive}
           account={activeAccount}
+          accounts={accounts}
+          activeAccountId={activeAccountId}
+          onSelectAccount={switchAccount}
           selectedInstance={selectedInstance}
           dropdownOpen={showDropdown}
           onToggleDropdown={() => setShowDropdown((v) => !v)}
@@ -665,7 +750,7 @@ function AppContent() {
 
         <div
           className="flex-1 overflow-hidden"
-          style={{ marginLeft: railW, transition: 'margin-left 300ms cubic-bezier(0.4, 0, 0.2, 1)' }}
+          style={{ marginLeft: railW + 8, transition: 'margin-left 320ms cubic-bezier(0.33, 1, 0.68, 1)' }}
         >
           <div className={`h-full ${transitionClass}`}>
             {displayPage === 'home' && (
@@ -743,8 +828,12 @@ function AppContent() {
         </div>
       </div>
 
+      {dissolve && (
+        <PixelDissolve key={dissolve.id} onMid={handleDissolveMid} onDone={finishDissolve} />
+      )}
+
       {boot !== 'done' && (
-        <SplashScreen lang={lang} leaving={boot === 'leaving'} status={bootStatus} version={version} update={update} />
+        <SplashScreen theme={theme} lang={lang} onComplete={finishBoot} />
       )}
 
       {whatsNew && (

@@ -4,15 +4,15 @@ const fs = require('fs')
 
 const TEXT = {
   vi: {
-    open: 'Mở LunarSpace Launcher',
+    open: 'Mở XyoLauncher',
     hide: 'Ẩn launcher',
-    quit: 'Thoát LunarSpace',
+    quit: 'Thoát XyoLauncher',
     playing: 'Đang chơi',
   },
   en: {
-    open: 'Open LunarSpace Launcher',
+    open: 'Open XyoLauncher',
     hide: 'Hide launcher',
-    quit: 'Quit LunarSpace',
+    quit: 'Quit XyoLauncher',
     playing: 'Playing',
   },
 }
@@ -58,7 +58,7 @@ function create(options = {}) {
     console.error('[lunaspace] tray failed:', err?.message || err)
     return null
   }
-  tray.setToolTip('LunarSpace Launcher')
+  tray.setToolTip('XyoLauncher')
   tray.setContextMenu(buildMenu())
   tray.on('click', () => toggle())
   tray.on('double-click', () => handlers.onShow())
@@ -68,7 +68,7 @@ function create(options = {}) {
 function refresh() {
   if (!tray || tray.isDestroyed()) return
   const running = handlers.getRunning()
-  tray.setToolTip(running.length ? `LunarSpace Launcher · ${TEXT[handlers.getLang() === 'en' ? 'en' : 'vi'].playing}: ${running.join(', ')}` : 'LunarSpace Launcher')
+  tray.setToolTip(running.length ? `XyoLauncher · ${TEXT[handlers.getLang() === 'en' ? 'en' : 'vi'].playing}: ${running.join(', ')}` : 'XyoLauncher')
   tray.setContextMenu(buildMenu())
 }
 

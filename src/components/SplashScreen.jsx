@@ -1,73 +1,110 @@
-import { useLayoutEffect } from 'react'
-import { LOGO_ROWS } from '../lib/asciiLogo'
+import { useEffect, useRef, useState } from 'react'
+import Preloader from './Preloader'
 
-const STATUS = {
-  boot: { vi: 'Đang khởi động…', en: 'Starting…' },
-  versions: { vi: 'Đang tải phiên bản…', en: 'Loading versions…' },
-  ready: { vi: 'Sẵn sàng', en: 'Ready' },
-}
+// Splash lấy nguyên từ bản Rust: 156 frame JPEG 1280x720 phát 30fps,
+// hết frame thì chuyển sang preloader đếm % (Lucian #256) rồi tách đôi trượt ra.
+const FRAME_COUNT = 156
+const FPS = 30
+const FRAME_MS = 1000 / FPS
+const PRELOAD_AHEAD = 8
 
-const SUBTITLE = { vi: 'Trình khởi chạy Minecraft', en: 'Minecraft Launcher' }
+const frameUrl = (index) => `./splash/frame_${String(index).padStart(3, '0')}.jpg`
 
-function updateLabel(update, lang) {
-  const vi = lang !== 'en'
-  const phase = update?.phase
-  const version = update?.version ? `v${update.version}` : ''
-  if (phase === 'checking') return vi ? 'Đang kiểm tra cập nhật…' : 'Checking for updates…'
-  if (phase === 'available') return vi ? `Có bản cập nhật ${version}` : `Update ${version} available`
-  if (phase === 'downloading') {
-    const percent = Math.round(update?.percent || 0)
-    return vi ? `Đang tải cập nhật ${version} · ${percent}%` : `Downloading ${version} · ${percent}%`
-  }
-  if (phase === 'ready' || phase === 'installing') return vi ? 'Đang cài bản cập nhật…' : 'Installing update…'
-  return ''
-}
+export default function SplashScreen({ theme, lang, onComplete }) {
+  const frameRef = useRef(null)
+  const [phase, setPhase] = useState('video')
+  const [splitStarted, setSplitStarted] = useState(false)
 
-function updateProgress(update) {
-  const phase = update?.phase
-  if (phase === 'downloading') return Math.max(0, Math.min(100, update?.percent || 0))
-  if (phase === 'ready' || phase === 'installing') return 100
-  return null
-}
-
-export default function SplashScreen({ lang, leaving, status = 'boot', version, update }) {
-  useLayoutEffect(() => {
+  useEffect(() => {
     document.getElementById('boot-splash')?.remove()
   }, [])
 
-  const label = updateLabel(update, lang) || STATUS[status]?.[lang] || STATUS[status]?.en || ''
-  const progress = updateProgress(update)
+  useEffect(() => {
+    const img = frameRef.current
+    if (!img) return undefined
+
+    const warm = new Map()
+    const preload = (index) => {
+      if (index < 1 || index > FRAME_COUNT || warm.has(index)) return
+      const el = new Image()
+      el.src = frameUrl(index)
+      warm.set(index, el)
+      for (const key of warm.keys()) {
+        if (key < index - 3) warm.delete(key)
+      }
+    }
+
+    for (let i = 1; i <= PRELOAD_AHEAD; i += 1) preload(i)
+
+    const startedAt = performance.now()
+    let shown = 1
+    let raf = 0
+    let ended = false
+
+    const finish = () => {
+      if (ended) return
+      ended = true
+      if (raf) cancelAnimationFrame(raf)
+      setPhase('loading')
+    }
+    // rAF có thể bị Chromium hạ tần số; timer này bảo đảm chuyển màn đúng 5.2s.
+    const finishTimer = setTimeout(finish, FRAME_COUNT * FRAME_MS)
+
+    const tick = (now) => {
+      if (ended) return
+      const index = Math.min(FRAME_COUNT, Math.floor((now - startedAt) / FRAME_MS) + 1)
+      if (index !== shown) {
+        shown = index
+        img.src = frameUrl(index)
+        for (let k = index + 1; k <= index + PRELOAD_AHEAD; k += 1) preload(k)
+      }
+      if ((now - startedAt) >= FRAME_COUNT * FRAME_MS) {
+        finish()
+        return
+      }
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+
+    return () => {
+      clearTimeout(finishTimer)
+      if (raf) cancelAnimationFrame(raf)
+      warm.clear()
+    }
+  }, [])
+
+  const loading = phase === 'loading'
 
   return (
     <div
-      role="status"
-      aria-live="polite"
-      aria-label={label}
-      data-splash={leaving ? 'leaving' : 'on'}
-      className={`splash-root${leaving ? ' splash-leaving' : ''}`}
+      className="fixed inset-0 z-[100] overflow-hidden"
+      style={{
+        background: splitStarted ? 'transparent' : '#0c0e12',
+        transition: 'background 0s linear',
+      }}
     >
-      <div className="splash-blob splash-blob-a" />
-      <div className="splash-blob splash-blob-b" />
+      <img
+        ref={frameRef}
+        src={frameUrl(1)}
+        alt=""
+        aria-hidden
+        draggable={false}
+        className="absolute inset-0 h-full w-full object-cover"
+        style={{
+          opacity: loading ? 0 : 1,
+          transition: 'opacity 280ms ease',
+          pointerEvents: 'none',
+        }}
+      />
 
-      <div className="splash-center">
-        <div className="splash-glow" />
-        <div className="splash-ascii" role="img" aria-label="LunarSpace">
-          {LOGO_ROWS.map((row, i) => (
-            <span className="splash-ascii-row" key={i} style={{ '--i': i }}>{row}</span>
-          ))}
-        </div>
-        <p className="splash-sub">{SUBTITLE[lang] || SUBTITLE.en}</p>
-      </div>
-
-      <div className="splash-foot">
-        <p className="splash-status">{label}</p>
-        <div className="splash-track">
-          {progress === null
-            ? <div className="splash-sweep" />
-            : <div className="splash-fill" style={{ width: `${progress}%` }} />}
-        </div>
-        <p className="splash-version">{version ? `v${version}` : ''}</p>
-      </div>
+      {loading && (
+        <Preloader
+          theme={theme}
+          lang={lang}
+          onOpen={() => setSplitStarted(true)}
+          onComplete={onComplete}
+        />
+      )}
     </div>
   )
 }

@@ -35,7 +35,7 @@ const SOURCES = [
 ]
 
 const SOURCE_NAMES = { modrinth: 'Modrinth', curseforge: 'CurseForge', lunar: 'LunarModpack' }
-const sourceName = (source) => SOURCE_NAMES[source] || 'LunarSpace'
+const sourceName = (source) => SOURCE_NAMES[source] || 'XyoLauncher'
 
 const SORTS = {
   modrinth: ['relevance', 'downloads', 'follows', 'newest', 'updated'],
@@ -290,7 +290,7 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
   const acceptFile = useCallback((path) => {
     const filename = String(path || '').split(/[\\/]/).pop()
     if (!MODPACK_EXT.test(filename)) {
-      setDropError(vn(lang, 'Chỉ nhận tệp .mrpack hoặc .zip (CurseForge hay bản xuất profile của LunarSpace).', 'Only .mrpack, CurseForge .zip or a LunarSpace profile export.'))
+      setDropError(vn(lang, 'Chỉ nhận tệp .mrpack hoặc .zip (CurseForge hay bản xuất profile của XyoLauncher).', 'Only .mrpack, CurseForge .zip or a XyoLauncher profile export.'))
       return
     }
     reset()
@@ -506,7 +506,7 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
                   key={s.id}
                   onClick={() => pickSource(s.id)}
                   className="h-8 px-3 rounded-md text-[11px] font-semibold transition-colors"
-                  style={{ background: on ? c.surface : 'transparent', color: on ? c.accent : c.label, border: `1px solid ${on ? 'rgba(167,139,250,0.32)' : 'transparent'}` }}
+                  style={{ background: on ? c.surface : 'transparent', color: on ? c.accent : c.label, border: `1px solid ${on ? 'rgba(233,184,114,0.32)' : 'transparent'}` }}
                 >
                   {s.name}
                 </button>
@@ -666,8 +666,8 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
                     <p className="mt-1.5 text-[11px] leading-relaxed" style={{ color: c.label }}>
                       {vn(
                         lang,
-                        '.mrpack, .zip CurseForge, hoặc bản xuất profile của LunarSpace — mod, config và overrides được đưa vào phiên bản mới.',
-                        '.mrpack, CurseForge .zip, or a LunarSpace profile export — mods, configs and overrides go into the new instance.',
+                        '.mrpack, .zip CurseForge, hoặc bản xuất profile của XyoLauncher — mod, config và overrides được đưa vào phiên bản mới.',
+                        '.mrpack, CurseForge .zip, or a XyoLauncher profile export — mods, configs and overrides go into the new instance.',
                       )}
                     </p>
                   )}
@@ -726,7 +726,7 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
                           /\.mrpack$/i.test(imported.name)
                             ? 'Modrinth'
                             : imported.profile
-                              ? vn(lang, 'Profile LunarSpace', 'LunarSpace profile')
+                              ? vn(lang, 'Profile XyoLauncher', 'XyoLauncher profile')
                               : 'CurseForge'
                         }
                       />
@@ -989,7 +989,7 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
                                   <div className="flex items-center gap-2">
                                     <p className="text-[11px] font-semibold truncate" style={{ color: c.text }} title={v.versionNumber}>{v.versionNumber}</p>
                                     {i === 0 && (
-                                      <span className="text-[9px] font-bold px-1 py-0.5 rounded shrink-0 uppercase" style={{ background: 'rgba(167,139,250,0.16)', color: c.accent }}>
+                                      <span className="text-[9px] font-bold px-1 py-0.5 rounded shrink-0 uppercase" style={{ background: 'rgba(233,184,114,0.16)', color: c.accent }}>
                                         {vn(lang, 'mới nhất', 'latest')}
                                       </span>
                                     )}
@@ -1220,7 +1220,7 @@ export default function ModpackPage({ theme, lang, defaultInstanceDir, packProgr
                 className="rounded-xl flex flex-col items-center justify-center gap-2 py-9 px-6 text-center cursor-pointer transition-colors"
                 style={{
                   border: `2px dashed ${dropActive ? c.accent : c.border}`,
-                  background: dropActive ? 'rgba(167,139,250,0.07)' : c.input,
+                  background: dropActive ? 'rgba(233,184,114,0.07)' : c.input,
                 }}
               >
                 <span className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: c.surface, border: `1px solid ${c.border}` }}>
@@ -1315,14 +1315,14 @@ function PackVersionRow({ c, lang, version, first, selected, installing, disable
   return (
     <div
       className="flex items-center gap-3 px-3 py-2"
-      style={{ borderTop: first ? 'none' : `1px solid ${c.border}`, background: selected ? 'rgba(167,139,250,0.06)' : 'transparent' }}
+      style={{ borderTop: first ? 'none' : `1px solid ${c.border}`, background: selected ? 'rgba(233,184,114,0.06)' : 'transparent' }}
     >
       <button onClick={onPick} className="w-[3px] h-7 rounded-full shrink-0" style={{ background: selected ? c.accent : c.border }} aria-label={version.versionNumber} />
       <button onClick={onPick} className="min-w-0 flex-1 text-left">
         <div className="flex items-center gap-2">
           <p className="text-[11px] font-semibold truncate" style={{ color: c.text }} title={version.versionNumber}>{version.versionNumber}</p>
           {first && (
-            <span className="text-[9px] font-bold px-1 py-0.5 rounded shrink-0 uppercase" style={{ background: 'rgba(167,139,250,0.16)', color: c.accent }}>
+            <span className="text-[9px] font-bold px-1 py-0.5 rounded shrink-0 uppercase" style={{ background: 'rgba(233,184,114,0.16)', color: c.accent }}>
               {vn(lang, 'mới nhất', 'latest')}
             </span>
           )}

@@ -570,7 +570,7 @@ export function PanelWorld({ ctx }) {
               onChange={(value) => setNum('GameType', 'int', value)}
               options={[
                 { value: '0', label: vn(lang, 'Sinh tồn', 'Survival'), node: <Sword size={15} weight="duotone" />, tone: '#4ade80' },
-                { value: '1', label: vn(lang, 'Sáng tạo', 'Creative'), node: <PaintBrush size={15} weight="duotone" />, tone: '#a78bfa' },
+                { value: '1', label: vn(lang, 'Sáng tạo', 'Creative'), node: <PaintBrush size={15} weight="duotone" />, tone: '#e9b872' },
                 { value: '2', label: vn(lang, 'Phiêu lưu', 'Adventure'), node: <MapTrifold size={15} weight="duotone" />, tone: '#fb923c' },
                 { value: '3', label: vn(lang, 'Khán giả', 'Spectator'), node: <Eye size={15} weight="duotone" />, tone: '#94a3b8' },
               ]}

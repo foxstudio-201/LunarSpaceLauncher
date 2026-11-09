@@ -230,7 +230,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onScheduleDeleted: localEvent('schedule-deleted', (ev) => ({ id: ev.id })),
   onScheduleRan: localEvent('schedule-ran'),
 
+  captureWindow: () => ipcRenderer.invoke('win:capture'),
+  listBackgrounds: () => ipcRenderer.invoke('launcher:backgrounds'),
+  downloadBackground: (id) => ipcRenderer.invoke('launcher:background-download', id),
+  setBackground: (id) => ipcRenderer.invoke('launcher:background-set', id),
   minimizeWindow: () => ipcRenderer.invoke('win:minimize'),
+  maximizeWindow: () => ipcRenderer.invoke('win:maximize'),
+  isMaximized: () => ipcRenderer.invoke('win:isMaximized'),
+  onMaximizedChange: (cb) => {
+    const handler = (_event, value) => cb(Boolean(value))
+    ipcRenderer.on('win:maximized', handler)
+    return () => ipcRenderer.removeListener('win:maximized', handler)
+  },
   closeWindow: () => ipcRenderer.invoke('win:close'),
   quitApp: () => ipcRenderer.invoke('win:quit'),
 })

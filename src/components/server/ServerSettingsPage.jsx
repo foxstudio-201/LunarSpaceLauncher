@@ -74,12 +74,12 @@ export default function ServerSettingsPage({ server, theme, lang, onBack, onServ
       {/* Rename */}
       <div className="p-3 rounded-xl" style={{ background: theme === 'light' ? 'rgba(0,0,0,0.03)' : 'rgba(255,255,255,0.04)', border: `1px solid ${borderColor}` }}>
         <div className="flex items-center gap-2 mb-2">
-          <PencilSimple size={14} weight="duotone" style={{ color: '#a78bfa' }} />
+          <PencilSimple size={14} weight="duotone" style={{ color: '#e9b872' }} />
           <label className="text-[11px] font-semibold" style={{ color: textColor }}>{lang === 'vi' ? 'Đổi tên' : 'Rename Server'}</label>
         </div>
         <div className="flex gap-2">
-          <input value={name} onChange={e => setName(e.target.value)} className="flex-1 px-3 py-1.5 rounded-lg text-[11px] outline-none transition-colors focus:border-[#a78bfa]" style={{ background: theme === 'light' ? '#fff' : '#1a1a1a', border: `1px solid ${borderColor}`, color: textColor }} />
-          <button onClick={handleRename} className={`${btn}`} style={{ background: '#a78bfa', color: '#fff' }}>{lang === 'vi' ? 'Lưu' : 'Save'}</button>
+          <input value={name} onChange={e => setName(e.target.value)} className="flex-1 px-3 py-1.5 rounded-lg text-[11px] outline-none transition-colors focus:border-[#e9b872]" style={{ background: theme === 'light' ? '#fff' : '#1a1a1a', border: `1px solid ${borderColor}`, color: textColor }} />
+          <button onClick={handleRename} className={`${btn}`} style={{ background: '#e9b872', color: '#1b1409' }}>{lang === 'vi' ? 'Lưu' : 'Save'}</button>
         </div>
       </div>
 
@@ -102,7 +102,7 @@ export default function ServerSettingsPage({ server, theme, lang, onBack, onServ
 
       <div className="p-3 rounded-xl" style={{ background: theme === 'light' ? 'rgba(0,0,0,0.03)' : 'rgba(255,255,255,0.04)', border: `1px solid ${borderColor}` }}>
         <div className="flex items-center gap-2 mb-2">
-          <Package size={14} weight="duotone" style={{ color: '#a78bfa' }} />
+          <Package size={14} weight="duotone" style={{ color: '#e9b872' }} />
           <label className="text-[11px] font-semibold" style={{ color: textColor }}>{lang === 'vi' ? 'Xuất serverpack' : 'Export server pack'}</label>
         </div>
         <p className="text-[10px] mb-2" style={{ color: labelColor }}>
@@ -110,7 +110,7 @@ export default function ServerSettingsPage({ server, theme, lang, onBack, onServ
             ? 'Mở trang chọn tệp dạng cây rồi đóng gói thành zip để up lên hosting. Cây tệp lấy từ chính thư mục server này.'
             : 'Open the file-tree picker and pack a zip to upload to hosting. The tree reads from this server folder.'}
         </p>
-        <button onClick={() => setShowPack(true)} className={btn} style={{ background: '#a78bfa', color: '#fff' }}>
+        <button onClick={() => setShowPack(true)} className={btn} style={{ background: '#e9b872', color: '#1b1409' }}>
           {lang === 'vi' ? 'Mở trang xuất serverpack' : 'Open export page'}
         </button>
       </div>

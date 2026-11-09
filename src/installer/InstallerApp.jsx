@@ -3,10 +3,10 @@ import { Minus, X, DownloadSimple, HardDrives, FolderSimple, CheckCircle, Warnin
 import { palette } from '../lib/palette'
 import { t } from '../i18n/translations'
 import { formatBytes } from '../lib/status'
-import bgArt from '../../LunarSpace_backgound_app_install.png'
+import bgArt from '../../build-resources/xyolauncher-background.png'
 
 const FILL = {
-  run: { from: '#7c5cf6', to: '#a78bfa', glow: 'rgba(167,139,250,0.55)' },
+  run: { from: '#7c5cf6', to: '#e9b872', glow: 'rgba(233,184,114,0.55)' },
   done: { from: '#15803d', to: '#22c55e', glow: 'rgba(34,197,94,0.5)' },
   failed: { from: '#b91c1c', to: '#ef4444', glow: 'rgba(239,68,68,0.5)' },
 }
@@ -134,7 +134,7 @@ export default function InstallerApp() {
         <div className="absolute inset-0" style={{ background: 'linear-gradient(180deg, rgba(6,7,11,0.42) 0%, rgba(6,7,11,0.04) 36%, rgba(6,7,11,0.1) 66%, rgba(6,7,11,0.82) 100%)' }} />
         <div className="relative h-full flex flex-col justify-between px-6 py-4">
           <div className="flex items-center gap-2">
-            <span className="text-[10px] font-bold uppercase tracking-[0.22em] px-2 py-1 rounded" style={{ background: 'rgba(6,7,11,0.6)', color: '#c4b5fd', border: '1px solid rgba(167,139,250,0.35)' }}>
+            <span className="text-[10px] font-bold uppercase tracking-[0.22em] px-2 py-1 rounded" style={{ background: 'rgba(6,7,11,0.6)', color: '#f3c98a', border: '1px solid rgba(233,184,114,0.35)' }}>
               {tr(kindKey)}
             </span>
           </div>

@@ -38,7 +38,7 @@ export default function DatabasePage({ server, theme, lang }) {
       <div className="flex items-center gap-3 mb-4">
         <h2 className="text-sm font-bold" style={{ color: textColor }}>{lang === 'vi' ? 'Cơ sở dữ liệu' : 'Databases'}</h2>
         <div className="flex-1" />
-        <button onClick={() => setShowCreate(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold" style={{ background: '#8b5cf6', color: '#fff' }}>
+        <button onClick={() => setShowCreate(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold" style={{ background: '#e9b872', color: '#1b1409' }}>
           <Plus size={13} weight="duotone" /> {lang === 'vi' ? 'Tạo mới' : 'Create'}
         </button>
       </div>
@@ -70,8 +70,8 @@ export default function DatabasePage({ server, theme, lang }) {
           </div>
         ) : databases.map((db, i) => (
           <div key={i} className="flex items-center gap-3 px-3 py-2.5 rounded-xl mb-2" style={{ background: theme === 'light' ? 'rgba(0,0,0,0.03)' : 'rgba(255,255,255,0.04)', border: `1px solid ${borderColor}` }}>
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: '#8b5cf620' }}>
-              <span className="text-[10px] font-bold" style={{ color: '#8b5cf6' }}>DB</span>
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: '#c9903f20' }}>
+              <span className="text-[10px] font-bold" style={{ color: '#c9903f' }}>DB</span>
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-[11px] font-semibold truncate" style={{ color: textColor }}>{db.name}</p>

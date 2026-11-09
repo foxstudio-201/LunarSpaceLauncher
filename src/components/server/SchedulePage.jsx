@@ -287,7 +287,7 @@ export default function SchedulePage({ server, theme, lang }) {
   return (
     <div className="h-full flex flex-col overflow-hidden p-4 gap-4">
       <div className="flex items-center gap-3">
-        <Clock size={16} weight="duotone" style={{ color: '#a78bfa' }} />
+        <Clock size={16} weight="duotone" style={{ color: '#e9b872' }} />
         <h2 className="text-sm font-bold" style={{ color: textColor }}>
           {lang === 'vi' ? 'Lịch trình' : 'Schedules'}
         </h2>
@@ -295,7 +295,7 @@ export default function SchedulePage({ server, theme, lang }) {
         <button
           onClick={openCreate}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all hover:opacity-80 active:scale-95"
-          style={{ background: '#a78bfa', color: '#fff' }}
+          style={{ background: '#e9b872', color: '#1b1409' }}
         >
           <Plus size={13} weight="duotone" /> {lang === 'vi' ? 'Tạo mới' : 'Create'}
         </button>
@@ -355,7 +355,7 @@ export default function SchedulePage({ server, theme, lang }) {
                     )}
                   </div>
                   <div className="flex items-center gap-3 mt-0.5 flex-wrap">
-                    <span className="text-[10px] font-mono" style={{ color: '#a78bfa' }}>{s.cron}</span>
+                    <span className="text-[10px] font-mono" style={{ color: '#e9b872' }}>{s.cron}</span>
                     <span className="text-[10px]" style={{ color: labelColor }}>{s.humanCron || s.cron}</span>
                     <span className="text-[10px]" style={{ color: labelColor }}>
                       {lang === 'vi' ? 'Tiếp:' : 'Next:'} {formatTime(s.nextRunAt)}
@@ -392,7 +392,7 @@ export default function SchedulePage({ server, theme, lang }) {
                     onClick={() => openEdit(s)}
                     title={lang === 'vi' ? 'Sửa' : 'Edit'}
                     className="p-1.5 rounded-lg transition-all hover:opacity-80"
-                    style={{ background: '#a78bfa20', color: '#a78bfa' }}
+                    style={{ background: '#e9b87220', color: '#e9b872' }}
                   >
                     <PencilSimple size={13} weight="duotone" />
                   </button>
@@ -455,7 +455,7 @@ export default function SchedulePage({ server, theme, lang }) {
           className={`modal-backdrop fixed inset-0 z-[80] flex items-center justify-center p-4${modalClosing ? ' closing' : ''}`}
           style={{
             background: 'rgba(0,0,0,0.7)',
-            backdropFilter: 'blur(4px)',
+            backdropFilter: 'none',
             WebkitBackdropFilter: 'blur(4px)',
             pointerEvents: modalClosing ? 'none' : 'auto',
           }}
@@ -467,7 +467,7 @@ export default function SchedulePage({ server, theme, lang }) {
             onClick={e => e.stopPropagation()}
           >
             <div className="flex items-center gap-2 px-4 py-3" style={{ borderBottom: `1px solid ${borderColor}` }}>
-              <Clock size={15} weight="duotone" style={{ color: '#a78bfa' }} />
+              <Clock size={15} weight="duotone" style={{ color: '#e9b872' }} />
               <h3 className="text-xs font-bold" style={{ color: textColor }}>
                 {viewModal.mode === 'create'
                   ? (lang === 'vi' ? 'Tạo lịch trình' : 'Create schedule')
@@ -510,7 +510,7 @@ export default function SchedulePage({ server, theme, lang }) {
                       key={p.label}
                       onClick={() => updateData({ cron: p.label })}
                       className="text-[9px] px-2 py-1 rounded-md font-mono transition-all hover:opacity-80"
-                      style={{ background: viewModal.data.cron === p.label ? '#a78bfa25' : cardBg, border: `1px solid ${borderColor}`, color: viewModal.data.cron === p.label ? '#a78bfa' : labelColor }}
+                      style={{ background: viewModal.data.cron === p.label ? '#e9b87225' : cardBg, border: `1px solid ${borderColor}`, color: viewModal.data.cron === p.label ? '#e9b872' : labelColor }}
                       title={lang === 'vi' ? p.vi : p.en}
                     >
                       {p.label}
@@ -545,7 +545,7 @@ export default function SchedulePage({ server, theme, lang }) {
                     {lang === 'vi' ? `Các bước (${viewModal.data.steps.length})` : `Steps (${viewModal.data.steps.length})`}
                   </label>
                   <div className="flex-1" />
-                  <button onClick={addStep} className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-md font-semibold" style={{ background: '#a78bfa20', color: '#a78bfa' }}>
+                  <button onClick={addStep} className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-md font-semibold" style={{ background: '#e9b87220', color: '#e9b872' }}>
                     <Plus size={11} weight="bold" /> {lang === 'vi' ? 'Thêm bước' : 'Add step'}
                   </button>
                 </div>
@@ -554,7 +554,7 @@ export default function SchedulePage({ server, theme, lang }) {
                   {viewModal.data.steps.map((st, idx) => (
                     <div key={st.id || idx} className="p-2.5 rounded-xl" style={{ background: cardBg, border: `1px solid ${borderColor}` }}>
                       <div className="flex items-center gap-2 mb-2">
-                        <span className="text-[10px] font-bold w-5 text-center rounded" style={{ background: '#a78bfa20', color: '#a78bfa' }}>{idx + 1}</span>
+                        <span className="text-[10px] font-bold w-5 text-center rounded" style={{ background: '#e9b87220', color: '#e9b872' }}>{idx + 1}</span>
                         <select
                           value={st.action}
                           onChange={e => updateStep(idx, { action: e.target.value })}
@@ -650,7 +650,7 @@ export default function SchedulePage({ server, theme, lang }) {
               <button onClick={closeModal} disabled={modalClosing} className="px-3 py-1.5 rounded-lg text-[11px] font-semibold" style={{ background: borderColor, color: labelColor }}>
                 {lang === 'vi' ? 'Hủy' : 'Cancel'}
               </button>
-              <button onClick={handleSave} disabled={modalClosing} className="px-4 py-1.5 rounded-lg text-[11px] font-semibold" style={{ background: '#a78bfa', color: '#fff' }}>
+              <button onClick={handleSave} disabled={modalClosing} className="px-4 py-1.5 rounded-lg text-[11px] font-semibold" style={{ background: '#e9b872', color: '#1b1409' }}>
                 {lang === 'vi' ? 'Lưu' : 'Save'}
               </button>
             </div>

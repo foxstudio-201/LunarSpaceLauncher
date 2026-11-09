@@ -14,7 +14,7 @@ const TOKEN_URL = 'https://dashboard.ngrok.com/get-started/your-authtoken'
 
 const TONE = {
   idle: { color: '#71717a', bg: 'rgba(113,113,122,0.12)' },
-  ready: { color: '#a78bfa', bg: 'rgba(167,139,250,0.14)' },
+  ready: { color: '#e9b872', bg: 'rgba(233,184,114,0.14)' },
   live: { color: '#22c55e', bg: 'rgba(34,197,94,0.14)' },
   warn: { color: '#fbbf24', bg: 'rgba(251,191,36,0.12)' },
   bad: { color: '#f87171', bg: 'rgba(239,68,68,0.12)' },

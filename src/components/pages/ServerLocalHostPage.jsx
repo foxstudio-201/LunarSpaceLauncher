@@ -204,7 +204,7 @@ export default function ServerLocalHostPage({ theme, lang, instances, server, di
 
       <div className="flex-1 min-h-0 overflow-y-auto p-4">
         {servers.length === 0 ? (
-          <div className="h-full flex flex-col items-center justify-center gap-6">
+          <div className="xyo-glass h-full flex flex-col items-center justify-center gap-6 rounded-2xl" style={{ background: c.surface, border: `1px solid ${c.border}` }}>
             <div className="flex flex-col items-center gap-3">
               <HardDrives size={40} weight="duotone" style={{ color: c.label, opacity: 0.4 }} />
               <p className="text-sm font-semibold" style={{ color: c.text }}>
@@ -239,7 +239,7 @@ export default function ServerLocalHostPage({ theme, lang, instances, server, di
                   style={{ background: c.surface, border: `1px solid ${c.border}` }}
                 >
                   <div className="flex items-center gap-3 px-3.5 py-3">
-                    <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0" style={{ background: 'rgba(167,139,250,0.12)' }}>
+                    <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0" style={{ background: 'rgba(233,184,114,0.12)' }}>
                       <Cube size={22} weight="duotone" style={{ color: c.accent }} />
                     </div>
                     <div className="flex-1 min-w-0">

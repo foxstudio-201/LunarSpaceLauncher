@@ -24,7 +24,7 @@ export default function TrashPage({ instance, theme, lang }) {
   const [pending, setPending] = useState(null)
   const [busy, setBusy] = useState('')
 
-  const hover = theme === 'light' ? 'rgba(139,92,246,0.08)' : 'rgba(167,139,250,0.12)'
+  const hover = theme === 'light' ? 'rgba(201,144,63,0.08)' : 'rgba(233,184,114,0.12)'
 
   const load = useCallback(async () => {
     setLoading(true)

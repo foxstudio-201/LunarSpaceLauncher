@@ -645,7 +645,7 @@ export default function WorldEditorPage({ instance, world, theme, lang, onClose 
   const matchSet = useMemo(() => new Set(found.list), [found.list])
   const selectedNode = path ? walk(tree, path) : null
 
-  const rowHover = theme === 'light' ? 'rgba(139,92,246,0.07)' : 'rgba(167,139,250,0.10)'
+  const rowHover = theme === 'light' ? 'rgba(201,144,63,0.07)' : 'rgba(233,184,114,0.10)'
   const hairline = { borderBottom: `1px solid ${c.border}` }
   const env = {
     c, lang, vn, theme, tree, open, path, matchSet, found, limitAt, rowHover, hairline,

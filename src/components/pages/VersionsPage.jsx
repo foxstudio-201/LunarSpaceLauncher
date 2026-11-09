@@ -87,8 +87,8 @@ export default function VersionsPage({
     const filename = String(filePath || '').split(/[\\/]/).pop()
     if (!PACK_EXT.test(filename)) {
       setImportError(lang === 'vi'
-        ? 'Chỉ nhận tệp .mrpack hoặc .zip (CurseForge hay bản xuất profile của LunarSpace).'
-        : 'Only .mrpack, CurseForge .zip or a LunarSpace profile export.')
+        ? 'Chỉ nhận tệp .mrpack hoặc .zip (CurseForge hay bản xuất profile của XyoLauncher).'
+        : 'Only .mrpack, CurseForge .zip or a XyoLauncher profile export.')
       return
     }
     setImportError('')
@@ -309,8 +309,8 @@ export default function VersionsPage({
           onClick={() => onToggleSnapshots(!snapshots)}
           className="h-9 px-3 rounded-lg text-[11px] font-semibold transition-colors"
           style={{
-            background: snapshots ? 'rgba(167,139,250,0.14)' : c.input,
-            border: `1px solid ${snapshots ? 'rgba(167,139,250,0.42)' : c.border}`,
+            background: snapshots ? 'rgba(233,184,114,0.14)' : c.input,
+            border: `1px solid ${snapshots ? 'rgba(233,184,114,0.42)' : c.border}`,
             color: snapshots ? c.accent : c.label,
           }}
         >
@@ -438,7 +438,7 @@ export default function VersionsPage({
             ) : error && versions.length === 0 ? (
               <div className="text-center py-16">
                 <p className="text-sm mb-4" style={{ color: '#f87171' }}>{error}</p>
-                <button onClick={onRefresh} className="px-5 py-2 rounded-lg text-xs font-semibold" style={{ background: 'rgba(167,139,250,0.15)', color: c.accent }}>
+                <button onClick={onRefresh} className="px-5 py-2 rounded-lg text-xs font-semibold" style={{ background: 'rgba(233,184,114,0.15)', color: c.accent }}>
                   {t(lang, 'versions.retry')}
                 </button>
               </div>
@@ -455,8 +455,8 @@ export default function VersionsPage({
                       disabled={unsupported}
                       className={`group relative flex flex-col gap-2.5 p-3 rounded-xl text-left transition-all ${unsupported ? 'cursor-not-allowed' : 'hover:-translate-y-0.5'}`}
                       style={{
-                        background: active ? 'rgba(167,139,250,0.12)' : c.surface,
-                        border: `1px solid ${active ? 'rgba(167,139,250,0.5)' : c.border}`,
+                        background: active ? 'rgba(233,184,114,0.12)' : c.surface,
+                        border: `1px solid ${active ? 'rgba(233,184,114,0.5)' : c.border}`,
                         opacity: unsupported ? 0.45 : 1,
                       }}
                     >
@@ -480,7 +480,7 @@ export default function VersionsPage({
                           {v.type === 'release' ? t(lang, 'home.release') : t(lang, 'home.snapshot')}
                         </span>
                         {isLatest && (
-                          <span className="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase" style={{ background: 'rgba(167,139,250,0.16)', color: c.accent }}>
+                          <span className="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase" style={{ background: 'rgba(233,184,114,0.16)', color: c.accent }}>
                             Latest
                           </span>
                         )}
@@ -634,7 +634,7 @@ export default function VersionsPage({
               step="512"
               value={memoryMb}
               onChange={(e) => setMemoryMb(Number(e.target.value))}
-              className="w-full accent-[#a78bfa]"
+              className="w-full accent-[#e9b872]"
             />
             <div className="flex items-center gap-1">
               {MEMORY_STEPS.slice(0, 5).map((step) => (
@@ -643,7 +643,7 @@ export default function VersionsPage({
                   onClick={() => setMemoryMb(step)}
                   className="flex-1 h-6 rounded text-[9px] font-mono"
                   style={{
-                    background: memoryMb === step ? 'rgba(167,139,250,0.16)' : c.input,
+                    background: memoryMb === step ? 'rgba(233,184,114,0.16)' : c.input,
                     color: memoryMb === step ? c.accent : c.faint,
                   }}
                 >
@@ -683,7 +683,7 @@ export default function VersionsPage({
 
           <div
             className="flex items-center gap-3 px-2.5 py-2 rounded-lg"
-            style={{ background: demo ? 'rgba(167,139,250,0.1)' : c.input, border: `1px solid ${demo ? 'rgba(167,139,250,0.42)' : c.border}` }}
+            style={{ background: demo ? 'rgba(233,184,114,0.1)' : c.input, border: `1px solid ${demo ? 'rgba(233,184,114,0.42)' : c.border}` }}
           >
             <PlayCircle size={14} weight="duotone" style={{ color: demo ? c.accent : c.faint }} />
             <div className="flex-1 min-w-0">
@@ -770,7 +770,7 @@ export default function VersionsPage({
                 className="rounded-xl flex flex-col items-center justify-center gap-2 py-7 px-6 text-center cursor-pointer transition-colors"
                 style={{
                   border: `2px dashed ${dropActive ? c.accent : c.border}`,
-                  background: dropActive ? 'rgba(167,139,250,0.07)' : c.input,
+                  background: dropActive ? 'rgba(233,184,114,0.07)' : c.input,
                 }}
               >
                 <span className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: c.surface, border: `1px solid ${c.border}` }}>
@@ -790,8 +790,8 @@ export default function VersionsPage({
                     </p>
                     <p className="text-[10px]" style={{ color: c.faint }}>
                       {lang === 'vi'
-                        ? 'hoặc bấm để chọn — .mrpack, .zip CurseForge, hoặc bản xuất profile của LunarSpace'
-                        : 'or click to browse — .mrpack, CurseForge .zip, or a LunarSpace profile export'}
+                        ? 'hoặc bấm để chọn — .mrpack, .zip CurseForge, hoặc bản xuất profile của XyoLauncher'
+                        : 'or click to browse — .mrpack, CurseForge .zip, or a XyoLauncher profile export'}
                     </p>
                   </>
                 )}

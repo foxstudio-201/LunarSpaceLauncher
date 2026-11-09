@@ -739,7 +739,7 @@ async function install({ plan: prepared, root, onProgress, onLog }) {
   }
   const failed = [...new Set(errors.map((e) => path.basename(e.file)))]
   const added = targets.length - failed.length - existing
-  onLog?.(`[LunarSpace] Nội dung: thêm ${Math.max(0, added)} tệp${existing ? ` (${existing} đã có)` : ''}${failed.length ? ` · lỗi ${failed.length}` : ''}`)
+  onLog?.(`[XyoLauncher] Nội dung: thêm ${Math.max(0, added)} tệp${existing ? ` (${existing} đã có)` : ''}${failed.length ? ` · lỗi ${failed.length}` : ''}`)
   return { added: Math.max(0, added), existed: existing, failed, total: targets.length }
 }
 

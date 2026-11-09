@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { GearSix, FolderOpen, Trash, Terminal, FloppyDisk, CheckCircle, WarningCircle, PlayCircle, UserCircle, RocketLaunch, Lightning, Package, X, FileArrowUp, ArrowsClockwise, SpinnerGap, Coffee, ShareNetwork, Copy, ArrowSquareOut, ImageSquare, TextB, TextItalic, TextUnderline, TextStrikethrough, ListBullets, ListNumbers, Quotes, Code, LinkSimple, ArrowCounterClockwise, ArrowClockwise, TextHOne, TextHTwo, Eraser, Plus, Eye } from '@phosphor-icons/react'
+import { GearSix, FolderOpen, Trash, Terminal, FloppyDisk, CheckCircle, WarningCircle, PlayCircle, UserCircle, Package, X, FileArrowUp, ArrowsClockwise, SpinnerGap, Coffee, ShareNetwork, Copy, ArrowSquareOut, ImageSquare, TextB, TextItalic, TextUnderline, TextStrikethrough, ListBullets, ListNumbers, Quotes, Code, LinkSimple, ArrowCounterClockwise, ArrowClockwise, TextHOne, TextHTwo, Eraser, Plus, Eye } from '@phosphor-icons/react'
 import { t } from '../../i18n/translations'
 import { palette } from '../../lib/palette'
 import HeadSkin from '../ui/HeadSkin'
@@ -38,10 +38,10 @@ const EXPORT_FORMATS = [
   },
   {
     id: 'share',
-    vi: 'Chia sẻ lên LunarSpace',
-    en: 'Share to LunarSpace',
+    vi: 'Chia sẻ lên XyoLauncher',
+    en: 'Share to XyoLauncher',
     hintVi: 'Mở form chia sẻ: ảnh, tên, phiên bản, mô tả… rồi tải instance lên trang Modpack của lunarspace.site. Người khác mở Modpack → LunarModpack để cài.',
-    hintEn: 'Opens the share form: image, name, version, description… then uploads the instance to LunarSpace. Others install it from Modpack → LunarModpack.',
+    hintEn: 'Opens the share form: image, name, version, description… then uploads the instance to XyoLauncher. Others install it from Modpack → LunarModpack.',
   },
 ]
 
@@ -92,24 +92,6 @@ function Switch({ on, onClick, c, tip }) {
   )
 }
 
-function boostModsHint(lang, loader, game) {
-  const set = BOOST_MODS[loader]
-  if (!set) {
-    return lang === 'vi'
-      ? 'Loader này chưa có bộ mod tăng FPS phù hợp.'
-      : 'No FPS mod set for this loader yet.'
-  }
-  const head = lang === 'vi' ? 'Cài từ Modrinth vào thư mục mods' : 'Installs from Modrinth into mods/'
-  return `${head}: ${set.join(' + ')} — ${lang === 'vi' ? 'đây mới là phần tăng FPS thật' : 'this is what actually raises FPS'}${game ? ` (${loader} ${game})` : ''}.`
-}
-
-const BOOST_MODS = {
-  fabric: ['Sodium', 'Lithium', 'FerriteCore', 'ModernFix', 'EntityCulling', 'ImmediatelyFast', 'Dynamic FPS'],
-  quilt: ['Sodium', 'Lithium', 'FerriteCore', 'ModernFix', 'EntityCulling', 'ImmediatelyFast', 'Dynamic FPS'],
-  forge: ['Embeddium', 'FerriteCore', 'ModernFix', 'EntityCulling', 'ImmediatelyFast', 'Clumps'],
-  neoforge: ['Embeddium', 'FerriteCore', 'ModernFix', 'EntityCulling', 'ImmediatelyFast', 'Clumps'],
-}
-
 const SHARE_TOOLS = [
   { cmd: 'bold', icon: TextB, title: ['Đậm', 'Bold'] },
   { cmd: 'italic', icon: TextItalic, title: ['Nghiêng', 'Italic'] },
@@ -123,7 +105,8 @@ const SHARE_TOOLS = [
   { cmd: 'formatBlock', value: 'PRE', icon: Code, title: ['Code', 'Code'] },
 ]
 
-const JVM_DEFAULT = '-XX:+UseG1GC -XX:MaxGCPauseMillis=50'
+// Mặc định nhẹ: không dùng -XX:MaxGCPauseMillis (kéo G1GC chạy dày hơn và tốn RAM).
+const JVM_DEFAULT = '-XX:+UseG1GC -XX:+DisableExplicitGC'
 
 export default function InstanceSettingsPage({ instance, theme, lang, account, onNavigate, onRemove, onOpenAccounts, onSaveInstance }) {
   const c = palette(theme)
@@ -132,8 +115,6 @@ export default function InstanceSettingsPage({ instance, theme, lang, account, o
   const [name, setName] = useState(instance.name)
   const [memory, setMemory] = useState(instance.memoryMb || 2048)
   const [jvm, setJvm] = useState(instance.jvmArgs || JVM_DEFAULT)
-  const [boostOn, setBoost] = useState(!!instance.boost)
-  const [boostMods, setBoostMods] = useState(!!instance.boostMods)
   const [saved, setSaved] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
   const [exportFormat, setExportFormat] = useState('mrpack')
@@ -325,14 +306,12 @@ export default function InstanceSettingsPage({ instance, theme, lang, account, o
     setName(instance.name)
     setMemory(instance.memoryMb || 2048)
     setJvm(instance.jvmArgs || JVM_DEFAULT)
-    setBoost(!!instance.boost)
-    setBoostMods(!!instance.boostMods)
-  }, [instance.id, instance.name, instance.memoryMb, instance.jvmArgs, instance.boost, instance.boostMods])
+  }, [instance.id, instance.name, instance.memoryMb, instance.jvmArgs])
 
   const save = async () => {
     setError('')
     try {
-      const res = await api.updateInstance({ id: instance.id, patch: { name, memoryMb: memory, jvmArgs: jvm, boost: boostOn, boostMods, javaPath } })
+      const res = await api.updateInstance({ id: instance.id, patch: { name, memoryMb: memory, jvmArgs: jvm, javaPath } })
       if (!res?.ok) return setError(res?.error || 'error')
       onSaveInstance?.(res.instance)
       setSaved(true)
@@ -818,32 +797,6 @@ export default function InstanceSettingsPage({ instance, theme, lang, account, o
             )}
 
             <div className="flex items-center gap-4 px-4 py-3.5" style={rowStyle}>
-              <RocketLaunch size={16} weight="duotone" style={{ color: boostOn ? c.accent : c.label }} />
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-semibold" style={{ color: boostOn ? c.accent : c.text }}>
-                  {t(lang, 'instance.settings.boost')}
-                </p>
-                <p className="mt-0.5 text-[10px] leading-relaxed" style={{ color: c.faint }}>
-                  {t(lang, 'instance.settings.boostHint')}
-                </p>
-              </div>
-              <Switch on={boostOn} onClick={() => setBoost((v) => !v)} c={c} tip={t(lang, 'instance.settings.boost')} />
-            </div>
-
-            <div className="flex items-center gap-4 px-4 py-3.5" style={rowStyle}>
-              <Lightning size={16} weight="duotone" style={{ color: boostMods ? c.accent : c.label }} />
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-semibold" style={{ color: boostMods ? c.accent : c.text }}>
-                  {t(lang, 'instance.settings.boostMods')}
-                </p>
-                <p className="mt-0.5 text-[10px] leading-relaxed" style={{ color: c.faint }}>
-                  {boostModsHint(lang, instance.loader, instance.version)}
-                </p>
-              </div>
-              <Switch on={boostMods} onClick={() => setBoostMods((v) => !v)} c={c} tip={t(lang, 'instance.settings.boostMods')} />
-            </div>
-
-            <div className="flex items-center gap-4 px-4 py-3.5" style={rowStyle}>
               <Terminal size={16} weight="duotone" style={{ color: c.accent }} />
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-semibold" style={{ color: c.text }}>{t(lang, 'instance.settings.jvm')}</p>
@@ -853,9 +806,6 @@ export default function InstanceSettingsPage({ instance, theme, lang, account, o
                   className="mt-1 w-full h-8 px-2.5 rounded-lg text-[11px] font-mono outline-none"
                   style={{ background: c.input, border: `1px solid ${c.border}`, color: c.text }}
                 />
-                {boostOn && (
-                  <p className="mt-1 text-[10px]" style={{ color: c.accent }}>{t(lang, 'instance.settings.jvmBoostNote')}</p>
-                )}
               </div>
             </div>
 
@@ -870,7 +820,7 @@ export default function InstanceSettingsPage({ instance, theme, lang, account, o
                   step="512"
                   value={memory}
                   onChange={(e) => setMemory(Number(e.target.value))}
-                  className="mt-2 w-full accent-[#a78bfa]"
+                  className="mt-2 w-full accent-[#e9b872]"
                 />
               </div>
               <span className="w-20 text-right text-[11px] font-mono" style={{ color: c.text }}>{memory} MB</span>
@@ -965,8 +915,8 @@ export default function InstanceSettingsPage({ instance, theme, lang, account, o
                     onClick={() => { setExportFormat(option.id); setExportDone(null); setExportError('') }}
                     className="w-full text-left rounded-xl px-3.5 py-3 flex items-start gap-3 transition-colors"
                     style={{
-                      background: on ? 'rgba(167,139,250,0.08)' : c.input,
-                      border: `1px solid ${on ? 'rgba(167,139,250,0.4)' : c.border}`,
+                      background: on ? 'rgba(233,184,114,0.08)' : c.input,
+                      border: `1px solid ${on ? 'rgba(233,184,114,0.4)' : c.border}`,
                     }}
                   >
                     <span
@@ -999,7 +949,7 @@ export default function InstanceSettingsPage({ instance, theme, lang, account, o
                   <div className="flex items-center gap-2">
                     <CheckCircle size={13} weight="fill" style={{ color: '#22c55e' }} />
                     <span className="text-[10px] font-semibold" style={{ color: '#22c55e' }}>
-                      {lang === 'vi' ? 'Đã chia sẻ lên LunarSpace' : 'Shared to LunarSpace'}
+                      {lang === 'vi' ? 'Đã chia sẻ lên XyoLauncher' : 'Shared to XyoLauncher'}
                     </span>
                     <span className="ml-auto text-[10px] font-mono" style={{ color: c.label }}>
                       {Math.round((exportDone.bytes || 0) / 104857.6) / 10} MB
@@ -1091,8 +1041,8 @@ export default function InstanceSettingsPage({ instance, theme, lang, account, o
               <ShareNetwork size={15} weight="duotone" style={{ color: c.accent }} />
               <p className="text-[12px] font-bold flex-1" style={{ color: c.text }}>
                 {shareUpdate
-                  ? (lang === 'vi' ? 'Cập nhật modpack lên LunarSpace' : 'Update modpack on LunarSpace')
-                  : (lang === 'vi' ? 'Chia sẻ modpack lên LunarSpace' : 'Share modpack to LunarSpace')}
+                  ? (lang === 'vi' ? 'Cập nhật modpack lên XyoLauncher' : 'Update modpack on XyoLauncher')
+                  : (lang === 'vi' ? 'Chia sẻ modpack lên XyoLauncher' : 'Share modpack to XyoLauncher')}
               </p>
               <button
                 onClick={() => { if (!shareBusy) setShareOpen(false) }}
@@ -1122,7 +1072,7 @@ export default function InstanceSettingsPage({ instance, theme, lang, account, o
               </div>
 
               {shareUpdate && (
-                <div className="flex items-center gap-2 px-2.5 py-2 rounded-lg" style={{ background: 'rgba(167,139,250,0.10)', border: `1px solid ${c.border}` }}>
+                <div className="flex items-center gap-2 px-2.5 py-2 rounded-lg" style={{ background: 'rgba(233,184,114,0.10)', border: `1px solid ${c.border}` }}>
                   <ArrowsClockwise size={13} weight="duotone" style={{ color: c.accent }} />
                   <span className="text-[10px] leading-relaxed" style={{ color: c.label }}>
                     {lang === 'vi'
@@ -1297,7 +1247,7 @@ export default function InstanceSettingsPage({ instance, theme, lang, account, o
                   <div className="flex items-center gap-2">
                     <CheckCircle size={13} weight="fill" style={{ color: '#22c55e' }} />
                     <span className="text-[10px] font-semibold" style={{ color: '#22c55e' }}>
-                      {lang === 'vi' ? 'Đã chia sẻ lên LunarSpace' : 'Shared to LunarSpace'}
+                      {lang === 'vi' ? 'Đã chia sẻ lên XyoLauncher' : 'Shared to XyoLauncher'}
                     </span>
                     <span className="ml-auto text-[10px] font-mono" style={{ color: c.label }}>
                       {Math.round((shareResult.bytes || 0) / 104857.6) / 10} MB

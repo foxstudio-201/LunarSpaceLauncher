@@ -81,7 +81,7 @@ const LEGACY_GAME = '1.20.1'
 const DEFAULT_PROPS = [
   ['server-ip', ''],
   ['server-port', '25565'],
-  ['motd', 'A LunarSpace Server'],
+  ['motd', 'A XyoLauncher Server'],
   ['online-mode', 'true'],
   ['max-players', '20'],
   ['view-distance', '10'],
@@ -528,10 +528,10 @@ async function exportServerPack({
           zip.addBuffer(fileName, text)
         }
         report.server = { name: server.name, kind: server.kind, size: server.size || 0 }
-        onLog?.(`[LunarSpace] Serverpack kèm tệp server: ${server.name}`)
+        onLog?.(`[XyoLauncher] Serverpack kèm tệp server: ${server.name}`)
       } catch (err) {
         report.serverError = err.message
-        onLog?.(`[LunarSpace] Không tải được tệp server: ${err.message}`)
+        onLog?.(`[XyoLauncher] Không tải được tệp server: ${err.message}`)
       }
     }
 

@@ -1,0 +1,12 @@
+{
+  "default": "1123121",
+  "repo": "https://raw.githubusercontent.com/foxstudio-201/LunarSpaceLauncher/main/backgrounds",
+  "items": [
+    { "id": "1123121", "name": "Mặc định", "ext": "png", "local": true },
+    { "id": "984658", "name": "984658", "ext": "jpg" },
+    { "id": "1224149", "name": "1224149", "ext": "png" },
+    { "id": "1265740", "name": "1265740", "ext": "png" },
+    { "id": "1373816", "name": "1373816", "ext": "png" },
+    { "id": "1402908", "name": "1402908", "ext": "png" }
+  ]
+}

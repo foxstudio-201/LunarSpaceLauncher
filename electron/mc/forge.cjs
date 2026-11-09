@@ -182,11 +182,11 @@ async function installLegacy({ jarPath, game, fullId, versionsDir, librariesDir,
           if (signed.length) {
             for (const entry of signed) zip.deleteFile(entry.entryName)
             zip.writeZip(dst)
-            onLog?.(`[LunarSpace] Đã bỏ ${signed.length} tệp chữ ký khỏi jar gốc`)
+            onLog?.(`[XyoLauncher] Đã bỏ ${signed.length} tệp chữ ký khỏi jar gốc`)
           }
         }
       } catch (err) {
-        onLog?.(`[LunarSpace] Không sao chép được jar gốc: ${err.message}`)
+        onLog?.(`[XyoLauncher] Không sao chép được jar gốc: ${err.message}`)
       }
     }
   }
@@ -229,7 +229,7 @@ function runInstaller({ javaPath, installer, root, onLog, timeout = 15 * 60 * 10
         stdio: ['ignore', 'pipe', 'pipe'],
       })
     } catch (err) {
-      onLog(`[LunarSpace] Không chạy được installer Forge: ${err.message}`)
+      onLog(`[XyoLauncher] Không chạy được installer Forge: ${err.message}`)
       return resolve({ ok: false, code: -1 })
     }
     let settled = false
@@ -241,7 +241,7 @@ function runInstaller({ javaPath, installer, root, onLog, timeout = 15 * 60 * 10
       resolve({ ok: code === 0, code, invalidOutputs })
     }
     const timer = setTimeout(() => {
-      onLog('[LunarSpace] Installer Forge chạy quá lâu, dừng lại.')
+      onLog('[XyoLauncher] Installer Forge chạy quá lâu, dừng lại.')
       try {
         child.kill()
       } catch {}
@@ -257,7 +257,7 @@ function runInstaller({ javaPath, installer, root, onLog, timeout = 15 * 60 * 10
     child.stdout.on('data', push)
     child.stderr.on('data', push)
     child.on('error', (err) => {
-      onLog(`[LunarSpace] Lỗi installer Forge: ${err.message}`)
+      onLog(`[XyoLauncher] Lỗi installer Forge: ${err.message}`)
       done(-1)
     })
     child.on('exit', (code) => done(code ?? -1))

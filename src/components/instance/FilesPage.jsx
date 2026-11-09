@@ -53,8 +53,8 @@ export default function FilesPage({ instance, theme, lang }) {
   const textRef = useRef(null)
 
   const parts = rel ? rel.split('/') : []
-  const hover = theme === 'light' ? 'rgba(139,92,246,0.08)' : 'rgba(167,139,250,0.12)'
-  const hoverStrong = theme === 'light' ? 'rgba(139,92,246,0.14)' : 'rgba(167,139,250,0.18)'
+  const hover = theme === 'light' ? 'rgba(201,144,63,0.08)' : 'rgba(233,184,114,0.12)'
+  const hoverStrong = theme === 'light' ? 'rgba(201,144,63,0.14)' : 'rgba(233,184,114,0.18)'
 
   const load = useCallback(async (target) => {
     setLoading(true)
@@ -592,7 +592,7 @@ export default function FilesPage({ instance, theme, lang }) {
           className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold"
           style={{
             background: selectMode ? hover : c.surface,
-            border: `1px solid ${selectMode ? 'rgba(167,139,250,0.42)' : c.border}`,
+            border: `1px solid ${selectMode ? 'rgba(233,184,114,0.42)' : c.border}`,
             color: selectMode ? c.accent : c.label,
           }}
         >
@@ -651,7 +651,7 @@ export default function FilesPage({ instance, theme, lang }) {
       )}
 
       {selectMode && (
-        <div className="shrink-0 mx-3 mt-2 flex items-center gap-3 px-3 py-2 rounded-lg" style={{ background: hover, border: '1px solid rgba(167,139,250,0.28)' }}>
+        <div className="shrink-0 mx-3 mt-2 flex items-center gap-3 px-3 py-2 rounded-lg" style={{ background: hover, border: '1px solid rgba(233,184,114,0.28)' }}>
           <span className="text-[11px] font-semibold" style={{ color: c.accent }}>
             {selected.length} {t(lang, 'files.selected')}
           </span>

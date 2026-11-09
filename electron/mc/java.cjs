@@ -242,7 +242,7 @@ async function removeRuntime({ paths, component }) {
     await fsp.rm(dir, { recursive: true, force: true })
     return { ok: true }
   } catch {
-    return { ok: false, error: 'Runtime này không do LunarSpace quản lý.' }
+    return { ok: false, error: 'Runtime này không do XyoLauncher quản lý.' }
   }
 }
 
@@ -398,7 +398,7 @@ async function removeZulu({ paths, dir } = {}) {
   const target = path.resolve(dir)
   if (!target.startsWith(path.resolve(paths.runtime) + path.sep)) return { ok: false, error: 'Thư mục ngoài runtime.' }
   const marker = await readMarker(target)
-  if (marker?.kind !== 'zulu') return { ok: false, error: 'Java này không do LunarSpace tải.' }
+  if (marker?.kind !== 'zulu') return { ok: false, error: 'Java này không do XyoLauncher tải.' }
   try {
     await fsp.rm(target, { recursive: true, force: true })
     return { ok: true }

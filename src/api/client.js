@@ -6,7 +6,7 @@ export const LOADERS = [
   { id: 'quilt', name: 'Quilt', image: 'loader-icon/quilt.png', desc: 'Kế thừa Fabric, hiện đại hơn' },
   { id: 'forge', name: 'Forge', image: 'loader-icon/forge.png', desc: 'Loader lâu đời, nhiều mod nhất' },
   { id: 'neoforge', name: 'NeoForge', image: 'loader-icon/neoforge.png', desc: 'Bản tách từ Forge, hiện đại hơn' },
-  { id: 'lunar', name: 'LunarLoader', image: 'loader-icon/lunar.png', desc: 'Loader riêng của LunarSpace, tối ưu cho mod hiện đại' },
+  { id: 'lunar', name: 'LunarLoader', image: 'loader-icon/lunar.png', desc: 'Loader riêng của XyoLauncher, tối ưu cho mod hiện đại' },
 ]
 
 const LUNAR_API = String(import.meta.env?.VITE_LUNAR_API || 'https://lunarspace.site').replace(/\/+$/, '')
@@ -42,7 +42,7 @@ export function loaderIcon(loader) {
   return `./${found ? found.image : LOADERS[0].image}`
 }
 
-const ENV_COLORS = { client: '#a78bfa', server: '#22d3ee', both: '#4ade80' }
+const ENV_COLORS = { client: '#e9b872', server: '#22d3ee', both: '#4ade80' }
 
 const ENV_GLYPHS = {
   client: '<rect x="2.5" y="4" width="19" height="12.5" rx="2"/><line x1="8.5" y1="20" x2="15.5" y2="20"/><line x1="12" y1="16.5" x2="12" y2="20"/>',
@@ -59,7 +59,7 @@ export function envIcon(env) {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
 }
 
-const NEEDS_APP = 'Thao tác này chỉ chạy được trong ứng dụng LunarSpace Launcher.'
+const NEEDS_APP = 'Thao tác này chỉ chạy được trong ứng dụng XyoLauncher.'
 
 const cache = new Map()
 
@@ -310,6 +310,26 @@ export async function resolveSkin({ uuid, name, provider } = {}) {
 export async function removeAccount({ id } = {}) {
   if (bridge?.removeAccount) return bridge.removeAccount({ id })
   throw new Error(NEEDS_APP)
+}
+
+export async function listBackgrounds() {
+  if (bridge?.listBackgrounds) return bridge.listBackgrounds()
+  return { ok: false, items: [], default: '', current: '' }
+}
+
+export async function downloadBackground(id) {
+  if (bridge?.downloadBackground) return bridge.downloadBackground(id)
+  return { ok: false, error: 'Chỉ chạy trong ứng dụng.' }
+}
+
+export async function setBackground(id) {
+  if (bridge?.setBackground) return bridge.setBackground(id)
+  return { ok: false, error: 'Chỉ chạy trong ứng dụng.' }
+}
+
+export async function captureWindow() {
+  if (bridge?.captureWindow) return bridge.captureWindow()
+  return { ok: false }
 }
 
 export async function setActiveAccount({ id } = {}) {
@@ -1072,7 +1092,7 @@ export async function getCrash({ id } = {}) {
 export async function uploadLog({ text, label } = {}) {
   if (bridge?.uploadLog) return bridge.uploadLog({ text, label })
   try {
-    const body = new URLSearchParams({ content: String(text || ''), source: label || 'LunarSpace Launcher' })
+    const body = new URLSearchParams({ content: String(text || ''), source: label || 'XyoLauncher' })
     const res = await fetch('https://api.mclo.gs/1/log', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body })
     const json = await res.json()
     if (!json?.success) return { ok: false, error: json?.error || `HTTP ${res.status}` }

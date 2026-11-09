@@ -117,7 +117,7 @@ a.btn:active{transform:translate(2px,2px);box-shadow:1px 1px 0 0 var(--ink)}
 
       <div class="bar" id="bar"><i></i></div>
       <div class="actions" id="actions">
-        <a class="btn" id="open" href="lunarspace://reopen">Mở lại LunarSpace Launcher</a>
+        <a class="btn" id="open" href="lunarspace://reopen">Mở lại XyoLauncher</a>
       </div>
       <p class="note" id="note">Có thể đóng cửa sổ này sau khi xác thực xong.</p>
     </section>

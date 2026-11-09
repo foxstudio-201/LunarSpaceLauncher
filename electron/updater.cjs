@@ -292,7 +292,7 @@ function shapeRelease(data, version) {
 
 async function githubJson(url) {
   const res = await fetch(url, {
-    headers: { 'User-Agent': 'LunarSpace-Launcher', Accept: 'application/vnd.github+json' },
+    headers: { 'User-Agent': 'XyoLauncher-Launcher', Accept: 'application/vnd.github+json' },
     signal: AbortSignal.timeout(15000),
   })
   if (!res.ok) throw new Error(`GitHub trả về ${res.status}`)

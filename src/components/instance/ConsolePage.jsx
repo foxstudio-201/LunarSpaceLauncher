@@ -9,17 +9,16 @@ import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { SearchAddon } from '@xterm/addon-search'
 import { t } from '../../i18n/translations'
 import { useApp } from '../../i18n/AppContext'
-import { palette, currentPaletteSkin } from '../../lib/palette'
+import { palette } from '../../lib/palette'
 import { statusColor, statusKey } from '../../lib/status'
 import { BANNER_MARK } from '../../lib/asciiLogo'
 
-const FONT_STACK = () =>
-  currentPaletteSkin() === 'pixel' ? "'VT323', monospace" : 'Menlo, Monaco, "Courier New", monospace'
+const FONT_STACK = () => "'IBM Plex Mono', ui-monospace, Menlo, monospace"
 
 const TERM_THEME = {
   background: '#0a0a0a',
   foreground: '#d4d4d8',
-  cursor: '#a78bfa',
+  cursor: '#e9b872',
   cursorAccent: '#0a0a0a',
   selectionBackground: 'rgba(255,255,255,0.3)',
   selectionInactiveBackground: 'rgba(255,255,255,0.2)',
@@ -28,7 +27,7 @@ const TERM_THEME = {
   green: '#22c55e',
   yellow: '#eab308',
   blue: '#3b82f6',
-  magenta: '#a78bfa',
+  magenta: '#e9b872',
   cyan: '#06b6d4',
   white: '#e5e5e5',
   brightBlack: '#6b7280',
@@ -36,7 +35,7 @@ const TERM_THEME = {
   brightGreen: '#4ade80',
   brightYellow: '#facc15',
   brightBlue: '#60a5fa',
-  brightMagenta: '#c4b5fd',
+  brightMagenta: '#f3c98a',
   brightCyan: '#67e8f9',
   brightWhite: '#ffffff',
 }
@@ -56,7 +55,7 @@ function levelColor(level) {
 function formatLogLine(line) {
   const text = String(line ?? '')
   if (!text || text.startsWith(BANNER_MARK)) return text
-  if (text.startsWith('[LunarSpace]')) return `\x1b[35m${text}${RESET}`
+  if (text.startsWith('[XyoLauncher]')) return `\x1b[35m${text}${RESET}`
   const match = LOG_LINE_RE.exec(text)
   if (!match) return text
   const [, stamp, threadLevel, logger, message] = match
@@ -381,7 +380,7 @@ export default function ConsolePage({ instance, theme, lang, logs, launchError, 
               onClick={() => { setSearchOpen((v) => !v); if (searchOpen) searchRef.current?.clearDecorations?.() }}
               data-tip={lang === 'vi' ? 'Tìm trong console' : 'Search console'}
               className="p-1.5 rounded transition-colors hover:opacity-80"
-              style={{ background: searchOpen ? 'rgba(167,139,250,0.15)' : 'transparent', color: searchOpen ? c.accent : c.label }}
+              style={{ background: searchOpen ? 'rgba(233,184,114,0.15)' : 'transparent', color: searchOpen ? c.accent : c.label }}
             >
               <MagnifyingGlass size={14} />
             </button>

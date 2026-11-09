@@ -6,6 +6,7 @@ import {
 import { useApp } from '../../i18n/AppContext'
 import { t } from '../../i18n/translations'
 import { palette } from '../../lib/palette'
+import ThemeSwitch from '../ui/ThemeSwitch'
 import { formatBytes, formatDate, timeAgo, statusColor, statusKey, formatPlaytime } from '../../lib/status'
 import PageHeader from '../ui/PageHeader'
 import { Section, Card, Fact, Meter, Skeleton } from '../ui/Panel'
@@ -18,7 +19,6 @@ export default function HomePage({
   theme, lang, system, versions, latest, loading, instances,
   onSelectInstance, onOpenVersions, sharedDir, progress, launchError, onLaunch, onStop,
 }) {
-  const { setTheme } = useApp()
   const c = palette(theme)
 
   const [loaderInfo, setLoaderInfo] = useState(null)
@@ -114,23 +114,9 @@ export default function HomePage({
           {t(lang, 'sidebar.versions')}
           <ArrowRight size={12} />
         </button>
-        <button
-          onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
-          data-tip={t(lang, 'settings.theme')}
-          className="w-9 h-9 rounded-lg flex items-center justify-center transition-all hover:opacity-80 active:scale-95"
-          style={{ background: c.input, border: `1px solid ${c.border}`, color: c.label }}
-        >
-          {theme === 'light' ? (
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-            </svg>
-          ) : (
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <circle cx="12" cy="12" r="4" />
-              <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
-            </svg>
-          )}
-        </button>
+        <div data-tip={t(lang, 'settings.theme')}>
+          <ThemeSwitch size="sm" />
+        </div>
       </PageHeader>
 
       <div className="shrink-0 px-6 pt-3">
@@ -160,7 +146,7 @@ export default function HomePage({
           {tab === 'overview' && (
           <>
           <Section c={c} title={vn(lang, 'Sẵn sàng chơi', 'Ready to play')} hint={`${running ? `${running} ${vn(lang, 'đang chạy', 'running')}` : vn(lang, 'không có tiến trình', 'nothing running')}`}>
-            <div className="group relative rounded-xl overflow-hidden transition-transform duration-300 hover:scale-[1.005]" style={{ border: `1px solid ${c.border}` }}>
+            <div className="xyo-rise xyo-rise-photo group relative rounded-xl overflow-hidden transition-transform duration-300 hover:scale-[1.005]" style={{ border: `1px solid ${c.border}`, '--d': '.45s' }}>
               <img
                 src="./Minecraft_backgound.png"
                 alt=""
@@ -256,7 +242,7 @@ export default function HomePage({
                     <button
                       onClick={onOpenVersions}
                       className="shrink-0 h-10 px-4 rounded-lg text-[12px] font-bold"
-                      style={{ background: 'rgba(255,255,255,0.94)', color: '#111' }}
+                      style={{ background: c.accent, color: c.onAccent }}
                     >
                       {t(lang, 'versions.create')}
                     </button>
@@ -266,6 +252,7 @@ export default function HomePage({
             </div>
           </Section>
 
+          <div className="xyo-rise" style={{ '--d': '.6s' }}>
           <Section
             c={c}
             title={vn(lang, 'Bản phát hành', 'Releases')}
@@ -286,7 +273,7 @@ export default function HomePage({
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span className="text-xl font-bold font-mono tabular-nums leading-none" style={{ color: c.text }}>{latestRelease || '—'}</span>
-                      <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase" style={{ background: 'rgba(167,139,250,0.16)', color: c.accent }}>
+                      <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase" style={{ background: 'rgba(233,184,114,0.16)', color: c.accent }}>
                         {vn(lang, 'mới nhất', 'latest')}
                       </span>
                     </div>
@@ -375,6 +362,7 @@ export default function HomePage({
               </Card>
             </div>
           </Section>
+          </div>
 
           <Section c={c} title={vn(lang, 'Trình tải mod', 'Mod loaders')} hint={vn(lang, 'bản mới nhất cho', 'latest build for') + ` ${latestRelease || '—'}`}>
             <div className="grid grid-cols-3 gap-3">

@@ -9,7 +9,6 @@ const LABELS = {
   assets: { vi: 'Đang tải tài nguyên…', en: 'Downloading assets…' },
   java: { vi: 'Đang tải Java…', en: 'Downloading Java…' },
   forge: { vi: 'Đang cài Forge…', en: 'Installing Forge…' },
-  boost: { vi: 'Đang cài mod tăng FPS…', en: 'Installing FPS mods…' },
   install: { vi: 'Đang cài phiên bản…', en: 'Installing version…' },
   'install-done': { vi: 'Đã cài xong phiên bản', en: 'Version installed' },
   modpack: { vi: 'Đang cài modpack…', en: 'Installing modpack…' },
@@ -23,8 +22,8 @@ const LABELS = {
 }
 
 const FILL = {
-  dark: { from: '#7c5cf6', to: '#a78bfa', glow: 'rgba(167,139,250,0.55)' },
-  light: { from: '#6d28d9', to: '#8b5cf6', glow: 'rgba(139,92,246,0.5)' },
+  dark: { from: '#7c5cf6', to: '#e9b872', glow: 'rgba(233,184,114,0.55)' },
+  light: { from: '#6d28d9', to: '#c9903f', glow: 'rgba(201,144,63,0.5)' },
   done: { from: '#15803d', to: '#22c55e', glow: 'rgba(34,197,94,0.5)' },
   failed: { from: '#b91c1c', to: '#ef4444', glow: 'rgba(239,68,68,0.5)' },
 }

@@ -52,7 +52,7 @@ export default function ModsPanel({ instance, theme, lang, progress }) {
           onClick={repair}
           disabled={repairing}
           className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold transition-opacity hover:opacity-85 disabled:opacity-60"
-          style={{ background: '#a78bfa', color: '#12081f' }}
+          style={{ background: '#e9b872', color: '#1b1409' }}
         >
           <ShieldCheck size={13} weight="bold" className={repairing ? 'animate-spin' : ''} />
           {vn(lang, 'Tải bù mod thiếu', 'Repair mods')}

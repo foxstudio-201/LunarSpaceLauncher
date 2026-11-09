@@ -4,11 +4,11 @@ const fs = require('fs')
 const os = require('os')
 const { execFile, spawn } = require('child_process')
 
-const APP_EXE = 'LunarSpace Launcher.exe'
-const APP_NAME = 'LunarSpace Launcher'
-const PUBLISHER = 'LunarSpace'
+const APP_EXE = 'XyoLauncher.exe'
+const APP_NAME = 'XyoLauncher'
+const PUBLISHER = 'XyoLauncher'
 const UNINSTALL_KEY = 'Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\LunarSpaceLauncher'
-const SHELL_KEY = 'Software\\LunarSpace\\LunarSpace Launcher'
+const SHELL_KEY = 'Software\\XyoLauncher\\XyoLauncher'
 const WIN = { width: 860, height: 640 }
 
 const hooks = !app.isPackaged

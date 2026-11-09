@@ -2,7 +2,7 @@ const { createClient } = require('./discord.cjs')
 
 const CLIENT_ID = '1556839052102209596'
 const LARGE_IMAGE = 'lunarspace'
-const LARGE_TEXT = 'LunarSpace Launcher'
+const LARGE_TEXT = 'XyoLauncher'
 const DEFAULT_INVITE = 'https://discord.gg/8UQZTkRSGp'
 
 const LOADERS = {

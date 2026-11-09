@@ -99,7 +99,7 @@ export default function Select({ theme, value, options = [], onChange, placehold
           background: c.surface,
           border: `1px solid ${c.border}`,
           borderRadius: 10,
-          boxShadow: '0 16px 40px rgba(0,0,0,0.45), 0 0 0 1px rgba(167,139,250,0.06)',
+          boxShadow: '0 16px 40px rgba(0,0,0,0.45), 0 0 0 1px rgba(233,184,114,0.06)',
         }}
       >
         {options.map((option, i) => {
@@ -114,7 +114,7 @@ export default function Select({ theme, value, options = [], onChange, placehold
               onClick={() => { onChange(option.value); close() }}
               className={`group relative w-full flex items-center gap-2.5 text-left ${scale.row}`}
               style={{
-                background: isSelected ? 'rgba(167,139,250,0.13)' : isActive ? c.hover : 'transparent',
+                background: isSelected ? 'rgba(233,184,114,0.13)' : isActive ? c.hover : 'transparent',
                 color: isSelected ? c.accent : c.text,
               }}
             >
@@ -140,7 +140,7 @@ export default function Select({ theme, value, options = [], onChange, placehold
                   key={tag}
                   className="px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 uppercase"
                   style={{
-                    background: tag === 'latest' ? 'rgba(167,139,250,0.16)' : c.input,
+                    background: tag === 'latest' ? 'rgba(233,184,114,0.16)' : c.input,
                     color: tag === 'latest' ? c.accent : c.label,
                   }}
                 >
@@ -165,7 +165,7 @@ export default function Select({ theme, value, options = [], onChange, placehold
         aria-haspopup="listbox"
         aria-expanded={open}
         className={`w-full rounded-lg flex items-center gap-2.5 text-left transition-colors disabled:opacity-50 ${scale.trigger}`}
-        style={{ background: c.input, border: `1px solid ${open ? 'rgba(167,139,250,0.42)' : c.border}`, color: c.text }}
+        style={{ background: c.input, border: `1px solid ${open ? 'rgba(233,184,114,0.42)' : c.border}`, color: c.text }}
       >
         {selectedOption?.tone && (
           <span

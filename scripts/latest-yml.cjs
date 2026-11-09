@@ -4,7 +4,7 @@ const crypto = require('crypto')
 
 const dir = process.argv[2] ? path.resolve(process.argv[2]) : path.join(__dirname, '..', 'dist-electron')
 const version = require('../package.json').version
-const name = `LunarSpace-Launcher-Setup-${version}.exe`
+const name = `XyoLauncher-Setup-${version}.exe`
 const file = path.join(dir, name)
 
 if (!fs.existsSync(file)) {

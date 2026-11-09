@@ -1,5 +1,4 @@
 import { createContext, useContext, useState, useEffect } from 'react'
-import { themeWipe } from '../lib/themeWipe.js'
 import { surfaceColor } from '../lib/palette.js'
 
 const AppContext = createContext()
@@ -9,7 +8,6 @@ const isElectron = typeof window !== 'undefined' && window.electronAPI
 export function AppProvider({ children }) {
   const [lang, setLang] = useState(() => (window.__boot?.lang === 'en' ? 'en' : 'vi'))
   const [theme, setTheme] = useState(() => (window.__boot?.theme === 'light' ? 'light' : 'dark'))
-  const [font, setFont] = useState(() => (window.__boot?.font === 'pixel' ? 'pixel' : 'default'))
   useEffect(() => {
     const load = async () => {
       if (!isElectron) return
@@ -17,7 +15,6 @@ export function AppProvider({ children }) {
       if (!s) return
       if (s.language) setLang(s.language)
       if (s.theme) setTheme(s.theme)
-      if (s.font) setFont(s.font === 'pixel' ? 'pixel' : 'default')
     }
     load()
   }, [])
@@ -25,16 +22,8 @@ export function AppProvider({ children }) {
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
     document.body.style.background = surfaceColor(theme)
-    if (theme === 'light') {
-      document.body.style.color = '#111'
-    } else {
-      document.body.style.color = '#fff'
-    }
+    document.body.style.color = theme === 'light' ? '#171a20' : '#e8ebf1'
   }, [theme])
-
-  useEffect(() => {
-    document.documentElement.setAttribute('data-font', font)
-  }, [font])
 
   const saveLang = async (next) => {
     setLang(next)
@@ -43,29 +32,19 @@ export function AppProvider({ children }) {
     await window.electronAPI.saveSettings({ ...s, language: next })
   }
 
+  // Rust đổi theme ngay lập tức; hiệu ứng nằm ở công tắc ngày/đêm.
   const saveTheme = (next) => {
     if (next === theme) return
-    themeWipe(surfaceColor(next), () => {
-      setTheme(next)
-      if (!isElectron) return
-      window.electronAPI
-        .getSettings()
-        .then((s) => window.electronAPI.saveSettings({ ...s, theme: next }))
-        .catch(() => {})
-    })
-  }
-
-  const saveFont = async (next) => {
-    const value = next === 'pixel' ? 'pixel' : 'default'
-    if (value === font) return
-    setFont(value)
+    setTheme(next)
     if (!isElectron) return
-    const s = await window.electronAPI.getSettings()
-    await window.electronAPI.saveSettings({ ...s, font: value })
+    window.electronAPI
+      .getSettings()
+      .then((s) => window.electronAPI.saveSettings({ ...s, theme: next }))
+      .catch(() => {})
   }
 
   return (
-    <AppContext.Provider value={{ lang, theme, font, setLang: saveLang, setTheme: saveTheme, setFont: saveFont }}>
+    <AppContext.Provider value={{ lang, theme, setLang: saveLang, setTheme: saveTheme }}>
       {children}
     </AppContext.Provider>
   )

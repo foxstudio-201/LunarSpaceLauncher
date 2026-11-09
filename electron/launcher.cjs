@@ -12,8 +12,7 @@ const javaModule = require('./mc/java.cjs')
 const { analyzeExit, uploadToMclogs } = require('./mc/crash.cjs')
 const forgeMod = require('./mc/forge.cjs')
 const neoMod = require('./mc/neoforge.cjs')
-const lunarMod = require('./mc/lunar.cjs')
-const boost = require('./mc/boost.cjs')
+const lunarMod = require('./mc/lunar.cjs')
 const presence = require('./presence.cjs')
 const modpack = require('./mc/modpack.cjs')
 const content = require('./mc/content.cjs')
@@ -343,7 +342,7 @@ async function installForge({ entry, paths, settings, emit }) {
   }
 
   if (mode === 'legacy') {
-    log(`[LunarSpace] Đang cài ${name} ${forgeId} (installer cũ, Java ${resolved.java.major})…`)
+    log(`[XyoLauncher] Đang cài ${name} ${forgeId} (installer cũ, Java ${resolved.java.major})…`)
     const created = await forgeMod.installLegacy({
       jarPath: installer,
       game,
@@ -354,7 +353,7 @@ async function installForge({ entry, paths, settings, emit }) {
     })
     emit?.({ type: 'progress', id: entry.id, phase: 'clear' })
     clearLog(entry.id, emit)
-    log(`[LunarSpace] Forge đã cài: ${created}`)
+    log(`[XyoLauncher] Forge đã cài: ${created}`)
     return created
   }
   if (mode === 'none') throw new Error(`Bản ${name} ${forgeId} không có installer để cài tự động.`)
@@ -363,14 +362,14 @@ async function installForge({ entry, paths, settings, emit }) {
   const attempts = await javaCandidates({ primary: resolved.java, paths })
   let lastRun = null
   for (const java of attempts) {
-    log(`[LunarSpace] Đang cài ${name} ${forgeId} (Java ${java.major})…`)
+    log(`[XyoLauncher] Đang cài ${name} ${forgeId} (Java ${java.major})…`)
     lastRun = await mod.runInstaller({ javaPath: java.path, installer, root: paths.shared, onLog: log })
     if (lastRun.ok) break
     if (!lastRun.invalidOutputs) {
       emit?.({ type: 'progress', id: entry.id, phase: 'clear' })
       throw new Error(`Installer ${name} kết thúc với mã ${lastRun.code}`)
     }
-    log(`[LunarSpace] Java ${java.major} tạo tệp không khớp hash của ${name}, thử Java khác…`)
+    log(`[XyoLauncher] Java ${java.major} tạo tệp không khớp hash của ${name}, thử Java khác…`)
   }
   emit?.({ type: 'progress', id: entry.id, phase: 'clear' })
   if (!lastRun?.ok) throw new Error(`Installer ${name} không tạo được tệp khớp với bản phát hành.`)
@@ -380,7 +379,7 @@ async function installForge({ entry, paths, settings, emit }) {
     (await forgeMod.detectInstalledId({ versionsDir: paths.versions, before, game }))
   if (!created) throw new Error(`Không tìm thấy phiên bản ${name} sau khi cài`)
   clearLog(entry.id, emit)
-  log(`[LunarSpace] ${name} đã cài: ${created}`)
+  log(`[XyoLauncher] ${name} đã cài: ${created}`)
   return created
 }
 
@@ -418,7 +417,7 @@ async function createInstance({ name, version, loader = 'vanilla', loaderVersion
   }
 
   const existing = readIndex().find((i) => path.resolve(i.dir) === path.resolve(instanceDir))
-  if (existing) return { ok: false, error: 'Thư mục này đã có một instance của LunarSpace.' }
+  if (existing) return { ok: false, error: 'Thư mục này đã có một instance của XyoLauncher.' }
 
   const entry = {
     id: `${loader}-${version}-${Date.now().toString(36)}`,
@@ -1144,9 +1143,7 @@ async function updateInstance({ id, patch = {}, settings, emit } = {}) {
   if (patch.username !== undefined) allowed.username = String(patch.username).trim() || 'Player'
   if (patch.memoryMb !== undefined) allowed.memoryMb = Math.max(512, Number(patch.memoryMb) || 2048)
   if (patch.jvmArgs !== undefined) allowed.jvmArgs = String(patch.jvmArgs)
-  if (patch.demo !== undefined) allowed.demo = !!patch.demo
-  if (patch.boost !== undefined) allowed.boost = !!patch.boost
-  if (patch.boostMods !== undefined) allowed.boostMods = !!patch.boostMods
+  if (patch.demo !== undefined) allowed.demo = !!patch.demo
   if (patch.javaPath !== undefined) allowed.javaPath = String(patch.javaPath || '').trim()
   const next = updateEntry(id, allowed)
   try {
@@ -1157,25 +1154,6 @@ async function updateInstance({ id, patch = {}, settings, emit } = {}) {
   const log = (line) => {
     pushLog(id, line)
     emit?.({ type: 'log', id, line })
-  }
-  if (patch.boostMods) {
-    emit?.({ type: 'progress', id, phase: 'download', label: 'boost', done: 0, total: 0 })
-    const res = await boost.installPerfMods({
-      dir: entry.dir,
-      game: next.version,
-      loader: next.loader,
-      onProgress: (p) => emit?.({ type: 'progress', id, ...p }),
-      onLog: log,
-    })
-    emit?.({ type: 'progress', id, phase: 'clear' })
-    if (!res.ok && res.reason === 'unsupported') {
-      log('[LunarSpace] Tăng FPS: loader này chưa có mod tăng FPS phù hợp.')
-    } else if (res.failed?.length) {
-      log(`[LunarSpace] Tăng FPS: ${res.failed.length} mod không cài được (${res.failed.map((f) => f.name).join(', ')}).`)
-    } else if (res.installed?.length) {
-      log(`[LunarSpace] Tăng FPS: đã cài ${res.installed.map((m) => m.name).join(', ')}.`)
-    }
-    next.boostResult = { installed: res.installed || [], skipped: res.skipped || [], failed: res.failed || [], reason: res.reason || null }
   }
   return { ok: true, instance: next }
 }
@@ -1199,7 +1177,7 @@ async function changeLoaderVersion({ id, loaderVersion, settings } = {}, emit) {
     }
   }
 
-  const patch = { loaderVersion: wanted, versionId, status: 'installing', error: null, boostResult: null }
+  const patch = { loaderVersion: wanted, versionId, status: 'installing', error: null }
   if (entry.loader === 'forge' || entry.loader === 'neoforge') patch.forgeVersion = wanted
   const next = updateEntry(entry.id, patch)
   try {
@@ -1223,7 +1201,7 @@ async function reinstallLoader({ id, settings } = {}, emit) {
   if (entry.loader === 'vanilla') return { ok: false, error: 'Phiên bản này không dùng loader.' }
   if (installingIds.has(entry.id)) return { ok: false, error: 'Instance đang cài, chờ cho xong đã.' }
 
-  const patch = { status: 'installing', error: null, boostResult: null }
+  const patch = { status: 'installing', error: null }
   if (entry.loader === 'forge' || entry.loader === 'neoforge') {
     patch.versionId = null
     patch.forgeVersion = entry.loaderVersion || entry.forgeVersion || null
@@ -1276,13 +1254,13 @@ async function resolveJavaFor({ instanceId, chain, paths, settings, emit, prefer
   if (preferred) {
     const chosen = await findJava({ explicit: preferred, required })
     if (chosen.ok) return { ok: true, java: chosen.java, source: 'instance' }
-    emit?.({ type: 'log', id: instanceId, line: `[LunarSpace] Java đã chọn cho phiên bản không dùng được (${chosen.error}). Chuyển sang Java tự động.` })
+    emit?.({ type: 'log', id: instanceId, line: `[XyoLauncher] Java đã chọn cho phiên bản không dùng được (${chosen.error}). Chuyển sang Java tự động.` })
   }
 
   if (settings?.javaPath) {
     const manual = await findJava({ explicit: settings.javaPath, required })
     if (manual.ok) return { ok: true, java: manual.java, source: 'manual' }
-    emit?.({ type: 'log', id: instanceId, line: `[LunarSpace] Java chỉ định không chạy được (${manual.error}). Chuyển sang Java tải kèm.` })
+    emit?.({ type: 'log', id: instanceId, line: `[XyoLauncher] Java chỉ định không chạy được (${manual.error}). Chuyển sang Java tải kèm.` })
   }
 
   if (!component) {
@@ -1310,7 +1288,7 @@ async function resolveJavaFor({ instanceId, chain, paths, settings, emit, prefer
       return { ok: true, java: { path: runtime.javaPath, major: runtime.major, raw: `Java ${runtime.name}` }, source: 'managed' }
     } catch (err) {
       emit?.({ type: 'progress', id: instanceId, phase: 'clear' })
-      emit?.({ type: 'log', id: instanceId, line: `[LunarSpace] Không tải được Java ${required}: ${err.message}` })
+      emit?.({ type: 'log', id: instanceId, line: `[XyoLauncher] Không tải được Java ${required}: ${err.message}` })
     }
   }
 
@@ -1396,7 +1374,7 @@ async function launchInstance(opts, emit) {
   const entry = readIndex().find((i) => i.id === (opts || {}).id) || null
   if (entry) presence.starting(entry)
   const res = await runLaunch(opts, emit)
-  if (res?.ok && !res.cancelled) presence.playing(entry || { name: 'LunarSpace', version: '', loader: 'vanilla' })
+  if (res?.ok && !res.cancelled) presence.playing(entry || { name: 'XyoLauncher', version: '', loader: 'vanilla' })
   else presence.stopped()
   return res
 }
@@ -1424,7 +1402,7 @@ async function runLaunchSteps({ id, username, demo: demoOverride, quickPlay, set
 
   logs.set(id, [])
   emit?.({ type: 'banner', id })
-  const preparing = '[LunarSpace] Đang chuẩn bị khởi chạy…'
+  const preparing = '[XyoLauncher] Đang chuẩn bị khởi chạy…'
   pushLog(id, preparing)
   emit?.({ type: 'log', id, line: preparing })
   updateEntry(id, { status: 'starting' })
@@ -1505,7 +1483,9 @@ async function runLaunchSteps({ id, username, demo: demoOverride, quickPlay, set
     if (queuedLogs.length >= 200) flushLogs()
     else if (!logTimer) logTimer = setTimeout(flushLogs, 80)
   }
-  const userJvm = entry.jvmArgs ? entry.jvmArgs.split(/\s+/).filter(Boolean) : []
+  // Bỏ các cờ JVM cũ gây tốn RAM (instance lưu từ bản trước vẫn còn MaxGCPauseMillis/AlwaysPreTouch).
+  const LEGACY_RAM_FLAGS = /^-XX:(?:MaxGCPauseMillis|AlwaysPreTouch)(?:=|$)/
+  const userJvm = entry.jvmArgs ? entry.jvmArgs.split(/\s+/).filter((a) => a && !LEGACY_RAM_FLAGS.test(a)) : []
   const skin = account?.type === 'offline' && account.uuid && skins.customSync(paths.shared, account.uuid)
     ? { dir: skins.dirFor(paths.shared), uuid: account.uuid, name: account.name, model: skins.modelSync(paths.shared, account.uuid) }
     : null
@@ -1527,7 +1507,7 @@ async function runLaunchSteps({ id, username, demo: demoOverride, quickPlay, set
     instanceDir: entry.dir,
     username: player,
     memoryMb: entry.memoryMb || 2048,
-    extraJvm: [...(auth.javaAgent ? [auth.javaAgent] : []), ...(entry.boost ? [...boost.jvmFlags(entry.memoryMb || 2048), ...userJvm] : userJvm)],
+    extraJvm: [...(auth.javaAgent ? [auth.javaAgent] : []), ...userJvm],
     auth,
     demo,
     quickPlay,
@@ -1536,7 +1516,7 @@ async function runLaunchSteps({ id, username, demo: demoOverride, quickPlay, set
 
   if (pathFix) {
     emitLog(
-      `[LunarSpace] Đường dẫn có ký tự đặc biệt (một số bản Java không đọc được) — dùng đường dẫn rút gọn: ${pathFix.to}`,
+      `[XyoLauncher] Đường dẫn có ký tự đặc biệt (một số bản Java không đọc được) — dùng đường dẫn rút gọn: ${pathFix.to}`,
     )
   }
 
@@ -1571,7 +1551,7 @@ async function runLaunchSteps({ id, username, demo: demoOverride, quickPlay, set
   }
   try {
     const gpu = await ensureGameGpu(found.java.path, gpuCacheFile()).catch(() => false)
-    if (gpu) emitLog('[LunarSpace] Đã ưu tiên GPU rời cho Java (Windows Graphics).')
+    if (gpu) emitLog('[XyoLauncher] Đã ưu tiên GPU rời cho Java (Windows Graphics).')
     child = spawnGame({
       javaPath: found.java.path,
       args,
@@ -1603,7 +1583,7 @@ async function runLaunchSteps({ id, username, demo: demoOverride, quickPlay, set
           playtimeMs: (current?.playtimeMs || 0) + elapsed,
         })
         syncProfiles(settings).catch(() => {})
-        emitLog(`[LunarSpace] Tiến trình kết thúc (code ${code})`)
+        emitLog(`[XyoLauncher] Tiến trình kết thúc (code ${code})`)
         flushLogs()
         emit?.({ type: 'exit', id, code })
         presence.stopped()
@@ -1620,12 +1600,6 @@ async function runLaunchSteps({ id, username, demo: demoOverride, quickPlay, set
   if (cancelledLaunches.has(id)) {
     killTree(child.pid)
     return { ok: true, cancelled: true }
-  }
-
-  if (entry.boost) {
-    boost.setHighPriority(child.pid).then((done) => {
-      if (done) emitLog(`[LunarSpace] Tăng FPS: đã đặt ưu tiên cao cho tiến trình game (pid ${child.pid}).`)
-    })
   }
 
   running.set(id, { pid: child.pid, startedAt })
@@ -1663,7 +1637,7 @@ function stopInstance({ id }, emit) {
       updateEntry(id, { status: 'ready' })
     }
     emit?.({ type: 'state', id, status: 'ready' })
-    emit?.({ type: 'log', id, line: '[LunarSpace] Buộc dừng tiến trình game.' })
+    emit?.({ type: 'log', id, line: '[XyoLauncher] Buộc dừng tiến trình game.' })
   }, 12000)
   return { ok: true }
 }
@@ -1833,7 +1807,7 @@ async function modpackResolve({ source, packId, fileId, settings } = {}) {
       await fsp.mkdir(cacheDir, { recursive: true })
       const versionTarget = String(fileId || packId)
       const zipPath = path.join(cacheDir, `lunar-${versionTarget.replace(/[^a-z0-9._-]/gi, '')}.zip`)
-      await lunarModpacks.download({ id: versionTarget, dest: zipPath, onProgress: (p) => { if (p.total && p.done >= p.total) onLog?.(`[LunarSpace] Đã tải modpack (${p.done} byte)`) } })
+      await lunarModpacks.download({ id: versionTarget, dest: zipPath, onProgress: (p) => { if (p.total && p.done >= p.total) onLog?.(`[XyoLauncher] Đã tải modpack (${p.done} byte)`) } })
       plan = await modpack.planFromCurseforgeZip({ zipPath, onLog })
       plan.source = 'lunar'
       try {
@@ -1981,7 +1955,7 @@ async function modpackInstall({ token, name, dir, icon = '', memoryMb = 4096, se
     await syncProfiles(settings)
     return { ok: true, applied, instance: { ...(fresh || entry), modpack: modpackMeta, status: 'ready' } }
   } catch (err) {
-    log(`[LunarSpace] Lỗi modpack: ${err.message}`)
+    log(`[XyoLauncher] Lỗi modpack: ${err.message}`)
     updateEntry(entry.id, { modpack: modpackMeta, status: 'error', error: err.message })
     stream({ phase: 'error', error: err.message })
     return { ok: false, error: err.message, instance: { ...entry, modpack: modpackMeta } }
@@ -2223,7 +2197,7 @@ async function modpackInstanceUpdate({ id, versionId, settings } = {}, emit) {
   if (!versionId) return { ok: false, error: 'Thiếu bản modpack cần cập nhật.' }
   const marker = await readPackMarker(entry.dir)
   if (!marker || !['modrinth', 'curseforge', 'lunar'].includes(marker.source)) {
-    return { ok: false, error: 'Instance này không phải modpack tải từ Modrinth/CurseForge/LunarSpace.' }
+    return { ok: false, error: 'Instance này không phải modpack tải từ Modrinth/CurseForge/XyoLauncher.' }
   }
   const ident = await resolvePackIdentity(entry, marker)
   if (!ident) return { ok: false, error: 'Không xác định được modpack nguồn để cập nhật.' }
@@ -2262,7 +2236,7 @@ async function modpackInstanceUpdate({ id, versionId, settings } = {}, emit) {
   updateEntry(entry.id, { status: 'installing' })
   stream({ phase: 'download', done: 0, total: 0 })
   try {
-    log(`[LunarSpace] Cập nhật modpack: ${marker.version || '?'} → ${label}`)
+    log(`[XyoLauncher] Cập nhật modpack: ${marker.version || '?'} → ${label}`)
     let plan
     if (marker.source === 'lunar') {
       const cacheDir = path.join(shared, 'modpacks')
@@ -2288,7 +2262,7 @@ async function modpackInstanceUpdate({ id, versionId, settings } = {}, emit) {
       const oldZip = path.join(shared, 'modpacks', `lunar-${String(marker.versionId).replace(/[^a-z0-9._-]/gi, '')}.zip`)
       try {
         oldFiles = modpack.zipOwnedMeta({ zipPath: oldZip, plan: { tree: true } })
-        if (oldFiles.length) log(`[LunarSpace] Đọc được ${oldFiles.length} tệp của bản cũ từ bộ đệm.`)
+        if (oldFiles.length) log(`[XyoLauncher] Đọc được ${oldFiles.length} tệp của bản cũ từ bộ đệm.`)
       } catch {}
     }
     const oldOwned = new Set()
@@ -2316,7 +2290,7 @@ async function modpackInstanceUpdate({ id, versionId, settings } = {}, emit) {
         removed.push(rel)
       } catch {}
     }
-    if (removed.length) log(`[LunarSpace] Đã xoá ${removed.length} tệp không còn trong bản mới.`)
+    if (removed.length) log(`[XyoLauncher] Đã xoá ${removed.length} tệp không còn trong bản mới.`)
     try {
       await fsp.writeFile(
         path.join(entry.dir, PACK_PLAN_FILE),
@@ -2354,7 +2328,7 @@ async function modpackInstanceUpdate({ id, versionId, settings } = {}, emit) {
       applied: { planned: plan.files.length, downloaded: res.downloaded, failed: res.failed.length, removed: removed.length },
     }
   } catch (err) {
-    log(`[LunarSpace] Lỗi cập nhật modpack: ${err.message}`)
+    log(`[XyoLauncher] Lỗi cập nhật modpack: ${err.message}`)
     updateEntry(entry.id, { status: 'ready' })
     stream({ phase: 'error', label: 'update', error: err.message })
     return { ok: false, error: err.message }
@@ -2788,7 +2762,7 @@ async function exportProfile({ id, format = 'zip', targetPath } = {}, emit) {
     emit?.({ type: 'progress', id: entry.id, phase: 'done', label: 'export', summary: res })
     return res
   } catch (err) {
-    log(`[LunarSpace] Xuất profile lỗi: ${err.message}`)
+    log(`[XyoLauncher] Xuất profile lỗi: ${err.message}`)
     emit?.({ type: 'progress', id: entry.id, phase: 'error', error: err.message })
     return { ok: false, error: err.message }
   }
@@ -2886,11 +2860,11 @@ async function shareInstance({ id, name = '', author = '', summary = '', descrip
         'utf8',
       )
     } catch {}
-    log(`[LunarSpace] Đã chia sẻ modpack: ${res.url}`)
+    log(`[XyoLauncher] Đã chia sẻ modpack: ${res.url}`)
     emit?.({ type: 'share', id: entry.id, phase: 'done', url: res.url, bytes: pack.bytes })
     return { ok: true, ...res, bytes: pack.bytes }
   } catch (err) {
-    log(`[LunarSpace] Chia sẻ modpack lỗi: ${err.message}`)
+    log(`[XyoLauncher] Chia sẻ modpack lỗi: ${err.message}`)
     emit?.({ type: 'share', id: entry.id, phase: 'error', error: err.message })
     return { ok: false, error: err.message }
   } finally {
@@ -3096,7 +3070,7 @@ async function serverpackExport({ id, serverId, include = [], props = null, raw 
     emit?.({ type: 'progress', id: src.id, phase: 'done', label: 'serverpack', summary: res })
     return res
   } catch (err) {
-    log(`[LunarSpace] Xuất serverpack lỗi: ${err.message}`)
+    log(`[XyoLauncher] Xuất serverpack lỗi: ${err.message}`)
     emit?.({ type: 'progress', id: src.id, phase: 'error', error: err.message })
     return { ok: false, error: err.message }
   }
@@ -3724,7 +3698,7 @@ async function contentInstall({ kind, source, id, versionId, version = '', insta
           removed.push(base)
         } catch {}
       }
-      if (removed.length) log(`[LunarSpace] Đã xoá bản cũ: ${removed.join(', ')}`)
+      if (removed.length) log(`[XyoLauncher] Đã xoá bản cũ: ${removed.join(', ')}`)
     }
     try {
       const failed = new Set((res.failed || []).map((name) => path.basename(String(name))))
@@ -3755,7 +3729,7 @@ async function contentInstall({ kind, source, id, versionId, version = '', insta
     return { ok: true, ...res, folder: prepared.folder, removed }
   } catch (err) {
     emit?.({ type: 'progress', id: entry.id, phase: 'clear' })
-    log(`[LunarSpace] Tải nội dung lỗi: ${err.message}`)
+    log(`[XyoLauncher] Tải nội dung lỗi: ${err.message}`)
     return { ok: false, error: err.message }
   }
 }

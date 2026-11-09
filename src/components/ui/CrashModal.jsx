@@ -38,7 +38,7 @@ export default function CrashModal({ crash, theme, lang, onClose }) {
     setError('')
     setUploadUrl('')
     try {
-      const res = await api.uploadLog({ text: crash.logText || '', label: `LunarSpace Launcher · ${crash.id}` })
+      const res = await api.uploadLog({ text: crash.logText || '', label: `XyoLauncher · ${crash.id}` })
       if (res?.ok) setUploadUrl(res.url)
       else setError(res?.error || vn(lang, 'Gửi log thất bại.', 'Upload failed.'))
     } catch (err) {
@@ -195,7 +195,7 @@ export default function CrashModal({ crash, theme, lang, onClose }) {
               onClick={() => reveal(crash.crashReport || crash.jvmError)}
               data-tip={crash.crashReport || crash.jvmError}
               className={btn}
-              style={{ background: 'rgba(167,139,250,0.14)', color: c.accent }}
+              style={{ background: 'rgba(233,184,114,0.14)', color: c.accent }}
             >
               <FileText size={14} weight="duotone" />
               {crash.crashReport ? 'crash-report' : 'hs_err'}

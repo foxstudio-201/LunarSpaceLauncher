@@ -1,11 +1,11 @@
 {
-  "name": "lunaspace-launcher",
+  "name": "xyolauncher",
   "private": true,
   "version": "1.6.16",
-  "description": "LunarSpace Launcher - Minecraft launcher client",
+  "description": "XyoLauncher - Minecraft launcher client",
   "author": {
-    "name": "LunarSpace",
-    "email": "contact@lunarspace.local"
+    "name": "XyoLauncher",
+    "email": "contact@xyolauncher.local"
   },
   "type": "module",
   "main": "electron/main.cjs",
@@ -47,9 +47,9 @@
     "wait-on": "^9.0.5"
   },
   "build": {
-    "appId": "com.lunarspace.launcher",
-    "productName": "LunarSpace Launcher",
-    "copyright": "Copyright © 2026 LunarSpace",
+    "appId": "com.xyolauncher.launcher",
+    "productName": "XyoLauncher",
+    "copyright": "Copyright © 2026 XyoLauncher",
     "asar": true,
     "afterPack": "scripts/after-pack.cjs",
     "directories": {
@@ -97,7 +97,7 @@
       ],
       "category": "Game",
       "icon": "public/icon.png",
-      "maintainer": "LunarSpace <contact@lunarspace.local>"
+      "maintainer": "XyoLauncher <contact@xyolauncher.local>"
     },
     "publish": [
       {
@@ -107,12 +107,12 @@
       }
     ],
     "portable": {
-      "artifactName": "LunarSpace-Launcher-Setup-${version}.${ext}",
-      "unpackDirName": "lunarspace-launcher-setup",
+      "artifactName": "XyoLauncher-Setup-${version}.${ext}",
+      "unpackDirName": "xyolauncher-setup",
       "splashImage": "build-resources/installer-splash.bmp"
     },
     "appImage": {
-      "artifactName": "LunarSpace-Launcher-${version}.${ext}"
+      "artifactName": "XyoLauncher-${version}.${ext}"
     }
   }
 }

@@ -180,7 +180,7 @@ async function uploadToMclogs(text, label) {
   const content = stripAnsi(text)
   if (!content.trim()) return { ok: false, error: 'Log trống.' }
   try {
-    const body = new URLSearchParams({ content, source: label || 'LunarSpace Launcher' })
+    const body = new URLSearchParams({ content, source: label || 'XyoLauncher' })
     const res = await fetch(MCLOGS_API, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },

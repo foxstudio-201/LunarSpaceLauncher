@@ -9,7 +9,7 @@ import * as api from '../../api/client.js'
 const vn = (lang, vi, en) => (lang === 'vi' ? vi : en)
 
 const TONES = {
-  mod: '#a78bfa',
+  mod: '#e9b872',
   config: '#60a5fa',
   script: '#f59e0b',
   data: '#34d399',

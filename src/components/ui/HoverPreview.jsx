@@ -113,14 +113,14 @@ export default function HoverPreview({ theme, lang, hit, kind, load, children, d
   const body = (
     <div
       ref={boxRef}
-      className="hover-preview fixed z-[240] pointer-events-none rounded-xl overflow-hidden"
+      className="xyo-tip hover-preview fixed z-[240] pointer-events-none rounded-xl overflow-hidden"
       style={{
         left: pos?.left ?? -9999,
         top: pos?.top ?? -9999,
         width: WIDTH,
         background: c.surface,
         border: `1px solid ${c.border}`,
-        boxShadow: '0 22px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(167,139,250,0.08)',
+        boxShadow: '0 22px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(233,184,114,0.08)',
         visibility: pos ? 'visible' : 'hidden',
       }}
     >

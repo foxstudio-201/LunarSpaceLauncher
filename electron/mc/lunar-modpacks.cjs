@@ -41,7 +41,7 @@ function mapHit(row) {
     slug: String(row.slug || row.id || ''),
     source: 'lunar',
     name: String(row.name || 'Modpack'),
-    author: String(row.author || 'LunarSpace'),
+    author: String(row.author || 'XyoLauncher'),
     summary: String(row.summary || ''),
     description: String(row.description || ''),
     icon: String(row.icon || ''),

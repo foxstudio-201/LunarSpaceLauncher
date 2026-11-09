@@ -15,7 +15,7 @@ const FORMATS = {
   mrpack: { ext: '.mrpack', label: 'Modrinth .mrpack' },
   curseforge: { ext: '.zip', label: 'CurseForge .zip' },
   zip: { ext: '.zip', label: 'Zip cơ bản' },
-  share: { ext: '.zip', label: 'LunarSpace Modpack .zip' },
+  share: { ext: '.zip', label: 'XyoLauncher Modpack .zip' },
 }
 
 async function postJson(url, body) {
@@ -222,7 +222,7 @@ function cfManifest({ name, version, mc, loader, loaderVersion, project }) {
     manifestVersion: 1,
     name: name || 'Modpack',
     version: version || '1.0.0',
-    author: project?.author || 'LunarSpace Launcher',
+    author: project?.author || 'XyoLauncher',
     files: [],
     overrides: 'overrides',
   }
@@ -275,7 +275,7 @@ async function exportProfile({ entry, format = 'zip', targetPath, onProgress, on
       const profileJson = JSON.stringify(
         {
           formatVersion: 1,
-          exportedBy: 'LunarSpace Launcher',
+          exportedBy: 'XyoLauncher',
           shared: share,
           name: entry.name,
           minecraft: entry.version,
@@ -340,7 +340,7 @@ async function exportProfile({ entry, format = 'zip', targetPath, onProgress, on
         zip.addFile(`overrides/${rel}`, path.join(dir, rel))
         report.overrides += 1
       }
-      onLog?.(`[LunarSpace] Xuất .mrpack: ${report.identified}/${mods.length} mod tham chiếu được, ${report.overrides} tệp trong overrides.`)
+      onLog?.(`[XyoLauncher] Xuất .mrpack: ${report.identified}/${mods.length} mod tham chiếu được, ${report.overrides} tệp trong overrides.`)
     } else {
       const cfCache = new Map()
       const fileIds = new Map()
@@ -392,7 +392,7 @@ async function exportProfile({ entry, format = 'zip', targetPath, onProgress, on
         zip.addFile(`overrides/${rel}`, path.join(dir, rel))
         report.overrides += 1
       }
-      onLog?.(`[LunarSpace] Xuất zip CurseForge: ${report.identified}/${mods.length} mod theo ID, ${report.overrides} tệp trong overrides.`)
+      onLog?.(`[XyoLauncher] Xuất zip CurseForge: ${report.identified}/${mods.length} mod theo ID, ${report.overrides} tệp trong overrides.`)
     }
 
     const out = share ? await zip.closeAsync() : zip.close()

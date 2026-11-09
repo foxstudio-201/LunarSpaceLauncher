@@ -13,7 +13,7 @@ export default function UserPage({ server, theme, lang }) {
       <div className="flex items-center gap-3 mb-4">
         <h2 className="text-sm font-bold" style={{ color: textColor }}>{lang === 'vi' ? 'Người dùng' : 'Subusers'}</h2>
         <div className="flex-1" />
-        <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold" style={{ background: '#8b5cf6', color: '#fff' }}>
+        <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold" style={{ background: '#e9b872', color: '#1b1409' }}>
           <Plus size={13} weight="duotone" /> {lang === 'vi' ? 'Thêm' : 'Add'}
         </button>
       </div>

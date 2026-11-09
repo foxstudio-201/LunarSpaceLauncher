@@ -1,89 +1,108 @@
-const DARK = {
-  bg: '#0a0a0a',
-  bar: '#0d0d10',
-  surface: '#101014',
-  text: '#ffffff',
-  label: 'rgba(255,255,255,0.6)',
-  faint: 'rgba(255,255,255,0.35)',
-  border: 'rgba(255,255,255,0.08)',
-  input: 'rgba(255,255,255,0.05)',
-  hover: 'rgba(255,255,255,0.06)',
-  accent: '#a78bfa',
+// Bảng màu XyoLauncher — đồng bộ với theme của bản Rust (src/ui/theme.rs).
+const XYO_DARK = {
+  bg: '#0c0e12',
+  bar: '#080a0d',
+  surface: '#14171d',
+  surfaceActive: '#212630',
+  text: '#e8ebf1',
+  label: '#99a2b1',
+  faint: '#656d7b',
+  border: '#242a33',
+  borderSoft: '#1b2027',
+  input: '#181c23',
+  hover: '#1a1e25',
+  accent: '#e9b872',
+  accentHover: '#f3c98a',
+  accentSoft: '#f0c991',
+  onAccent: '#1b1409',
+  ok: '#22c55e',
+  warn: '#f5b84b',
+  bad: '#f87171',
+  info: '#60a5fa',
   pixel: false,
-  ink: '#000000',
-  shadow: '0 14px 34px rgba(0,0,0,0.42)',
-  shadowSm: '0 1px 2px rgba(0,0,0,0.25)',
+  ink: '#05070a',
+  shadow: '0 14px 34px rgba(0, 0, 0, 0.5)',
+  shadowSm: '0 1px 2px rgba(0, 0, 0, 0.3)',
 }
 
-const LIGHT = {
-  bg: '#f0eff0',
-  bar: '#f0eff0',
+const XYO_LIGHT = {
+  bg: '#f4f5f8',
+  bar: '#ffffff',
   surface: '#ffffff',
-  text: '#111111',
-  label: '#555555',
-  faint: 'rgba(0,0,0,0.4)',
-  border: 'rgba(0,0,0,0.08)',
-  input: 'rgba(0,0,0,0.04)',
-  hover: 'rgba(0,0,0,0.04)',
-  accent: '#8b5cf6',
+  surfaceActive: '#e9ebf1',
+  text: '#171a20',
+  label: '#5c6472',
+  faint: '#8b93a2',
+  border: '#dfe3ea',
+  borderSoft: '#e9ecf1',
+  input: '#f1f2f6',
+  hover: '#eef0f4',
+  accent: '#c07a2c',
+  accentHover: '#a9661f',
+  accentSoft: '#b7791f',
+  onAccent: '#ffffff',
+  ok: '#16a34a',
+  warn: '#b77908',
+  bad: '#dc2626',
+  info: '#2563eb',
   pixel: false,
-  ink: '#111111',
-  shadow: '0 12px 28px rgba(0,0,0,0.12)',
-  shadowSm: '0 1px 2px rgba(0,0,0,0.12)',
-}
-
-const dither = (color, opacity) =>
-  `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4'%3E%3Cg fill='${encodeURIComponent(color)}' fill-opacity='${opacity}'%3E%3Crect width='2' height='2'/%3E%3Crect x='2' y='2' width='2' height='2'/%3E%3C/g%3E%3C/svg%3E")`
-
-const PIXEL_DARK = {
-  bg: '#0a0d12',
-  bar: '#0f131a',
-  surface: `${dither('#9fb4cc', '0.05')} #171c24`,
-  text: '#e6ebf2',
-  label: '#9fabb8',
-  faint: '#7b8794',
-  border: '#39434f',
-  input: '#1f252e',
-  hover: '#262d38',
-  accent: '#7ba3cc',
-  pixel: true,
-  ink: '#04060a',
-  shadow: '3px 3px 0 0 #04060a',
-  shadowSm: '2px 2px 0 0 #04060a',
-}
-
-const PIXEL_LIGHT = {
-  bg: '#edf2f9',
-  bar: '#e4ebf5',
-  surface: `${dither('#1d4ed8', '0.06')} #ffffff`,
-  text: '#0d1728',
-  label: '#3c5273',
-  faint: '#61779a',
-  border: '#1b3458',
-  input: '#dde6f2',
-  hover: '#d2ddec',
-  accent: '#1d4ed8',
-  pixel: true,
-  ink: '#1b3458',
-  shadow: '3px 3px 0 0 #1b3458',
-  shadowSm: '2px 2px 0 0 #1b3458',
+  ink: '#171a20',
+  shadow: '0 12px 28px rgba(0, 0, 0, 0.12)',
+  shadowSm: '0 1px 2px rgba(0, 0, 0, 0.12)',
 }
 
 const SURFACE_COLOR = {
-  'default-dark': DARK.bg,
-  'default-light': LIGHT.bg,
-  'pixel-dark': PIXEL_DARK.bg,
-  'pixel-light': PIXEL_LIGHT.bg,
+  'xyo-dark': XYO_DARK.bg,
+  'xyo-light': XYO_LIGHT.bg,
 }
 
-const SKIN = 'pixel'
+// Chế độ "nền ảnh": mọi bề mặt là kính mờ, màu cố định (không theo sáng/tối).
+const GLASS = {
+  bg: 'transparent',
+  bar: 'rgba(8, 10, 14, 0.20)',
+  surface: 'rgba(10, 13, 19, 0.30)',
+  surfaceActive: 'rgba(255, 255, 255, 0.12)',
+  text: '#e8ebf1',
+  label: 'rgba(232, 235, 241, 0.68)',
+  faint: 'rgba(232, 235, 241, 0.42)',
+  border: 'rgba(255, 255, 255, 0.10)',
+  borderSoft: 'rgba(255, 255, 255, 0.06)',
+  input: 'rgba(255, 255, 255, 0.06)',
+  hover: 'rgba(255, 255, 255, 0.08)',
+  accent: '#e9b872',
+  accentHover: '#f3c98a',
+  accentSoft: '#f0c991',
+  onAccent: '#1b1409',
+  ok: '#22c55e',
+  warn: '#f5b84b',
+  bad: '#f87171',
+  info: '#60a5fa',
+  pixel: false,
+  ink: '#05070a',
+  shadow: '0 18px 44px rgba(0, 0, 0, 0.55)',
+  shadowSm: '0 1px 2px rgba(0, 0, 0, 0.35)',
+}
+
+let backgroundMode = false
+
+export function setBackgroundMode(active) {
+  backgroundMode = Boolean(active)
+}
+
+export function isBackgroundMode() {
+  return backgroundMode
+}
+
+const SKIN = 'xyo'
 
 export const currentPaletteSkin = () => SKIN
 
 export function surfaceColor(theme) {
-  return SURFACE_COLOR[`${SKIN}-${theme === 'light' ? 'light' : 'dark'}`] || PIXEL_DARK.bg
+  if (backgroundMode) return 'transparent'
+  return SURFACE_COLOR[`${SKIN}-${theme === 'light' ? 'light' : 'dark'}`] || XYO_DARK.bg
 }
 
 export function palette(theme) {
-  return theme === 'light' ? PIXEL_LIGHT : PIXEL_DARK
+  if (backgroundMode) return GLASS
+  return theme === 'light' ? XYO_LIGHT : XYO_DARK
 }

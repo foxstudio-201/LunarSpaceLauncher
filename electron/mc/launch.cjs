@@ -280,7 +280,7 @@ function buildLaunch({ chain, paths, nativesDir, instanceDir, username, memoryMb
     version_type: chain.type || 'release',
     user_properties: '{}',
     natives_directory: nativesDir,
-    launcher_name: 'LunarSpace',
+    launcher_name: 'XyoLauncher',
     launcher_version: '1.0.0',
     classpath,
     classpath_separator: process.platform === 'win32' ? ';' : ':',
@@ -294,7 +294,7 @@ function buildLaunch({ chain, paths, nativesDir, instanceDir, username, memoryMb
     ? substitute(flatten(chain.arguments.jvm), map)
     : [
         `-Djava.library.path=${nativesDir}`,
-        '-Dminecraft.launcher.brand=LunarSpace',
+        '-Dminecraft.launcher.brand=XyoLauncher',
         '-Dminecraft.launcher.version=1.0.0',
         '-cp',
         classpath,
@@ -388,7 +388,7 @@ function spawnGame({ javaPath, args, cwd, onLog, onExit }) {
   }
   for (const reader of readers) reader.stream.on('data', (chunk) => push(reader, chunk))
   child.on('error', (err) => {
-    onLog(`[LunarSpace] Không chạy được Java: ${err.message}`)
+    onLog(`[XyoLauncher] Không chạy được Java: ${err.message}`)
     onExit(-1)
   })
   child.on('exit', (code, signal) => {

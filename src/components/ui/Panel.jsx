@@ -16,7 +16,7 @@ export function Section({ c, title, hint, action, children }) {
 
 export function Card({ c, className = '', children }) {
   return (
-    <div className={`rounded-xl ${className}`} style={{ background: c.surface, border: `1px solid ${c.border}` }}>
+    <div className={`xyo-glass rounded-xl ${className}`} style={{ background: c.surface, border: `1px solid ${c.border}` }}>
       {children}
     </div>
   )
