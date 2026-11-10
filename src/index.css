@@ -289,84 +289,185 @@
   animation: nav-bar-grow 260ms cubic-bezier(0.33, 0, 0.2, 1) both;
 }
 
-/* Kính mờ: chỉ cho khối lớn (card/panel), dùng ảnh nền blur cố định theo viewport. */
-html[data-xyo-bg] :is(div, section, aside, article, main, nav, ul, li):is(.xyo-glass, [style*="rgba(10, 13, 19"], [style*="rgba(8, 10, 14"]) {
-  isolation: isolate;
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
+/* ═══════════════════════════════════════════════════════════════════
+   Xyo Glass — vật liệu kính hiện đại cho chế độ nền ảnh.
+   Bề mặt lớn (rail, khung nội dung, header, modal) nhận blur thật;
+   thẻ nhỏ nằm trong khung chỉ phủ tint + viền sáng để tránh blur
+   chồng lớp và giữ hiệu năng.
+   ═══════════════════════════════════════════════════════════════════ */
+.xyo-wallpaper {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
 }
 
-/* phần tử đã được định vị (fixed/absolute/sticky) thì KHÔNG đổi position */
-html[data-xyo-bg] :is(div, section, aside, article, main, nav, ul, li):is(.xyo-glass, [style*="rgba(10, 13, 19"], [style*="rgba(8, 10, 14"]):not(.fixed):not(.absolute):not(.sticky) {
+.xyo-wallpaper::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: var(--xyo-wallpaper-scrim);
+}
+
+html[data-xyo-bg] {
+  --xyo-glass-noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.6'/%3E%3C/svg%3E");
+  --xyo-glass-sheen: linear-gradient(
+    152deg,
+    rgba(255, 255, 255, 0.24) 0%,
+    rgba(255, 255, 255, 0.07) 22%,
+    rgba(255, 255, 255, 0.015) 50%,
+    rgba(255, 255, 255, 0.07) 100%
+  );
+  --xyo-sheen-opacity: 0.9;
+  --xyo-noise-opacity: 0.045;
+  --xyo-glass-filter: blur(30px) saturate(180%) brightness(0.94);
+  --xyo-glass-deep-filter: blur(46px) saturate(190%) brightness(0.88);
+  --xyo-edge-hi: rgba(255, 255, 255, 0.22);
+  --xyo-edge-lo: rgba(255, 255, 255, 0.05);
+  --xyo-shadow-soft: 0 12px 32px -22px rgba(0, 0, 0, 0.65);
+  --xyo-shadow-deep: 0 44px 100px -46px rgba(0, 0, 0, 0.92);
+  --xyo-header-bg: rgba(10, 12, 16, 0.46);
+  --xyo-titlebar-bg: rgba(8, 11, 16, 0.46);
+  --xyo-titlebar-line: rgba(255, 255, 255, 0.07);
+  --xyo-pop-bg: rgba(19, 23, 31, 0.66);
+  --xyo-pop-sheen: linear-gradient(152deg, rgba(255, 255, 255, 0.10) 0%, rgba(255, 255, 255, 0.02) 42%, rgba(255, 255, 255, 0.05) 100%);
+  --xyo-pop-line: rgba(255, 255, 255, 0.14);
+  --xyo-backdrop-bg: rgba(4, 6, 10, 0.52);
+  --xyo-modal-bg: rgba(16, 20, 28, 0.72);
+  --xyo-modal-line: rgba(255, 255, 255, 0.10);
+  --xyo-wallpaper-scrim:
+    linear-gradient(180deg, rgba(6, 9, 13, 0.34) 0%, rgba(6, 9, 13, 0.08) 26%, rgba(6, 9, 13, 0.12) 62%, rgba(4, 6, 10, 0.52) 100%),
+    radial-gradient(130% 90% at 80% 0%, rgba(233, 184, 114, 0.05), transparent 60%);
+}
+
+
+
+html[data-xyo-bg] .xyo-glass {
+  -webkit-backdrop-filter: var(--xyo-glass-filter);
+  backdrop-filter: var(--xyo-glass-filter);
+  box-shadow:
+    inset 0 1px 0 var(--xyo-edge-hi),
+    inset 0 0 0 1px var(--xyo-edge-lo),
+    var(--xyo-shadow-soft);
+}
+
+/* Chỉ đặt relative khi phần tử chưa tự định vị (không phá sticky/fixed). */
+html[data-xyo-bg] .xyo-glass:not(.absolute):not(.fixed):not(.sticky):not([style*="position: absolute"]):not([style*="position: fixed"]) {
   position: relative;
 }
 
-html[data-xyo-bg] :is(div, section, aside, article, main, nav, ul, li):is(.xyo-glass, [style*="rgba(10, 13, 19"], [style*="rgba(8, 10, 14"])::before {
+/* Blur của bề mặt lớn dùng ::before (sheen) — ::after giữ hạt nhiễu. */
+html[data-xyo-bg] .xyo-glass::before {
   content: '';
   position: absolute;
   inset: 0;
   z-index: -1;
   border-radius: inherit;
   pointer-events: none;
-  background-image: linear-gradient(rgba(10, 13, 19, 0.42), rgba(10, 13, 19, 0.42)), var(--xyo-bg-url, none);
-  background-size: cover, cover;
-  background-position: center center, center center;
-  background-attachment: fixed, fixed;
-  background-repeat: no-repeat, no-repeat;
-  filter: blur(16px) saturate(1.18) brightness(1.02);
+  background: var(--xyo-glass-sheen);
+  opacity: var(--xyo-sheen-opacity);
 }
 
-/* Menu drop, tooltip, toast: không kính, nền đục */
-html[data-xyo-bg] :is(.select-panel, .xyo-menu-in, .xyo-tip, [role="menu"], [role="listbox"], .u070-t, .u070-zone)::before,
-html[data-xyo-bg] :is(.select-panel, .xyo-menu-in, .xyo-tip, [role="menu"], [role="listbox"], .u070-t, .u070-zone) *::before {
-  display: none !important;
-  background-image: none !important;
+html[data-xyo-bg] .xyo-glass::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  background-image: var(--xyo-glass-noise);
+  background-size: 140px 140px;
+  opacity: var(--xyo-noise-opacity);
+  mix-blend-mode: overlay;
 }
 
-html[data-xyo-bg] :is(.select-panel, .xyo-menu-in, [role="menu"], [role="listbox"], .u070-t) {
-  background: #171a20 !important;
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
+/* Khung lớn: rail + khung nội dung. Blur sâu hơn, shadow lớn hơn. */
+html[data-xyo-bg] .xyo-glass-deep {
+  -webkit-backdrop-filter: var(--xyo-glass-deep-filter);
+  backdrop-filter: var(--xyo-glass-deep-filter);
+  box-shadow:
+    inset 0 1px 0 var(--xyo-edge-hi),
+    inset 0 0 0 1px var(--xyo-edge-lo),
+    var(--xyo-shadow-deep);
 }
 
-html[data-xyo-bg] .xyo-tip {
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
+/* Thẻ lồng trong bề mặt đã blur thì chỉ phủ tint — tránh blur chồng lớp. */
+html[data-xyo-bg] .xyo-glass-deep .xyo-glass:not(.xyo-glass-header) {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow:
+    inset 0 1px 0 var(--xyo-edge-hi),
+    inset 0 0 0 1px var(--xyo-edge-lo);
 }
 
-/* Modal, tooltip, toast: không kính, nền đục */
-html[data-xyo-bg] :is(.modal-content, .modal-backdrop, [role="dialog"], .u070-zone, .u070-t) :is(.xyo-glass, [style*="rgba(10, 13, 19"], [style*="rgba(8, 10, 14"], [style*="rgba(9, 11, 15"])::before,
-html[data-xyo-bg] :is(.modal-content, .modal-backdrop, [role="dialog"], .u070-zone, .u070-t)::before {
-  background-image: none !important;
-  display: none !important;
+html[data-xyo-bg] .xyo-glass-header {
+  background: var(--xyo-header-bg) !important;
+  box-shadow: inset 0 1px 0 var(--xyo-edge-hi);
 }
 
-html[data-xyo-bg] :is(.modal-content, .modal-backdrop, [role="dialog"], .u070-zone, .u070-t) *,
-html[data-xyo-bg] :is(.modal-content, .modal-backdrop, [role="dialog"], .u070-t) {
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
+/* Thanh tiêu đề: một dải kính mỏng trên cùng. */
+html[data-xyo-bg] .xyo-titlebar {
+  z-index: 5 !important;
+  background: var(--xyo-titlebar-bg) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(160%);
+  backdrop-filter: blur(28px) saturate(160%);
+  border-bottom-color: var(--xyo-titlebar-line) !important;
 }
 
-html[data-xyo-bg] :is(.modal-content, .modal-backdrop > div, [role="dialog"]) {
-  background: #14171d !important;
+/* Menu, dropdown, toast: kính đậm để chữ luôn đọc được. */
+html[data-xyo-bg] :is(.select-panel, .xyo-menu-in, .u070-t) {
+  background: var(--xyo-pop-sheen), var(--xyo-pop-bg) !important;
+  -webkit-backdrop-filter: blur(34px) saturate(185%) !important;
+  backdrop-filter: blur(34px) saturate(185%) !important;
+  border-color: var(--xyo-pop-line) !important;
+  box-shadow:
+    inset 0 1px 0 var(--xyo-edge-hi),
+    0 26px 60px -22px rgba(0, 0, 0, 0.55) !important;
 }
 
-html[data-xyo-bg] .modal-content,
-html[data-xyo-bg] .modal-backdrop > div {
-  background: #14171d !important;
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
+html[data-xyo-bg] .select-panel {
+  border-radius: 12px !important;
 }
 
-html[data-xyo-bg] .modal-content .xyo-glass,
-html[data-xyo-bg] .modal-backdrop .xyo-glass {
-  background: #14171d !important;
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
+/* Modal: nền tối vừa + kính, không còn tấm đục cứng. */
+html[data-xyo-bg] .modal-backdrop {
+  background: var(--xyo-backdrop-bg);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  backdrop-filter: blur(14px) saturate(140%);
 }
 
-html[data-xyo-bg] [data-surface] {
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85), 0 0 14px rgba(0, 0, 0, 0.45);
+html[data-xyo-bg] .modal-content {
+  background-color: var(--xyo-modal-bg) !important;
+  -webkit-backdrop-filter: blur(40px) saturate(180%) !important;
+  backdrop-filter: blur(40px) saturate(180%) !important;
+  box-shadow:
+    inset 0 1px 0 var(--xyo-edge-hi),
+    inset 0 0 0 1px var(--xyo-modal-line),
+    0 46px 110px -32px rgba(0, 0, 0, 0.55) !important;
+}
+
+html[data-xyo-bg] .modal-content:not(.absolute):not(.fixed):not(.sticky) {
+  position: relative;
+}
+
+html[data-xyo-bg] .modal-content::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  background: var(--xyo-glass-sheen);
+}
+
+@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  html[data-xyo-bg] :is(.xyo-glass, .xyo-glass-deep, .modal-content, .select-panel, .u070-t) {
+    background-color: rgba(12, 15, 21, 0.94) !important;
+  }
 }
 
 html[data-wiping] [data-surface] {
@@ -653,18 +754,25 @@ html[data-wiping] * {
   0%, 100% { opacity: 0.3; }
   50% { opacity: 1; }
 }
-.xyo-tip,
-.hover-preview {
+.xyo-tip:not(.hover-preview) {
   background: #1a1625 !important;
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
   filter: none !important;
 }
 
-.xyo-tip::before,
-.hover-preview::before,
-.xyo-tip *::before,
-.hover-preview *::before {
+html[data-xyo-bg] .hover-preview {
+  background: var(--xyo-pop-sheen), var(--xyo-pop-bg) !important;
+  -webkit-backdrop-filter: blur(30px) saturate(165%) !important;
+  backdrop-filter: blur(30px) saturate(165%) !important;
+  border-color: var(--xyo-pop-line) !important;
+  box-shadow:
+    inset 0 1px 0 var(--xyo-edge-hi),
+    0 22px 60px -22px rgba(0, 0, 0, 0.5) !important;
+}
+
+.xyo-tip:not(.hover-preview)::before,
+.xyo-tip:not(.hover-preview) *::before {
   display: none !important;
   background-image: none !important;
 }

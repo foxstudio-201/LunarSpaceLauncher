@@ -26,7 +26,7 @@ export default function TitleBar() {
 
   return (
     <div
-      className="drag-region fixed top-0 left-0 right-0 z-[9999] flex h-11 items-center"
+      className="xyo-titlebar drag-region fixed top-0 left-0 right-0 z-[9999] flex h-11 items-center"
       style={{ background: c.bg, borderBottom: `1px solid ${c.borderSoft}` }}
       onDoubleClick={toggleMax}
     >

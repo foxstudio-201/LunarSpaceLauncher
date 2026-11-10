@@ -246,7 +246,6 @@ function ToastHost({ api, storeRef, tick }) {
     <div className="u070" style={{ position: 'fixed', inset: 0, zIndex: 300, pointerEvents: 'none' }}>
       <style>{`
 .u070-zone{position:absolute;right:16px;bottom:16px;width:350px;pointer-events:none}
-html[data-xyo-bg] .u070-t{background:#14171d !important;-webkit-backdrop-filter:none !important;backdrop-filter:none !important}
 .u070-catch{position:absolute;left:0;right:0;bottom:0;pointer-events:auto}
 .u070-t{position:absolute;left:0;right:0;bottom:0;pointer-events:auto;display:flex;align-items:center;gap:12px;min-height:68px;padding:12px 12px 12px 14px;border-radius:20px;background:${c.surface};box-shadow:0 0 0 1px ${c.border},0 16px 30px -18px rgba(0,0,0,.45);transform-origin:50% 100%;transform:translate(var(--dx,0px),var(--y,0px)) scale(var(--s,1));opacity:var(--o,1);transition:transform .5s cubic-bezier(.34,1.45,.64,1),opacity .35s;touch-action:pan-y;user-select:none;-webkit-user-select:none;cursor:default}
 .u070-t.drag{transition:none}

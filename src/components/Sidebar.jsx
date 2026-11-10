@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   House, Gear, Terminal, Files, Archive, User, Trash,
   PuzzlePiece, Stack, GearSix, ArrowLeft, ChartLineUp, SidebarSimple, CaretRight, Check, Image, PaintBrush, Plus, Cloud, HardDrives,
@@ -284,7 +285,7 @@ export default function Sidebar({
       onMouseLeave={() => setRailHover(false)}
     >
       <div
-        className="xyo-glass relative flex h-full flex-col overflow-hidden rounded-3xl"
+        className="xyo-glass xyo-glass-deep relative flex h-full flex-col overflow-hidden rounded-3xl"
         style={{ width, background: c.bar, border: `1px solid ${c.border}` }}
       >
         <div className="h-11 w-full shrink-0" />
@@ -434,7 +435,7 @@ export default function Sidebar({
         </button>
       </div>
 
-      {menuOpen && (
+      {menuOpen && createPortal(
         <div
           ref={menuRef}
           className="xyo-menu-in fixed z-[60] flex flex-col gap-0.5 rounded-[18px] p-1"
@@ -511,7 +512,8 @@ export default function Sidebar({
               </button>
             )
           })}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )

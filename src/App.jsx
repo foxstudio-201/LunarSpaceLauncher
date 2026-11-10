@@ -461,10 +461,8 @@ function AppContent() {
       setBgUrl(url || '')
       if (url) {
         document.documentElement.setAttribute('data-xyo-bg', '')
-        document.documentElement.style.setProperty('--xyo-bg-url', `url("${url}")`)
       } else {
         document.documentElement.removeAttribute('data-xyo-bg')
-        document.documentElement.style.removeProperty('--xyo-bg-url')
       }
     }
     const load = async () => {
@@ -695,20 +693,11 @@ function AppContent() {
   return (
     <div className="w-screen h-screen flex flex-col overflow-hidden relative z-10" style={{ background: 'transparent' }}>
       {bgUrl ? (
-        <>
-          <div
-            aria-hidden
-            style={{
-              position: 'fixed',
-              inset: 0,
-              zIndex: 0,
-              backgroundImage: `url("${bgUrl}")`,
-              backgroundSize: 'cover',
-              backgroundPosition: 'center',
-              pointerEvents: 'none',
-            }}
-          />
-        </>
+        <div
+          aria-hidden
+          className="xyo-wallpaper"
+          style={{ backgroundImage: `url("${bgUrl}")` }}
+        />
       ) : null}
 
       {boot !== 'splash' && <TitleBar />}

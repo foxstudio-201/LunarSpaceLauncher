@@ -4,10 +4,9 @@ export default function PageHeader({ theme, title, subtitle, children }) {
   const c = palette(theme)
   return (
     <div
-      className="xyo-rise xyo-glass shrink-0 sticky top-0 z-20"
+      className="xyo-rise xyo-glass xyo-glass-header shrink-0 sticky top-0 z-20"
       style={{
-        background: c.bg === 'transparent' ? 'rgba(10, 12, 16, 0.55)' : `${c.bg}ee`,
-        WebkitBackdropFilter: c.bg === 'transparent' ? 'blur(28px) saturate(1.25) brightness(1.04)' : undefined,
+        background: c.bg === 'transparent' ? undefined : `${c.bg}ee`,
         borderBottom: `1px solid ${c.border}`,
         '--d': '.25s',
       }}

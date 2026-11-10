@@ -56,19 +56,19 @@ const SURFACE_COLOR = {
   'xyo-light': XYO_LIGHT.bg,
 }
 
-// Chế độ "nền ảnh": mọi bề mặt là kính mờ, màu cố định (không theo sáng/tối).
+// Chế độ "nền ảnh": bề mặt là kính mờ (tông tối cố định), tách hẳn khỏi sáng/tối.
 const GLASS = {
   bg: 'transparent',
-  bar: 'rgba(8, 10, 14, 0.20)',
-  surface: 'rgba(10, 13, 19, 0.30)',
-  surfaceActive: 'rgba(255, 255, 255, 0.12)',
-  text: '#e8ebf1',
-  label: 'rgba(232, 235, 241, 0.68)',
-  faint: 'rgba(232, 235, 241, 0.42)',
-  border: 'rgba(255, 255, 255, 0.10)',
-  borderSoft: 'rgba(255, 255, 255, 0.06)',
-  input: 'rgba(255, 255, 255, 0.06)',
-  hover: 'rgba(255, 255, 255, 0.08)',
+  bar: 'rgba(9, 12, 18, 0.50)',
+  surface: 'rgba(16, 20, 28, 0.42)',
+  surfaceActive: 'rgba(255, 255, 255, 0.13)',
+  text: '#eef1f6',
+  label: 'rgba(238, 241, 246, 0.72)',
+  faint: 'rgba(238, 241, 246, 0.46)',
+  border: 'rgba(255, 255, 255, 0.14)',
+  borderSoft: 'rgba(255, 255, 255, 0.08)',
+  input: 'rgba(255, 255, 255, 0.08)',
+  hover: 'rgba(255, 255, 255, 0.10)',
   accent: '#e9b872',
   accentHover: '#f3c98a',
   accentSoft: '#f0c991',
@@ -79,7 +79,7 @@ const GLASS = {
   info: '#60a5fa',
   pixel: false,
   ink: '#05070a',
-  shadow: '0 18px 44px rgba(0, 0, 0, 0.55)',
+  shadow: '0 30px 70px -28px rgba(0, 0, 0, 0.8)',
   shadowSm: '0 1px 2px rgba(0, 0, 0, 0.35)',
 }
 

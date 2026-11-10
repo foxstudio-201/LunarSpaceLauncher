@@ -454,9 +454,6 @@ export default function SchedulePage({ server, theme, lang }) {
         <div
           className={`modal-backdrop fixed inset-0 z-[80] flex items-center justify-center p-4${modalClosing ? ' closing' : ''}`}
           style={{
-            background: 'rgba(0,0,0,0.7)',
-            backdropFilter: 'none',
-            WebkitBackdropFilter: 'blur(4px)',
             pointerEvents: modalClosing ? 'none' : 'auto',
           }}
           onClick={() => { if (!modalClosing) closeModal() }}
