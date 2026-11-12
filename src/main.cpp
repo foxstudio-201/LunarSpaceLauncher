@@ -522,6 +522,7 @@ private:
     bool tray_added_ = false;
     bool dark_ = true;
     bool theme_animating_ = false;
+    bool theme_locked_ = false;
     AnimEngine anims_;
     bool pill_pending_ = true;
     bool laid_out_ = false;
@@ -849,6 +850,12 @@ void App::load_data() {
         std::wstring file = background_file(background_id_);
         if (Node* root_node = ui_find(ui_.get(), L"root"))
             root_node->style.bg_image = file;
+        theme_locked_ = !file.empty();
+        if (theme_locked_) {
+            ui_set_dark(dark_);
+            ui_set_theme_anim(dark_ ? 1.0f : 0.0f);
+            theme_animating_ = false;
+        }
     }
 
     Json skin_cache;
@@ -3561,6 +3568,12 @@ void App::apply_background(const std::wstring& id) {
     } else if (root) {
         root->style.bg_image = file;
     }
+    theme_locked_ = id != L"theme";
+    if (theme_locked_) {
+        ui_set_dark(dark_);
+        ui_set_theme_anim(dark_ ? 1.0f : 0.0f);
+        theme_animating_ = false;
+    }
     rebuild_settings();
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
@@ -4053,9 +4066,12 @@ void App::rebuild_settings() {
         theme_switch->style.width = 74.0f;
         theme_switch->style.radius = 15.0f;
         theme_switch->action = L"toggle:theme";
+        if (theme_locked_) theme_switch->style.opacity = 0.55f;
         appearance->kids.push_back(row(
             dark_ ? L"assets/icons/moon-stars.svg" : L"assets/icons/sun.svg", L"Giao diện",
-            L"Bật/tắt chế độ tối", std::move(theme_switch)));
+            theme_locked_ ? L"Đang khóa khi dùng ảnh nền — chọn \"Theo giao diện\" để đổi sáng/tối"
+                          : L"Bật/tắt chế độ tối",
+            std::move(theme_switch)));
         appearance->kids.push_back(sep());
 
         appearance->kids.push_back(row(L"assets/icons/sparkle.svg", L"Hiệu ứng chuyển cảnh",
@@ -5526,6 +5542,12 @@ bool App::toast_mouse_down(int px, int py) {
 }
 
 void App::toggle_theme() {
+    if (theme_locked_) {
+        notify(L"Giao diện",
+               L"Đang ở chế độ ảnh nền — chọn \"Theo giao diện\" để đổi sáng/tối.",
+               L"info");
+        return;
+    }
     dark_ = !dark_;
     theme_animating_ = true;
     ui_set_dark(dark_);
