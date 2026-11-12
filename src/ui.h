@@ -66,3 +66,4 @@ bool ui_theme_animating();
 void ui_set_sidebar_pill(float top, bool show);
 void ui_set_caret_angle(float degrees);
 void ui_set_visible(Node* node, bool visible);
+void ui_set_skip_id(const wchar_t* id);

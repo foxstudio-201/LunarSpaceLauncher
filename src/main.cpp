@@ -271,6 +271,74 @@ struct AuthJob {
     std::wstring pass;
 };
 
+struct QuadMap {
+    float h[9]{};
+    bool valid = false;
+};
+
+static QuadMap quad_map(float x0, float y0, float x1, float y1, float x2, float y2,
+                        float x3, float y3) {
+    QuadMap map;
+    float dx1 = x1 - x2, dx2 = x3 - x2, dx3 = x0 - x1 + x2 - x3;
+    float dy1 = y1 - y2, dy2 = y3 - y2, dy3 = y0 - y1 + y2 - y3;
+    float den = dx1 * dy2 - dx2 * dy1;
+    if (std::fabs(den) < 1e-6f) {
+        map.h[0] = x1 - x0;
+        map.h[1] = x2 - x1;
+        map.h[2] = x0;
+        map.h[3] = y1 - y0;
+        map.h[4] = y2 - y1;
+        map.h[5] = y0;
+        map.h[6] = 0.0f;
+        map.h[7] = 0.0f;
+        map.h[8] = 1.0f;
+    } else {
+        float g = (dx3 * dy2 - dx2 * dy3) / den;
+        float h = (dx1 * dy3 - dx3 * dy1) / den;
+        map.h[0] = x1 - x0 + g * x1;
+        map.h[1] = x3 - x0 + h * x3;
+        map.h[2] = x0;
+        map.h[3] = y1 - y0 + g * y1;
+        map.h[4] = y3 - y0 + h * y3;
+        map.h[5] = y0;
+        map.h[6] = g;
+        map.h[7] = h;
+        map.h[8] = 1.0f;
+    }
+    map.valid = true;
+    return map;
+}
+
+static void quad_project(const QuadMap& map, float u, float v, float& x, float& y) {
+    float den = map.h[6] * u + map.h[7] * v + map.h[8];
+    if (std::fabs(den) < 1e-6f) den = 1e-6f;
+    x = (map.h[0] * u + map.h[1] * v + map.h[2]) / den;
+    y = (map.h[3] * u + map.h[4] * v + map.h[5]) / den;
+}
+
+static bool quad_unproject(const QuadMap& map, float x, float y, float& u, float& v) {
+    const float* m = map.h;
+    float det = m[0] * (m[4] * m[8] - m[5] * m[7]) -
+                m[1] * (m[3] * m[8] - m[5] * m[6]) +
+                m[2] * (m[3] * m[7] - m[4] * m[6]);
+    if (std::fabs(det) < 1e-8f) return false;
+    float inv[9];
+    inv[0] = (m[4] * m[8] - m[5] * m[7]) / det;
+    inv[1] = (m[2] * m[7] - m[1] * m[8]) / det;
+    inv[2] = (m[1] * m[5] - m[2] * m[4]) / det;
+    inv[3] = (m[5] * m[6] - m[3] * m[8]) / det;
+    inv[4] = (m[0] * m[8] - m[2] * m[6]) / det;
+    inv[5] = (m[2] * m[3] - m[0] * m[5]) / det;
+    inv[6] = (m[3] * m[7] - m[4] * m[6]) / det;
+    inv[7] = (m[1] * m[6] - m[0] * m[7]) / det;
+    inv[8] = (m[0] * m[4] - m[1] * m[3]) / det;
+    float w = inv[6] * x + inv[7] * y + inv[8];
+    if (std::fabs(w) < 1e-6f) return false;
+    u = (inv[0] * x + inv[1] * y + inv[2]) / w;
+    v = (inv[3] * x + inv[4] * y + inv[5]) / w;
+    return u >= -0.02f && u <= 1.02f && v >= -0.02f && v <= 1.02f;
+}
+
 class App {
 public:
     explicit App(HWND hwnd) : hwnd_(hwnd) {}
@@ -293,6 +361,10 @@ public:
     void on_key_down(WPARAM key);
     void on_char(wchar_t ch);
     void on_wheel(int delta, int px, int py);
+    void start_sidebar_depth_anim(float to, unsigned duration);
+    void sidebar_project(float u, float v, float& x, float& y) const;
+    bool sidebar_unproject(float x, float y, float& u, float& v) const;
+    Node* hit_test(float x, float y);
     void handle_auth_result(LPARAM lp) { apply_auth_result(reinterpret_cast<AuthResult*>(lp)); }
     void handle_discord_links_msg(LPARAM lp) { auto* body = reinterpret_cast<std::string*>(lp); if (body) { apply_discord_links_body(*body); delete body; } }
     void handle_discord_result_msg(LPARAM lp) { auto* result = reinterpret_cast<DiscordAuthResult*>(lp); if (result) { apply_discord_result(result); delete result; } }
@@ -414,6 +486,16 @@ private:
     HomeSystem system_info_;
     bool system_loading_ = true;
     std::wstring shared_dir_;
+    bool sidebar_entered_ = false;
+    bool sidebar_hover_ = false;
+    bool sidebar_depth_animating_ = false;
+    float sidebar_depth_ = 0.0f;
+    float sidebar_from_ = 0.0f;
+    float sidebar_to_ = 0.0f;
+    ULONGLONG sidebar_start_ = 0;
+    unsigned sidebar_duration_ = 700;
+    D2D1_RECT_F sidebar_rect_ = D2D1::RectF();
+    bool sidebar3d_active_ = false;
     int discord_phase_ = 0;
     int discord_seq_ = 0;
     bool discord_force_ = false;
@@ -3184,6 +3266,60 @@ void App::rebuild_home() {
     hovered_ = nullptr;
 }
 
+void App::start_sidebar_depth_anim(float to, unsigned duration) {
+    sidebar_from_ = sidebar_depth_;
+    sidebar_to_ = std::clamp(to, 0.0f, 0.3f);
+    sidebar_start_ = now_ms();
+    sidebar_duration_ = duration ? duration : 1;
+    sidebar_depth_animating_ = true;
+    SetTimer(hwnd_, 2, 16, nullptr);
+}
+
+
+// Must mirror Renderer::draw_capture_3d (rotation about the left edge, depth 900).
+static QuadMap sidebar_quad(const D2D1_RECT_F& rect, float depth) {
+    float w = rect.right - rect.left;
+    float h = rect.bottom - rect.top;
+    float radians = std::fabs(depth) * 3.14159265f;
+    float z = w * std::sin(radians);
+    float scale = 900.0f / (900.0f + z);
+    float rx = w * 0.5f + (w * std::cos(radians) - w * 0.5f) * scale;
+    float inset_y = h * 0.5f * (1.0f - scale);
+    return quad_map(rect.left, rect.top, rect.left + rx, rect.top + inset_y,
+                    rect.left + rx, rect.bottom - inset_y, rect.left, rect.bottom);
+}
+void App::sidebar_project(float u, float v, float& x, float& y) const {
+    quad_project(sidebar_quad(sidebar_rect_, sidebar_depth_), u, v, x, y);
+}
+
+bool App::sidebar_unproject(float x, float y, float& u, float& v) const {
+    return quad_unproject(sidebar_quad(sidebar_rect_, sidebar_depth_), x, y, u, v);
+}
+
+Node* App::hit_test(float x, float y) {
+    if (menu_open_) {
+        if (Node* menu_hit = ui_hit(menu_.get(), x, y)) return menu_hit;
+    }
+    if (sidebar3d_active_ && sidebar_rect_.right > sidebar_rect_.left) {
+        float u = 0.0f, v = 0.0f;
+        if (sidebar_unproject(x, y, u, v)) {
+            float w = sidebar_rect_.right - sidebar_rect_.left;
+            float h = sidebar_rect_.bottom - sidebar_rect_.top;
+            if (Node* sidebar_hit = ui_hit(ui_.get(), sidebar_rect_.left + u * w,
+                                           sidebar_rect_.top + v * h))
+                return sidebar_hit;
+        }
+    }
+    if (page_ == L"home" && home_ && x >= home_slot_rect_.left &&
+        x <= home_slot_rect_.right && y >= home_slot_rect_.top && y <= home_slot_rect_.bottom) {
+        if (Node* home_hit = ui_hit(home_.get(), x, y)) return home_hit;
+    }
+    ui_set_skip_id(sidebar3d_active_ ? L"sidebar" : L"");
+    Node* hit = ui_hit(ui_.get(), x, y);
+    ui_set_skip_id(L"");
+    return hit;
+}
+
 void App::do_action(const std::wstring& action) {
     if (action == L"toggle:theme") {
         toggle_theme();
@@ -3269,6 +3405,19 @@ void App::tick() {
         caret_cur_ = caret_from_ + (caret_to_ - caret_from_) * spring_ease(t);
         ui_set_caret_angle(caret_cur_);
         if (t >= 1.0f) { caret_animating_ = false; caret_cur_ = caret_to_; } else busy = true;
+    }
+    if (!splash_active() && !sidebar_entered_) {
+        sidebar_entered_ = true;
+        start_sidebar_depth_anim(0.12f, 700);
+    }
+    if (sidebar_depth_animating_) {
+        float t = std::min(1.0f, float(now - sidebar_start_) / float(sidebar_duration_));
+        sidebar_depth_ = sidebar_from_ + (sidebar_to_ - sidebar_from_) * spring_ease(t);
+        sidebar_depth_ = std::clamp(sidebar_depth_, 0.0f, 0.3f);
+        if (t >= 1.0f) {
+            sidebar_depth_animating_ = false;
+            sidebar_depth_ = sidebar_to_;
+        } else busy = true;
     }
     update_toasts(now);
     if (!toasts_.empty() || (modal_open_ && modal_busy_)) busy = true;
@@ -3484,7 +3633,27 @@ void App::paint() {
         start_pill_slide();
     }
     renderer_.begin(ui_color(L"bg"));
+    Node* sidebar_node = ui_find(ui_.get(), L"sidebar");
+    bool captured = false;
+    if (sidebar_node) {
+        sidebar_rect_ = sidebar_node->rect;
+        ui_set_skip_id(L"");
+        float sidebar_w = sidebar_rect_.right - sidebar_rect_.left;
+        float sidebar_h = sidebar_rect_.bottom - sidebar_rect_.top;
+        if (renderer_.capture_begin(sidebar_w, sidebar_h, sidebar_rect_.left, sidebar_rect_.top)) {
+            ui_draw(sidebar_node, renderer_, hovered_);
+            renderer_.capture_end();
+            captured = true;
+        }
+    }
+    ui_set_skip_id(captured ? L"sidebar" : L"");
     ui_draw(ui_.get(), renderer_, hovered_);
+    ui_set_skip_id(L"");
+    sidebar3d_active_ = false;
+    if (captured) {
+        sidebar3d_active_ = renderer_.draw_capture_3d(sidebar_rect_, sidebar_depth_ * 180.0f);
+        if (!sidebar3d_active_) ui_draw(sidebar_node, renderer_, hovered_);
+    }
     if (page_ == L"home" && home_) {
         layout_home();
         renderer_.clip_push(home_slot_rect_);
@@ -3530,12 +3699,19 @@ void App::on_mouse_move(int px, int py) {
     }
     float x = px / renderer_.scale();
     float y = py / renderer_.scale();
-    Node* hit = nullptr;
-    if (page_ == L"home" && home_ && x >= home_slot_rect_.left && x <= home_slot_rect_.right &&
-        y >= home_slot_rect_.top && y <= home_slot_rect_.bottom)
-        hit = ui_hit(home_.get(), x, y);
-    if (!hit) hit = menu_open_ ? ui_hit(menu_.get(), x, y) : nullptr;
-    if (!hit) hit = ui_hit(ui_.get(), x, y);
+    bool over_sidebar = false;
+    if (sidebar3d_active_ && sidebar_rect_.right > sidebar_rect_.left) {
+        float u = 0.0f, v = 0.0f;
+        over_sidebar = sidebar_unproject(x, y, u, v);
+    } else {
+        over_sidebar = x >= sidebar_rect_.left && x <= sidebar_rect_.right &&
+                       y >= sidebar_rect_.top && y <= sidebar_rect_.bottom;
+    }
+    if (sidebar_entered_ && over_sidebar != sidebar_hover_) {
+        sidebar_hover_ = over_sidebar;
+        start_sidebar_depth_anim(over_sidebar ? 0.155f : 0.12f, 320);
+    }
+    Node* hit = hit_test(x, y);
     if (hit != hovered_) {
         hovered_ = hit;
         InvalidateRect(hwnd_, nullptr, FALSE);
@@ -3556,6 +3732,7 @@ void App::save_settings() {
     std::wstring path = settings_path();
     WritePrivateProfileStringW(L"engine", L"theme", dark_ ? L"dark" : L"light", path.c_str());
 }
+
 
 std::wstring App::active_nav_id() const {
     if (page_ == L"home") return L"nav-home";
@@ -3649,6 +3826,16 @@ void App::draw_account_menu() {
     const float menu_h = 151.0f + 48.0f * float(std::max<size_t>(1, accounts_.size()));
     float x = acct->rect.left;
     float bottom = acct->rect.top - 6.0f;
+    if (sidebar3d_active_ && sidebar_rect_.right > sidebar_rect_.left) {
+        float w = sidebar_rect_.right - sidebar_rect_.left;
+        float h = sidebar_rect_.bottom - sidebar_rect_.top;
+        float u = (acct->rect.left - sidebar_rect_.left) / w;
+        float v = (acct->rect.top - sidebar_rect_.top) / h;
+        float px = 0.0f, py = 0.0f;
+        sidebar_project(u, v, px, py);
+        x = px;
+        bottom = py - 6.0f;
+    }
     float y = bottom - menu_h;
     if (y < 8.0f) y = 8.0f;
     if (x + menu_w > w - 8.0f) x = w - 8.0f - menu_w;
@@ -3964,17 +4151,13 @@ void App::on_mouse_down(int px, int py) {
     if (toast_mouse_down(px, py)) return;
     float x = px / renderer_.scale();
     float y = py / renderer_.scale();
-    Node* hit = nullptr;
-    if (page_ == L"home" && home_ && x >= home_slot_rect_.left && x <= home_slot_rect_.right &&
-        y >= home_slot_rect_.top && y <= home_slot_rect_.bottom)
-        hit = ui_hit(home_.get(), x, y);
-    if (!hit && menu_open_) {
-        hit = ui_hit(menu_.get(), x, y);
-        if (hit) {
-            pressed_ = hit->action;
+    if (menu_open_) {
+        Node* menu_hit = ui_hit(menu_.get(), x, y);
+        if (menu_hit) {
+            pressed_ = menu_hit->action;
             return;
         }
-        Node* normal = ui_hit(ui_.get(), x, y);
+        Node* normal = hit_test(x, y);
         bool account = normal && normal->action == L"menu:account";
         close_account_menu();
         if (account) {
@@ -3982,7 +4165,7 @@ void App::on_mouse_down(int px, int py) {
             return;
         }
     }
-    if (!hit) hit = ui_hit(ui_.get(), x, y);
+    Node* hit = hit_test(x, y);
     pressed_ = hit ? hit->action : L"";
     if (pressed_ == L"window:drag") {
         pressed_.clear();
@@ -3996,12 +4179,7 @@ void App::on_mouse_up(int px, int py) {
     if (modal_open_) { pressed_.clear(); return; }
     float x = px / renderer_.scale();
     float y = py / renderer_.scale();
-    Node* hit = nullptr;
-    if (page_ == L"home" && home_ && x >= home_slot_rect_.left && x <= home_slot_rect_.right &&
-        y >= home_slot_rect_.top && y <= home_slot_rect_.bottom)
-        hit = ui_hit(home_.get(), x, y);
-    if (!hit) hit = menu_open_ ? ui_hit(menu_.get(), x, y) : nullptr;
-    if (!hit) hit = ui_hit(ui_.get(), x, y);
+    Node* hit = hit_test(x, y);
     std::wstring action = hit ? hit->action : L"";
     if (!pressed_.empty() && action == pressed_) do_action(action);
     pressed_.clear();

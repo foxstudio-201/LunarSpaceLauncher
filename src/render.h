@@ -50,6 +50,9 @@ public:
     void clip_pop();
     void opacity_push(float value);
     void opacity_pop();
+    bool capture_begin(float width, float height, float translate_x, float translate_y);
+    void capture_end();
+    bool draw_capture_3d(const D2D1_RECT_F& rect, float angle_degrees);
 
 private:
     bool create_target();
@@ -82,7 +85,8 @@ private:
     ComPtr<IDXGISwapChain1> swap_chain_;
     ComPtr<ID2D1Factory> d2d_factory_;
     ComPtr<ID2D1Device> d2d_device_;
-    ComPtr<ID2D1DeviceContext> d2d_context_;
+    ComPtr<ID2D1DeviceContext> main_context_;
+    ID2D1DeviceContext* d2d_context_ = nullptr;
     ComPtr<ID2D1Bitmap1> render_target_;
     ComPtr<IDWriteFactory> dwrite_;
     ComPtr<IWICImagingFactory> wic_;
@@ -91,5 +95,11 @@ private:
     std::unordered_map<std::wstring, FormatCache> formats_;
     std::unordered_map<std::wstring, SvgDef> svgs_;
     std::vector<ComPtr<ID2D1Layer>> layers_;
+    ComPtr<ID2D1Bitmap> capture_;
+    ComPtr<ID2D1BitmapRenderTarget> cap_rt_;
+    ID2D1RenderTarget* target_ = nullptr;
+    ComPtr<ID2D1Effect> perspective_;
+    UINT capture_width_ = 0;
+    UINT capture_height_ = 0;
     D2D1_MATRIX_3X2_F base_transform_ = D2D1::IdentityMatrix();
 };

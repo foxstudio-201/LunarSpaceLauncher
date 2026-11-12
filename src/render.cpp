@@ -1,6 +1,15 @@
 #include "render.h"
 #include <d2d1helper.h>
 #include <d2d1_1helper.h>
+#include <d2d1effects.h>
+#ifndef D2D1_3DPERSPECTIVETRANSFORM_PROP_CORNERS
+#define D2D1_3DPERSPECTIVETRANSFORM_PROP_INTERPOLATION_MODE 0
+#define D2D1_3DPERSPECTIVETRANSFORM_PROP_DEPTH 2
+#define D2D1_3DPERSPECTIVETRANSFORM_PROP_PERSPECTIVE_ORIGIN 3
+#define D2D1_3DPERSPECTIVETRANSFORM_PROP_ROTATION_ORIGIN 6
+#define D2D1_3DPERSPECTIVETRANSFORM_PROP_ROTATION 7
+#define D2D1_3DPERSPECTIVETRANSFORM_INTERPOLATION_MODE_LINEAR 1
+#endif
 #include <wincodec.h>
 #include <dxgi1_3.h>
 #include <cstring>
@@ -70,8 +79,10 @@ bool Renderer::init(HWND hwnd) {
     if (FAILED(factory1->CreateDevice(dxgi_device.get(), d2d_device_.put())))
         return false;
     if (FAILED(d2d_device_->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE,
-                                                d2d_context_.put())))
+                                                main_context_.put())))
         return false;
+    d2d_context_ = main_context_.get();
+    target_ = d2d_context_;
     d2d_context_->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
 
     if (FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
@@ -127,19 +138,21 @@ bool Renderer::create_target() {
 
 void Renderer::begin(Color clear) {
     if (!d2d_context_ || !render_target_) return;
+    target_ = d2d_context_;
     if (hwnd_) {
         UINT dpi = GetDpiForWindow(hwnd_);
         if (dpi > 0) scale_ = dpi / 96.0f;
     }
-    d2d_context_->BeginDraw();
+    target_->BeginDraw();
     base_transform_ = D2D1::Matrix3x2F::Scale(scale_, scale_);
-    d2d_context_->SetTransform(base_transform_);
-    d2d_context_->Clear(to_d2d(clear));
+    target_->SetTransform(base_transform_);
+    target_->Clear(to_d2d(clear));
 }
 
 void Renderer::end() {
     if (!d2d_context_ || !swap_chain_) return;
-    HRESULT hr = d2d_context_->EndDraw();
+    target_ = d2d_context_;
+    HRESULT hr = target_->EndDraw();
     if (hr == D2DERR_RECREATE_TARGET) {
         render_target_.reset();
         d2d_context_->SetTarget(nullptr);
@@ -219,12 +232,12 @@ void Renderer::draw_text(const std::wstring& text, D2D1_RECT_F rect, float size,
     tl->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
     float y = rect.top;
     ComPtr<ID2D1SolidColorBrush> brush;
-    d2d_context_->CreateSolidColorBrush(to_d2d(color), brush.put());
+    target_->CreateSolidColorBrush(to_d2d(color), brush.put());
     if (brush) {
         brush->SetOpacity(std::clamp(opacity, 0.0f, 1.0f));
-        d2d_context_->PushAxisAlignedClip(rect, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-        d2d_context_->DrawTextLayout(D2D1::Point2F(rect.left, y), tl, brush.get());
-        d2d_context_->PopAxisAlignedClip();
+        target_->PushAxisAlignedClip(rect, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+        target_->DrawTextLayout(D2D1::Point2F(rect.left, y), tl, brush.get());
+        target_->PopAxisAlignedClip();
     }
     tl->Release();
 }
@@ -232,28 +245,28 @@ void Renderer::draw_text(const std::wstring& text, D2D1_RECT_F rect, float size,
 void Renderer::fill_rect(D2D1_RECT_F rect, float radius, Color color, float opacity) {
     if (!color.visible() || opacity <= 0.001f) return;
     ComPtr<ID2D1SolidColorBrush> brush;
-    d2d_context_->CreateSolidColorBrush(to_d2d(color), brush.put());
+    target_->CreateSolidColorBrush(to_d2d(color), brush.put());
     if (!brush) return;
     brush->SetOpacity(std::clamp(opacity, 0.0f, 1.0f));
     float r = std::max(0.0f, radius);
     if (r > 0.5f)
-        d2d_context_->FillRoundedRectangle(D2D1::RoundedRect(rect, r, r), brush.get());
+        target_->FillRoundedRectangle(D2D1::RoundedRect(rect, r, r), brush.get());
     else
-        d2d_context_->FillRectangle(rect, brush.get());
+        target_->FillRectangle(rect, brush.get());
 }
 
 void Renderer::stroke_rect(D2D1_RECT_F rect, float radius, Color color, float width,
                            float opacity) {
     if (!color.visible() || opacity <= 0.001f || width <= 0.0f) return;
     ComPtr<ID2D1SolidColorBrush> brush;
-    d2d_context_->CreateSolidColorBrush(to_d2d(color), brush.put());
+    target_->CreateSolidColorBrush(to_d2d(color), brush.put());
     if (!brush) return;
     brush->SetOpacity(std::clamp(opacity, 0.0f, 1.0f));
     float r = std::max(0.0f, radius);
     if (r > 0.5f)
-        d2d_context_->DrawRoundedRectangle(D2D1::RoundedRect(rect, r, r), brush.get(), width);
+        target_->DrawRoundedRectangle(D2D1::RoundedRect(rect, r, r), brush.get(), width);
     else
-        d2d_context_->DrawRectangle(rect, brush.get(), width);
+        target_->DrawRectangle(rect, brush.get(), width);
 }
 
 void Renderer::draw_image(ID2D1Bitmap* bitmap, D2D1_RECT_F rect, float radius,
@@ -274,19 +287,19 @@ void Renderer::draw_image(ID2D1Bitmap* bitmap, D2D1_RECT_F rect, float radius,
         d2d_factory_->CreateRoundedRectangleGeometry(
             D2D1::RoundedRect(rect, radius, radius), geometry.put());
         ComPtr<ID2D1Layer> layer;
-        d2d_context_->CreateLayer(nullptr, layer.put());
+        target_->CreateLayer(nullptr, layer.put());
         if (geometry && layer) {
             D2D1_LAYER_PARAMETERS params = D2D1::LayerParameters(
                 D2D1::InfiniteRect(), geometry.get(), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
                 D2D1::IdentityMatrix(), std::clamp(opacity, 0.0f, 1.0f));
-            d2d_context_->PushLayer(&params, layer.get());
-            d2d_context_->DrawBitmap(bitmap, rect, 1.0f,
+            target_->PushLayer(&params, layer.get());
+            target_->DrawBitmap(bitmap, rect, 1.0f,
                                      D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, src);
-            d2d_context_->PopLayer();
+            target_->PopLayer();
             return;
         }
     }
-    d2d_context_->DrawBitmap(bitmap, rect, std::clamp(opacity, 0.0f, 1.0f),
+    target_->DrawBitmap(bitmap, rect, std::clamp(opacity, 0.0f, 1.0f),
                              D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, src);
 }
 
@@ -328,27 +341,93 @@ void Renderer::draw_image_path(const std::wstring& path, D2D1_RECT_F rect, float
 }
 
 void Renderer::clip_push(D2D1_RECT_F rect) {
-    d2d_context_->PushAxisAlignedClip(rect, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+    target_->PushAxisAlignedClip(rect, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
 }
 
-void Renderer::clip_pop() { d2d_context_->PopAxisAlignedClip(); }
+void Renderer::clip_pop() { target_->PopAxisAlignedClip(); }
 
 void Renderer::opacity_push(float value) {
     if (!d2d_context_) return;
     ComPtr<ID2D1Layer> layer;
-    if (FAILED(d2d_context_->CreateLayer(nullptr, layer.put())) || !layer) return;
+    if (FAILED(target_->CreateLayer(nullptr, layer.put())) || !layer) return;
     D2D1_LAYER_PARAMETERS params = D2D1::LayerParameters(
         D2D1::InfiniteRect(), nullptr, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
         D2D1::IdentityMatrix(), std::clamp(value, 0.0f, 1.0f), nullptr,
         D2D1_LAYER_OPTIONS_NONE);
-    d2d_context_->PushLayer(params, layer.get());
+    target_->PushLayer(params, layer.get());
     layers_.push_back(std::move(layer));
 }
 
 void Renderer::opacity_pop() {
     if (!d2d_context_ || layers_.empty()) return;
-    d2d_context_->PopLayer();
+    target_->PopLayer();
     layers_.pop_back();
+}
+
+
+bool Renderer::capture_begin(float width, float height, float translate_x, float translate_y) {
+    if (!main_context_) return false;
+    if (!cap_rt_ || capture_width_ != UINT(width) || capture_height_ != UINT(height)) {
+        cap_rt_.reset();
+        capture_.reset();
+        D2D1_SIZE_F size = D2D1::SizeF(width, height);
+        D2D1_SIZE_U pixel_size = D2D1::SizeU(std::max<UINT>(1, UINT(width * scale_)),
+                                             std::max<UINT>(1, UINT(height * scale_)));
+        D2D1_PIXEL_FORMAT fmt = D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,
+                                                  D2D1_ALPHA_MODE_PREMULTIPLIED);
+        if (FAILED(main_context_->CreateCompatibleRenderTarget(
+                &size, &pixel_size, &fmt,
+                D2D1_COMPATIBLE_RENDER_TARGET_OPTIONS_NONE, cap_rt_.put())))
+            return false;
+        if (FAILED(cap_rt_->GetBitmap(capture_.put()))) return false;
+        capture_width_ = UINT(width);
+        capture_height_ = UINT(height);
+    }
+    cap_rt_->BeginDraw();
+    cap_rt_->Clear(D2D1::ColorF(0, 0.0f));
+    base_transform_ = D2D1::Matrix3x2F::Translation(-translate_x, -translate_y);
+    target_ = cap_rt_.get();
+    target_->SetTransform(base_transform_);
+    return true;
+}
+
+void Renderer::capture_end() {
+    if (!cap_rt_) return;
+    cap_rt_->EndDraw();
+    target_ = d2d_context_;
+    base_transform_ = D2D1::Matrix3x2F::Scale(scale_, scale_);
+    if (target_) target_->SetTransform(base_transform_);
+}
+
+bool Renderer::draw_capture_3d(const D2D1_RECT_F& rect, float angle_degrees) {
+    if (!d2d_context_ || !capture_) return false;
+    if (!perspective_) {
+        HRESULT hr = d2d_context_->CreateEffect(CLSID_D2D13DPerspectiveTransform,
+                                               perspective_.put());
+        if (FAILED(hr)) return false;
+    }
+    perspective_->SetInput(0, capture_.get());
+    float w = rect.right - rect.left;
+    float h = rect.bottom - rect.top;
+    // Rotation origin/depth must stay in sync with App::sidebar_quad, which
+    // mirrors this geometry for hit testing and menu anchoring.
+    FLOAT depth = 900.0f;
+    INT32 mode = D2D1_3DPERSPECTIVETRANSFORM_INTERPOLATION_MODE_LINEAR;
+    perspective_->SetValue(D2D1_3DPERSPECTIVETRANSFORM_PROP_INTERPOLATION_MODE,
+                           reinterpret_cast<const BYTE*>(&mode), UINT32(sizeof(mode)));
+    perspective_->SetValue(D2D1_3DPERSPECTIVETRANSFORM_PROP_DEPTH,
+                           reinterpret_cast<const BYTE*>(&depth), UINT32(sizeof(depth)));
+    D2D1_VECTOR_2F viewer{ w * 0.5f, h * 0.5f };
+    perspective_->SetValue(D2D1_3DPERSPECTIVETRANSFORM_PROP_PERSPECTIVE_ORIGIN,
+                           reinterpret_cast<const BYTE*>(&viewer), UINT32(sizeof(viewer)));
+    D2D1_VECTOR_3F origin{ 0.0f, h * 0.5f, 0.0f };
+    perspective_->SetValue(D2D1_3DPERSPECTIVETRANSFORM_PROP_ROTATION_ORIGIN,
+                           reinterpret_cast<const BYTE*>(&origin), UINT32(sizeof(origin)));
+    D2D1_VECTOR_3F rotation{ 0.0f, angle_degrees, 0.0f };
+    perspective_->SetValue(D2D1_3DPERSPECTIVETRANSFORM_PROP_ROTATION,
+                           reinterpret_cast<const BYTE*>(&rotation), UINT32(sizeof(rotation)));
+    d2d_context_->DrawImage(perspective_.get(), D2D1::Point2F(rect.left, rect.top));
+    return true;
 }
 
 namespace {
@@ -630,28 +709,25 @@ void Renderer::draw_svg(const std::wstring& path, D2D1_RECT_F rect, Color color,
     float h = rect.bottom - rect.top;
     if (w <= 0.0f || h <= 0.0f) return;
     D2D1_MATRIX_3X2_F icon = {
-        (w / def->vb_w) * scale_, 0.0f,
-        0.0f, (h / def->vb_h) * scale_,
-        rect.left * scale_, rect.top * scale_,
+        w / def->vb_w, 0.0f,
+        0.0f, h / def->vb_h,
+        rect.left, rect.top,
     };
     if (rotation != 0.0f) {
-        D2D1_POINT_2F center = D2D1::Point2F((rect.left + w * 0.5f) * scale_,
-                                             (rect.top + h * 0.5f) * scale_);
+        D2D1_POINT_2F center = D2D1::Point2F(rect.left + w * 0.5f, rect.top + h * 0.5f);
         icon = icon * D2D1::Matrix3x2F::Rotation(rotation, center);
     }
-    d2d_context_->SetTransform(base_transform_);
-    d2d_context_->PushAxisAlignedClip(D2D1::RectF(rect.left, rect.top, rect.right, rect.bottom),
-                                     D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-    d2d_context_->SetTransform(icon);
+    target_->PushAxisAlignedClip(rect, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+    target_->SetTransform(icon * base_transform_);
     for (const auto& part : def->parts) {
         ComPtr<ID2D1SolidColorBrush> brush;
-        d2d_context_->CreateSolidColorBrush(to_d2d(color), brush.put());
+        target_->CreateSolidColorBrush(to_d2d(color), brush.put());
         if (!brush) continue;
         brush->SetOpacity(std::clamp(opacity * part.opacity, 0.0f, 1.0f));
-        d2d_context_->FillGeometry(part.geometry.get(), brush.get());
+        target_->FillGeometry(part.geometry.get(), brush.get());
     }
-    d2d_context_->PopAxisAlignedClip();
-    d2d_context_->SetTransform(base_transform_);
+    target_->PopAxisAlignedClip();
+    target_->SetTransform(base_transform_);
 }
 
 void Renderer::draw_rgba(const std::vector<unsigned char>& pixels, int width, int height,
@@ -661,11 +737,11 @@ void Renderer::draw_rgba(const std::vector<unsigned char>& pixels, int width, in
     D2D1_BITMAP_PROPERTIES props = D2D1::BitmapProperties(
         D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED),
         96.0f, 96.0f);
-    if (FAILED(d2d_context_->CreateBitmap(D2D1::SizeU(UINT(width), UINT(height)),
+    if (FAILED(target_->CreateBitmap(D2D1::SizeU(UINT(width), UINT(height)),
                                           pixels.data(), UINT(width * 4), &props,
                                           bitmap.put())))
         return;
-    d2d_context_->DrawBitmap(bitmap.get(), rect, std::clamp(opacity, 0.0f, 1.0f),
+    target_->DrawBitmap(bitmap.get(), rect, std::clamp(opacity, 0.0f, 1.0f),
                              D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, nullptr);
 }
 
