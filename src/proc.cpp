@@ -10,6 +10,14 @@ std::wstring quote_arg(const std::wstring& value) {
     return L"\"" + value + L"\"";
 }
 
+// CreateProcessW fails with ERROR_DIRECTORY when lpCurrentDirectory does not exist.
+const wchar_t* valid_workdir(const std::wstring& cwd) {
+    if (cwd.empty()) return nullptr;
+    DWORD attr = GetFileAttributesW(cwd.c_str());
+    if (attr == INVALID_FILE_ATTRIBUTES || !(attr & FILE_ATTRIBUTE_DIRECTORY)) return nullptr;
+    return cwd.c_str();
+}
+
 std::string strip_ansi(const std::string& text) {
     std::string out;
     out.reserve(text.size());
@@ -63,9 +71,8 @@ bool run_process_capture(const std::wstring& exe, const std::wstring& args,
     si.hStdInput = nullptr;
     PROCESS_INFORMATION pi{};
     std::wstring cmdline = quote_arg(exe) + (args.empty() ? L"" : L" " + args);
-    std::wstring workdir = cwd.empty() ? L"" : cwd;
     BOOL ok = CreateProcessW(nullptr, cmdline.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW,
-                             nullptr, workdir.empty() ? nullptr : workdir.c_str(), &si, &pi);
+                             nullptr, valid_workdir(cwd), &si, &pi);
     close_handle(out_pipe.write);
     close_handle(err_pipe.write);
     if (!ok) {
@@ -136,7 +143,7 @@ bool ChildProcess::start(const std::wstring& exe, const std::wstring& args,
     si.hStdInput = nullptr;
     std::wstring cmdline = quote_arg(exe) + (args.empty() ? L"" : L" " + args);
     BOOL ok = CreateProcessW(nullptr, cmdline.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW,
-                             nullptr, cwd.empty() ? nullptr : cwd.c_str(), &si, &pi_);
+                             nullptr, valid_workdir(cwd), &si, &pi_);
     close_handle(out_pipe.write);
     close_handle(err_pipe.write);
     if (!ok) {

@@ -2,6 +2,7 @@
 #include "common.h"
 #include "fs.h"
 #include "java.h"
+#include "loaders.h"
 #include "proc.h"
 #include <algorithm>
 #include <atomic>
@@ -188,8 +189,24 @@ bool LaunchManager::running(const std::wstring& instance_id) const {
 
 void LaunchManager::Job::run() {
     McPaths paths = mc_paths(spec.shared_dir);
+    std::wstring version_id = spec.version_id;
+    if (!spec.loader.empty() && spec.loader != L"vanilla") {
+        std::wstring loader_error;
+        std::wstring loader_id;
+        if (!loader_prepare_profile(spec.loader, spec.version_id, spec.loader_version, paths,
+                                    loader_id, &loader_error)) {
+            running.store(false);
+            if (callbacks.exit)
+                callbacks.exit(spec.instance_id, -1, false, CrashInfo{},
+                               loader_error.empty() ? L"Không chuẩn bị được loader." : loader_error);
+            return;
+        }
+        emit_log(L"[XyoLauncher] Loader " + spec.loader + L" " + spec.loader_version + L" (" +
+                 spec.version_id + L") → " + loader_id);
+        version_id = loader_id;
+    }
     McInstall install;
-    bool ok = mc_install_version(spec.version_id, paths,
+    bool ok = mc_install_version(version_id, paths,
                                  [this](const ProgressReport& report) {
                                      if (callbacks.progress) callbacks.progress(spec.instance_id, report);
                                  },
@@ -247,6 +264,8 @@ void LaunchManager::Job::run() {
                            plan.error.empty() ? L"Không dựng được lệnh khởi chạy." : plan.error);
         return;
     }
+
+    dir_create_all(spec.instance_dir);
 
     std::vector<std::string> tail;
     std::mutex tail_mutex;

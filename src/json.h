@@ -79,6 +79,7 @@ private:
         while (p < s.size() && (s[p] == ' ' || s[p] == '\t' || s[p] == '\n' || s[p] == '\r')) ++p;
     }
     bool parse_value(const std::string& s, size_t& p) {
+        if (p == 0 && s.compare(0, 3, "\xEF\xBB\xBF") == 0) p = 3;
         skip(s, p);
         if (p >= s.size()) return false;
         char c = s[p];

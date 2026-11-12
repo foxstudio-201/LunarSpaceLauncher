@@ -18,6 +18,8 @@ struct InstanceLaunchSpec {
     std::wstring instance_id;
     std::wstring instance_dir;
     std::wstring version_id;
+    std::wstring loader;
+    std::wstring loader_version;
     std::wstring username;
     std::wstring uuid;
     std::wstring access_token;

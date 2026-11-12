@@ -5578,6 +5578,8 @@ void App::launch_instance(const std::wstring& id_in, const std::wstring& quick_t
     spec.instance_id = id;
     spec.instance_dir = inst->dir;
     spec.version_id = inst->version_id.empty() ? inst->version : inst->version_id;
+    spec.loader = inst->loader;
+    spec.loader_version = inst->loader_version;
     const Account* account = active_account();
     spec.username = account ? account->name : (inst->username.empty() ? L"Player" : inst->username);
     spec.uuid = account && !account->uuid.empty() ? account->uuid

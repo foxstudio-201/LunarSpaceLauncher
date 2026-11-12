@@ -302,9 +302,25 @@ static Json merge_versions(const Json& parent, const Json& child) {
     set_if_missing("type");
     set_if_missing("mainClass");
     set_if_missing("minecraftArguments");
-    if (!merged.find("arguments")) {
-        if (const Json* args = parent.find("arguments"))
-            merged.obj.push_back({"arguments", *args});
+    {
+        const Json* parent_args = parent.find("arguments");
+        const Json* child_args = child.find("arguments");
+        Json arguments;
+        arguments.type = Json::Type::Object;
+        for (const char* key : { "jvm", "game" }) {
+            Json list;
+            list.type = Json::Type::Array;
+            for (const Json* src : { parent_args, child_args }) {
+                const Json* part = src ? src->find(key) : nullptr;
+                if (part && part->type == Json::Type::Array)
+                    list.arr.insert(list.arr.end(), part->arr.begin(), part->arr.end());
+            }
+            arguments.obj.push_back({key, list});
+        }
+        bool replaced = false;
+        for (auto& kv : merged.obj)
+            if (kv.first == "arguments") { kv.second = arguments; replaced = true; }
+        if (!replaced && (parent_args || child_args)) merged.obj.push_back({"arguments", arguments});
     }
     std::vector<std::string> child_keys;
     if (const Json* libs = child.find("libraries"))
@@ -670,10 +686,19 @@ McLaunchPlan mc_build_launch(const Json& chain, const McInstall& install, const 
             if (!library_allowed(lib)) continue;
             const Json* downloads = lib.find("downloads");
             const Json* artifact = downloads ? downloads->find("artifact") : nullptr;
-            if (!artifact) continue;
-            std::string rel = json_str(artifact, "path");
-            if (rel.empty()) continue;
-            classpath_parts.push_back(path_join(paths.libraries, utf8_to_wide(rel)));
+            if (artifact) {
+                std::string rel = json_str(artifact, "path");
+                if (!rel.empty())
+                    classpath_parts.push_back(path_join(paths.libraries, utf8_to_wide(rel)));
+                continue;
+            }
+            // Maven-style entries (Fabric/Quilt profiles) carry only name + repo url.
+            LibParts parts = split_lib_name(json_str(&lib, "name"));
+            if (parts.group.empty() || parts.artifact.empty() || parts.version.empty()) continue;
+            std::wstring full =
+                path_join(paths.libraries,
+                          maven_rel(parts.group, parts.artifact, parts.version, parts.classifier));
+            if (path_exists(full)) classpath_parts.push_back(full);
         }
     }
     std::wstring jar_path =

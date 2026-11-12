@@ -20,6 +20,7 @@ add_executable(XyoLauncherEngine WIN32
   src/mc_install.cpp
   src/java.cpp
   src/launch.cpp
+  src/loaders.cpp
   src/third_party/miniz.c
   resource.rc
 )
