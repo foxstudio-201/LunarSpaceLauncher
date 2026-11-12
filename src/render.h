@@ -64,7 +64,8 @@ public:
     bool capture_item_begin(float width, float height, float translate_x, float translate_y);
     void capture_item_end();
     bool sidebar_item_ready();
-    bool draw_sidebar_item_3d(const D2D1_RECT_F& rect, float angle_degrees, float lift);
+    bool draw_sidebar_item_3d(const D2D1_RECT_F& rect, const D2D1_RECT_F& sidebar,
+                              float angle_degrees, float lift);
 
 private:
     bool create_target();
@@ -74,8 +75,10 @@ private:
                         UINT& pixel_w, UINT& pixel_h);
     void draw_textured_quad(ID3D11ShaderResourceView* srv, const float* verts,
                             const float* tint);
-    void project_sidebar_quad(const D2D1_RECT_F& rect, float angle_degrees, float lift,
+    void project_sidebar_quad(const D2D1_RECT_F& rect, float angle_degrees,
                               float* verts) const;
+    void project_item_quad(const D2D1_RECT_F& item, const D2D1_RECT_F& sidebar,
+                           float angle_degrees, float lift, float* verts) const;
     IDWriteTextFormat* format(float size, int weight, bool mono, TextAlign align, bool wrap);
     IDWriteTextLayout* layout(const std::wstring& text, float size, int weight, bool mono,
                               float max_width, float max_height, TextAlign align,

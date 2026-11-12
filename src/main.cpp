@@ -3626,11 +3626,6 @@ void App::paint() {
         ui_set_skip_id(L"");
         if (renderer_.capture_item_begin(iw, ih, sidebar_item_rect_.left,
                                          sidebar_item_rect_.top)) {
-            float lift_alpha = std::clamp(sidebar_rise_, 0.0f, 1.0f);
-            renderer_.fill_rect(row, sidebar_item_->style.radius, ui_token(L"surfaceActive"),
-                                lift_alpha);
-            renderer_.stroke_rect(row, sidebar_item_->style.radius, ui_token(L"border"), 1.0f,
-                                  lift_alpha * 0.5f);
             ui_draw(sidebar_item_, renderer_, hovered_);
             renderer_.capture_item_end();
             item_captured = true;
@@ -3665,8 +3660,8 @@ void App::paint() {
     if (use3d && main_ok)
         sidebar3d_active_ = renderer_.draw_sidebar_3d(sidebar_rect_, kSidebarDepth * 180.0f);
     if (sidebar3d_active_ && sidebar_item_valid_ && sidebar_rise_ > 0.005f)
-        renderer_.draw_sidebar_item_3d(sidebar_item_rect_, kSidebarDepth * 180.0f,
-                                       sidebar_rise_);
+        renderer_.draw_sidebar_item_3d(sidebar_item_rect_, sidebar_rect_,
+                                       kSidebarDepth * 180.0f, sidebar_rise_);
     renderer_.begin_overlay();
     draw_account_menu();
     draw_toasts();
