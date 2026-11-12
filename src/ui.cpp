@@ -99,6 +99,25 @@ Color blend(Color a, Color b, float t) {
                   a.a + (b.a - a.a) * t };
 }
 
+// Wallpaper mode palette (mirrors GLASS in the Electron launcher): fixed dark
+// glass tones, light text with alpha so it stays readable on any artwork.
+Palette make_glass() {
+    return Palette{ Color{},
+                    Color::rgb(0x090C12, 0.50f), Color::rgb(0x10141C, 0.42f),
+                    Color::rgb(0xFFFFFF, 0.13f), Color::rgb(0xF2F4F8),
+                    Color::rgb(0xF2F4F8, 0.80f), Color::rgb(0xF2F4F8, 0.60f),
+                    Color::rgb(0xFFFFFF, 0.14f), Color::rgb(0xFFFFFF, 0.08f),
+                    Color::rgb(0xFFFFFF, 0.08f), Color::rgb(0xFFFFFF, 0.10f),
+                    Color::rgb(0xE9B872), Color::rgb(0xF3C98A), Color::rgb(0xF0C991),
+                    Color::rgb(0x1B1409), Color::rgb(0x22C55E), Color::rgb(0xF5B84B),
+                    Color::rgb(0xF87171), Color::rgb(0x60A5FA), Color::rgb(0x05070A) };
+}
+
+Palette& palette_glass() {
+    static Palette glass = make_glass();
+    return glass;
+}
+
 }  // namespace
 
 void ui_set_dark(bool dark) { g_dark = dark; }
@@ -140,6 +159,7 @@ Color ui_color(const wchar_t* token) {
         p = 1.0f - std::pow(1.0f - p, 3.0f);
         night = g_theme_from + (g_theme_to - g_theme_from) * p;
     }
+    if (g_glass) return pick(palette_glass(), key);
     if (night >= 0.999f) return pick(palette_dark(), key);
     if (night <= 0.001f) return pick(palette_light(), key);
     return blend(pick(palette_light(), key), pick(palette_dark(), key), night);
