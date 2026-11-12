@@ -84,7 +84,8 @@ column bg=$bg growx=1 growy=1 {
         }
         spacer growx=1
         row id=header-tools-home gap=8 {
-          row id=btn-versions height=34 paddingx=12 radius=8 bg=$input border=1 bordercolor=$border action=nav:versions {
+          row id=btn-versions height=34 paddingx=12 gap=6 radius=8 bg=$input border=1 bordercolor=$border action=nav:versions {
+            image src=assets/icons/cube.svg width=14 height=14 color=$label
             text value="Phiên bản  →" size=11 weight=600 color=$label
           }
           row id=theme-switch width=74 height=30 radius=15 action=toggle:theme {
@@ -102,16 +103,16 @@ column bg=$bg growx=1 growy=1 {
       }
 
       row id=home-tabs gap=4 {
-        row height=30 paddingx=10 radius=8 bg=$input border=1 bordercolor=$border action=noop {
+        row id=tab-overview height=30 paddingx=10 radius=8 bg=$input border=1 bordercolor=$border action=home:tab:0 {
           text value="Tổng quan" size=11 weight=600 color=$text
         }
-        row height=30 paddingx=10 radius=8 action=noop {
+        row id=tab-recent height=30 paddingx=10 radius=8 action=home:tab:1 {
           text value="Chơi gần đây" size=11 weight=600 color=$faint
         }
-        row height=30 paddingx=10 radius=8 action=noop {
+        row id=tab-instances height=30 paddingx=10 radius=8 action=home:tab:2 {
           text value="Phiên bản" size=11 weight=600 color=$faint
         }
-        row height=30 paddingx=10 radius=8 action=noop {
+        row id=tab-system height=30 paddingx=10 radius=8 action=home:tab:3 {
           text value="Hệ thống" size=11 weight=600 color=$faint
         }
       }
@@ -125,61 +126,9 @@ column bg=$bg growx=1 growy=1 {
         }
       }
 
-      column id=home-view growx=1 growy=1 gap=14 {
-        row id=hero height=200 radius=16 bg=$surface bgimage=assets/img/background.png overlay=#0000007A border=1 bordercolor=$border padding=20 gap=18 {
-          row width=84 height=84 radius=16 bg=$ok {
-            spacer growx=1
-            text value="▶" size=32 color=#04140A
-            spacer growx=1
-          }
-          column growx=1 growy=1 gap=8 {
-            row gap=6 {
-              text value="●" size=9 color=$ok
-              text value="SẴN SÀNG" size=9 weight=700 color=$ok
-            }
-            text value="Vanilla 26.2" size=28 weight=700 color=#F4F5F8
-            row gap=6 {
-              row height=20 paddingx=6 radius=5 bg=#FFFFFF1A { text value="vanilla" size=9 weight=600 color=#F4F5F8 }
-              row height=20 paddingx=6 radius=5 bg=#FFFFFF1A { text value="26.2" size=9 weight=600 color=#F4F5F8 }
-              row height=20 paddingx=6 radius=5 bg=#FFFFFF1A { text value="6144 MB" size=9 weight=600 color=#F4F5F8 }
-            }
-            spacer growy=1
-            row gap=24 {
-              column { text value="RAM" size=8 weight=700 color=#E8EBF1 text value="6144 MB" size=11 weight=600 color=#F4F5F8 }
-              column { text value="TRÌNH TẢI" size=8 weight=700 color=#E8EBF1 text value="vanilla" size=11 weight=600 color=#F4F5F8 }
-              column { text value="THỜI GIAN CHƠI" size=8 weight=700 color=#E8EBF1 text value="2h 0m" size=11 weight=600 color=#F4F5F8 }
-              column { text value="LẦN CHƠI CUỐI" size=8 weight=700 color=#E8EBF1 text value="hôm nay" size=11 weight=600 color=#F4F5F8 }
-            }
-          }
-          row id=btn-open width=64 height=40 radius=10 bg=#F4F5F8 action=nav:versions {
-            spacer growx=1
-            text value="Mở" size=11 weight=700 color=#1B1409
-            spacer growx=1
-          }
+      column id=home-view growx=1 growy=1 {
+        column id=home-slot growx=1 growy=1 {
         }
-
-        text value="BẢN PHÁT HÀNH" size=10 weight=700 color=$faint
-
-        row gap=10 {
-          column width=190 height=104 radius=12 bg=$surface border=1 bordercolor=$border padding=14 gap=6 {
-            text value="26.3" size=18 weight=700 color=$text
-            text value="RELEASE · MỚI NHẤT" size=9 weight=700 color=$ok
-          }
-          column width=190 height=104 radius=12 bg=$surface border=1 bordercolor=$border padding=14 gap=6 {
-            text value="26.2" size=18 weight=700 color=$text
-            text value="RELEASE" size=9 weight=700 color=$ok
-          }
-          column width=190 height=104 radius=12 bg=$surface border=1 bordercolor=$border padding=14 gap=6 {
-            text value="26.1.2" size=18 weight=700 color=$text
-            text value="RELEASE" size=9 weight=700 color=$ok
-          }
-          column width=190 height=104 radius=12 bg=$surface border=1 bordercolor=$border padding=14 gap=6 {
-            text value="1.21.11" size=18 weight=700 color=$text
-            text value="RELEASE" size=9 weight=700 color=$ok
-          }
-        }
-
-        text value="Ghi chú: engine MVP đang dựng shell + splash + home bằng DSL riêng (Direct2D, một process)." size=10 color=$faint
       }
 
       column id=accounts-view hidden=1 growx=1 growy=1 gap=10 {

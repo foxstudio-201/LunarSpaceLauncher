@@ -132,13 +132,32 @@ struct Account {
     Json raw;
 };
 
+struct RecentWorldInfo {
+    std::wstring folder;
+    std::wstring name;
+    std::wstring played_at;
+};
+
+struct RecentServerInfo {
+    std::wstring host;
+    int port = 25565;
+    std::wstring played_at;
+};
+
 struct InstanceInfo {
     std::wstring id;
     std::wstring name;
     std::wstring version;
     std::wstring loader;
+    std::wstring loader_version;
     std::wstring status;
     std::wstring icon;
+    std::wstring last_played;
+    std::wstring created;
+    int memory_mb = 4096;
+    double playtime_ms = 0;
+    std::vector<RecentWorldInfo> worlds;
+    std::vector<RecentServerInfo> servers;
 };
 
 struct AuthResult {
@@ -150,6 +169,49 @@ struct AuthResult {
     std::wstring xuid;
     std::string token_json;
 };
+
+struct VersionInfo {
+    std::wstring id;
+    std::wstring release_time;
+    std::wstring type;
+};
+
+struct LoaderInfo {
+    std::wstring id;
+    std::wstring name;
+    std::wstring desc;
+    std::wstring build;
+    bool supported = false;
+    bool stable = false;
+    bool vanilla = false;
+    bool loaded = false;
+    int games = 0;
+};
+
+struct HomeData {
+    bool ok = false;
+    std::wstring latest;
+    std::wstring latest_snapshot;
+    std::vector<VersionInfo> releases;
+    int total = 0;
+    std::vector<LoaderInfo> loaders;
+};
+
+struct HomeSystem {
+    bool ok = false;
+    unsigned long long total_mem = 0;
+    unsigned long long free_mem = 0;
+    unsigned long long disk_total = 0;
+    unsigned long long disk_free = 0;
+    unsigned long long assets_bytes = 0;
+    unsigned long long java_bytes = 0;
+    int cpu_threads = 0;
+    int java_count = 0;
+    std::wstring cpu_model;
+    std::wstring shared_dir;
+};
+
+static std::vector<LoaderInfo> default_loaders();
 
 struct ModalLayout {
     D2D1_RECT_F card = D2D1::RectF();
@@ -230,10 +292,13 @@ public:
     std::wstring active_nav_id() const;
     void on_key_down(WPARAM key);
     void on_char(wchar_t ch);
+    void on_wheel(int delta, int px, int py);
     void handle_auth_result(LPARAM lp) { apply_auth_result(reinterpret_cast<AuthResult*>(lp)); }
     void handle_discord_links_msg(LPARAM lp) { auto* body = reinterpret_cast<std::string*>(lp); if (body) { apply_discord_links_body(*body); delete body; } }
     void handle_discord_result_msg(LPARAM lp) { auto* result = reinterpret_cast<DiscordAuthResult*>(lp); if (result) { apply_discord_result(result); delete result; } }
     void handle_unlink_msg(LPARAM lp) { auto* payload = reinterpret_cast<std::pair<bool, std::wstring>*>(lp); if (payload) { handle_unlink_result(payload->first, payload->second); delete payload; } }
+    void handle_home_data_msg(LPARAM lp) { auto* data = reinterpret_cast<HomeData*>(lp); if (data) { apply_home_data(data); delete data; } }
+    void handle_system_msg(LPARAM lp) { auto* info = reinterpret_cast<HomeSystem*>(lp); if (info) { apply_system_info(info); delete info; } }
     void handle_discord_waiting_msg(LPARAM lp) { auto* payload = reinterpret_cast<std::pair<std::wstring, int>*>(lp); if (payload) { if (payload->second == discord_seq_ && modal_open_ && modal_kind_ == 3 && (discord_phase_ == 1 || discord_phase_ == 2)) { discord_authorize_url_ = payload->first; discord_phase_ = 2; modal_busy_ = true; InvalidateRect(hwnd_, nullptr, FALSE); } delete payload; } }
     void on_dpi_changed();
     bool splash_active() const { return splash_.phase != Splash::Phase::None; }
@@ -256,6 +321,12 @@ private:
     const Account* find_account(const std::wstring& id) const;
     const Account* active_account() const;
     std::wstring account_head(const std::wstring& name) const;
+    void load_home_async();
+    void apply_home_data(HomeData* data);
+    void load_system_async();
+    void apply_system_info(HomeSystem* info);
+    void rebuild_home();
+    void layout_home();
     void refresh_discord_links();
     void apply_discord_links_body(const std::string& body);
     const DiscordLink* discord_link_for(const Account& account) const;
@@ -329,6 +400,20 @@ private:
     std::wstring discord_api_url_;
     std::wstring discord_api_key_;
     std::wstring modal_discord_account_;
+    std::unique_ptr<Node> home_;
+    int home_tab_ = 0;
+    float home_scroll_ = 0.0f;
+    float home_content_h_ = 0.0f;
+    D2D1_RECT_F home_slot_rect_ = D2D1::RectF();
+    std::vector<VersionInfo> versions_;
+    std::vector<LoaderInfo> loaders_;
+    std::wstring latest_release_;
+    std::wstring latest_snapshot_;
+    int version_total_ = 0;
+    bool home_data_loading_ = true;
+    HomeSystem system_info_;
+    bool system_loading_ = true;
+    std::wstring shared_dir_;
     int discord_phase_ = 0;
     int discord_seq_ = 0;
     bool discord_force_ = false;
@@ -430,9 +515,10 @@ void App::ui_apply_page() {
         if (page_ == L"accounts")
             sub->text = L"Tài khoản dùng khi khởi chạy game";
         else if (page_ == L"home") {
-            wchar_t sub_text[128];
-            swprintf(sub_text, 128, L"103 bản phát hành · %d phiên bản đã tạo · mới nhất 26.3",
-                     int(instances_.size()));
+            wchar_t sub_text[160];
+            swprintf(sub_text, 160, L"%d bản phát hành · %d phiên bản đã tạo · mới nhất %ls",
+                     version_total_, int(instances_.size()),
+                     latest_release_.empty() ? L"—" : latest_release_.c_str());
             sub->text = sub_text;
         }
         else if (page_ == L"modpacks")
@@ -469,6 +555,17 @@ void App::ui_apply_page() {
         if (Node* text = ui_find(ui_.get(), label))
             text->style.color = ui_token(active ? L"text" : L"faint");
     };
+    const wchar_t* home_tabs[4] = { L"tab-overview", L"tab-recent", L"tab-instances", L"tab-system" };
+    for (int i = 0; i < 4; ++i) {
+        if (Node* tab = ui_find(ui_.get(), home_tabs[i])) {
+            bool on = home_tab_ == i;
+            tab->style.bg = on ? ui_token(L"input") : Color{};
+            tab->style.border = on;
+            if (on) tab->style.border_color = ui_token(L"border");
+            if (!tab->kids.empty() && tab->kids[0]->kind == Kind::Text)
+                tab->kids[0]->style.color = ui_token(on ? L"text" : L"faint");
+        }
+    }
     tab_style(L"tab-list", L"label-tab-list", !accounts_skin_);
     tab_style(L"tab-skin", L"label-tab-skin", accounts_skin_);
 
@@ -567,16 +664,47 @@ void App::load_data() {
         info.name = utf8_to_wide(item.text("name", item.text("version")));
         info.version = utf8_to_wide(item.text("version"));
         info.loader = utf8_to_wide(item.text("loader", "vanilla"));
+        info.loader_version = utf8_to_wide(item.text("loaderVersion"));
         info.status = utf8_to_wide(item.text("status", "ready"));
+        info.last_played = utf8_to_wide(item.text("lastPlayed"));
+        info.created = utf8_to_wide(item.text("created"));
+        info.memory_mb = int(item.number("memoryMb", 4096));
+        info.playtime_ms = item.number("playtimeMs", 0);
         std::wstring dir = utf8_to_wide(item.text("dir"));
         std::wstring local_icon = dir + L"\\icon.png";
         if (!dir.empty() && GetFileAttributesW(local_icon.c_str()) != INVALID_FILE_ATTRIBUTES)
             info.icon = local_icon;
+        if (const Json* worlds = item.find("recentWorlds")) {
+            for (const auto& w : worlds->arr) {
+                RecentWorldInfo world;
+                world.folder = utf8_to_wide(w.text("folder"));
+                world.name = utf8_to_wide(w.text("name"));
+                world.played_at = utf8_to_wide(w.text("playedAt"));
+                if (!world.folder.empty()) info.worlds.push_back(std::move(world));
+            }
+        }
+        if (const Json* servers = item.find("recentServers")) {
+            for (const auto& srv : servers->arr) {
+                RecentServerInfo server;
+                server.host = utf8_to_wide(srv.text("host"));
+                server.port = int(srv.number("port", 25565));
+                server.played_at = utf8_to_wide(srv.text("playedAt"));
+                if (!server.host.empty()) info.servers.push_back(std::move(server));
+            }
+        }
         instances_.push_back(std::move(info));
     }
     rebuild_instance_rows();
     rebuild_account_rows();
     refresh_discord_links();
+
+    std::string shared_setting = root.text("sharedDir");
+    shared_dir_ = shared_setting.empty() ? user_data_dir() + L"\\shared"
+                                        : utf8_to_wide(shared_setting);
+    loaders_ = default_loaders();
+    load_home_async();
+    load_system_async();
+    rebuild_home();
 }
 
 const Account* App::find_account(const std::wstring& id) const {
@@ -2050,11 +2178,1032 @@ void App::handle_unlink_result(bool ok, const std::wstring& error) {
     notify(L"Discord", L"Đã bỏ liên kết Discord.", L"ok");
     refresh_discord_links();
 }
+static unsigned long long directory_size(const std::wstring& dir) {
+    unsigned long long total = 0;
+    WIN32_FIND_DATAW data{};
+    HANDLE find = FindFirstFileW((dir + L"\\*").c_str(), &data);
+    if (find == INVALID_HANDLE_VALUE) return 0;
+    do {
+        if (wcscmp(data.cFileName, L".") == 0 || wcscmp(data.cFileName, L"..") == 0) continue;
+        std::wstring path = dir + L"\\" + data.cFileName;
+        if (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            if (!(data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT))
+                total += directory_size(path);
+        } else {
+            unsigned long long size = (static_cast<unsigned long long>(data.nFileSizeHigh) << 32) | data.nFileSizeLow;
+            total += size;
+        }
+    } while (FindNextFileW(find, &data));
+    FindClose(find);
+    return total;
+}
+
+static std::wstring format_bytes(unsigned long long bytes) {
+    if (bytes >= 1073741824ULL) {
+        wchar_t out[32];
+        swprintf(out, 32, L"%.1f GB", double(bytes) / 1073741824.0);
+        return out;
+    }
+    if (bytes >= 1048576ULL) {
+        wchar_t out[32];
+        swprintf(out, 32, L"%llu MB", bytes / 1048576ULL);
+        return out;
+    }
+    if (bytes >= 1024ULL) return std::to_wstring(bytes / 1024ULL) + L" KB";
+    return std::to_wstring(bytes) + L" B";
+}
+
+static std::wstring format_playtime(double ms) {
+    long long total = (long long)(ms / 60000.0);
+    if (total < 60) return std::to_wstring(total) + L"m";
+    wchar_t out[32];
+    swprintf(out, 32, L"%lldh %lldm", total / 60, total % 60);
+    return out;
+}
+
+static bool parse_iso(const std::wstring& value, SYSTEMTIME& out) {
+    int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
+    if (swscanf(value.c_str(), L"%d-%d-%dT%d:%d:%d", &year, &month, &day, &hour, &minute,
+                &second) != 6)
+        return false;
+    out = SYSTEMTIME{};
+    out.wYear = WORD(year);
+    out.wMonth = WORD(month);
+    out.wDay = WORD(day);
+    out.wHour = WORD(hour);
+    out.wMinute = WORD(minute);
+    out.wSecond = WORD(second);
+    return true;
+}
+
+static std::wstring iso_date(const std::wstring& value) {
+    SYSTEMTIME st{};
+    if (!parse_iso(value, st)) return L"—";
+    wchar_t out[32];
+    swprintf(out, 32, L"%02d/%02d/%04d", st.wDay, st.wMonth, st.wYear);
+    return out;
+}
+
+static std::wstring iso_ago(const std::wstring& value) {
+    SYSTEMTIME st{};
+    if (!parse_iso(value, st)) return L"—";
+    FILETIME then{}, now{};
+    SystemTimeToFileTime(&st, &then);
+    GetSystemTimeAsFileTime(&now);
+    ULARGE_INTEGER a{}, b{};
+    a.LowPart = then.dwLowDateTime; a.HighPart = then.dwHighDateTime;
+    b.LowPart = now.dwLowDateTime; b.HighPart = now.dwHighDateTime;
+    if (b.QuadPart <= a.QuadPart) return L"hôm nay";
+    unsigned long long days = (b.QuadPart - a.QuadPart) / (10000000ULL * 86400ULL);
+    if (days == 0) return L"hôm nay";
+    if (days == 1) return L"hôm qua";
+    if (days < 30) return std::to_wstring(days) + L" ngày trước";
+    unsigned long long months = days / 30;
+    if (months < 12) return std::to_wstring(months) + L" tháng trước";
+    return std::to_wstring(months / 12) + L" năm trước";
+}
+
+static Color status_color(const std::wstring& status) {
+    if (status == L"running") return Color::rgb(0x22C55E);
+    if (status == L"installing" || status == L"stopping" || status == L"starting")
+        return Color::rgb(0xEAB308);
+    if (status == L"error") return Color::rgb(0xEF4444);
+    return Color::rgb(0x6B7280);
+}
+
+static std::wstring upper_text(std::wstring value) {
+    for (auto& ch : value) ch = wchar_t(towupper(ch));
+    return value;
+}
+
+static std::wstring status_label(const std::wstring& status) {
+    if (status == L"running") return L"Đang chạy";
+    if (status == L"starting") return L"Đang khởi động";
+    if (status == L"stopping") return L"Đang dừng";
+    if (status == L"installing") return L"Đang cài đặt";
+    if (status == L"error") return L"Lỗi";
+    return L"Sẵn sàng";
+}
+
+static std::wstring loader_icon_path(const std::wstring& id) {
+    return L"assets/img/loader-icon/" + id + L".png";
+}
+
+static std::vector<LoaderInfo> default_loaders() {
+    return {
+        { L"vanilla", L"Vanilla", L"Bản gốc Mojang, không mod", L"", false, false, true, false, 0 },
+        { L"fabric", L"Fabric", L"Loader nhẹ, cập nhật nhanh", L"", false, false, false, false, 0 },
+        { L"quilt", L"Quilt", L"Kế thừa Fabric, hiện đại hơn", L"", false, false, false, false, 0 },
+        { L"forge", L"Forge", L"Loader lâu đời, nhiều mod nhất", L"", false, false, false, false, 0 },
+        { L"neoforge", L"NeoForge", L"Bản tách từ Forge, hiện đại hơn", L"", false, false, false, false, 0 },
+        { L"lunar", L"LunarLoader", L"Loader riêng của XyoLauncher, tối ưu cho mod hiện đại", L"", false, false, false, false, 0 },
+    };
+}
+
+void App::load_home_async() {
+    HWND target = hwnd_;
+    HANDLE thread = CreateThread(nullptr, 0, +[](LPVOID param) -> DWORD {
+        HWND hwnd = reinterpret_cast<HWND>(param);
+        HomeData* data = new HomeData();
+        data->loaders = default_loaders();
+        HttpResult manifest = http_request(
+            L"https://piston-meta.mojang.com/mc/game/version_manifest_v2.json", L"GET");
+        Json root;
+        if (root.parse(manifest.body)) {
+            const Json* latest = root.find("latest");
+            if (latest) {
+                data->latest = utf8_to_wide(latest->text("release"));
+                data->latest_snapshot = utf8_to_wide(latest->text("snapshot"));
+            }
+            const Json* list = root.find("versions");
+            if (list) {
+                for (const auto& item : list->arr) {
+                    if (item.text("type") != "release") continue;
+                    ++data->total;
+                    if (data->releases.size() < 9) {
+                        VersionInfo version;
+                        version.id = utf8_to_wide(item.text("id"));
+                        version.release_time = utf8_to_wide(item.text("releaseTime"));
+                        version.type = L"release";
+                        data->releases.push_back(std::move(version));
+                    }
+                }
+                data->ok = true;
+            }
+        }
+        if (!data->latest.empty()) {
+            HttpResult fabric = http_request(
+                L"https://meta.fabricmc.net/v2/versions/loader/" + data->latest, L"GET");
+            Json fabric_json;
+            if (fabric_json.parse(fabric.body) && !fabric_json.arr.empty()) {
+                const Json* loader = fabric_json.arr[0].find("loader");
+                if (loader) {
+                    data->loaders[1].loaded = true;
+                    data->loaders[1].build = utf8_to_wide(loader->text("version"));
+                    data->loaders[1].supported = !data->loaders[1].build.empty();
+                    data->loaders[1].stable = true;
+                }
+            }
+            HttpResult quilt = http_request(
+                L"https://meta.quiltmc.org/v3/versions/loader/" + data->latest, L"GET");
+            Json quilt_json;
+            if (quilt_json.parse(quilt.body) && !quilt_json.arr.empty()) {
+                const Json* loader = quilt_json.arr[0].find("loader");
+                if (loader) {
+                    data->loaders[2].loaded = true;
+                    data->loaders[2].build = utf8_to_wide(loader->text("version"));
+                    data->loaders[2].supported = !data->loaders[2].build.empty();
+                    data->loaders[2].stable = true;
+                }
+            }
+            HttpResult promos = http_request(
+                L"https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json",
+                L"GET");
+            Json promos_json;
+            if (promos_json.parse(promos.body)) {
+                const Json* map = promos_json.find("promos");
+                if (map) {
+                    std::string key = wide_to_utf8(data->latest);
+                    std::string build = map->text((key + "-recommended").c_str());
+                    bool stable = !build.empty();
+                    if (build.empty()) build = map->text((key + "-latest").c_str());
+                    int game_count = 0;
+                    for (const auto& entry : map->obj)
+                        if (entry.first.size() > 7 && entry.first.substr(entry.first.size() - 7) == "-latest")
+                            ++game_count;
+                    data->loaders[3].games = game_count;
+                    if (!build.empty()) {
+                        data->loaders[3].loaded = true;
+                        data->loaders[3].build = utf8_to_wide(build);
+                        data->loaders[3].supported = true;
+                        data->loaders[3].stable = stable;
+                    }
+                }
+            }
+            HttpResult neo = http_request(
+                L"https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge",
+                L"GET");
+            Json neo_json;
+            if (neo_json.parse(neo.body)) {
+                const Json* versions = neo_json.find("versions");
+                if (versions && !versions->arr.empty()) {
+                    data->loaders[4].loaded = true;
+                    data->loaders[4].build = utf8_to_wide(versions->arr.back().str);
+                    data->loaders[4].supported = true;
+                    data->loaders[4].stable = true;
+                }
+            }
+            HttpResult lunar = http_request(
+                L"https://lunarspace.site/api-v2/versions?mc=" + data->latest, L"GET");
+            Json lunar_json;
+            if (lunar_json.parse(lunar.body)) {
+                const Json* versions = lunar_json.find("versions");
+                if (versions && !versions->arr.empty()) {
+                    data->loaders[5].loaded = true;
+                    data->loaders[5].build = utf8_to_wide(versions->arr[0].text("version"));
+                    data->loaders[5].supported = !data->loaders[5].build.empty();
+                    data->loaders[5].stable = versions->arr[0].text("channel", "stable") == "stable";
+                }
+            }
+            HttpResult fabric_games = http_request(
+                L"https://meta.fabricmc.net/v2/versions/game", L"GET");
+            Json fabric_games_json;
+            if (fabric_games_json.parse(fabric_games.body)) {
+                data->loaders[1].games = int(fabric_games_json.arr.size());
+            }
+            HttpResult quilt_games = http_request(
+                L"https://meta.quiltmc.org/v3/versions/game", L"GET");
+            Json quilt_games_json;
+            if (quilt_games_json.parse(quilt_games.body)) {
+                data->loaders[2].games = int(quilt_games_json.arr.size());
+            }
+            data->loaders[0].loaded = true;
+            data->loaders[0].build = data->latest;
+            data->loaders[0].supported = true;
+            data->loaders[0].stable = true;
+            data->loaders[5].loaded = true;
+        }
+        PostMessage(hwnd, WM_APP + 10, 0, reinterpret_cast<LPARAM>(data));
+        return 0;
+    }, hwnd_, 0, nullptr);
+    if (thread) CloseHandle(thread);
+}
+
+void App::apply_home_data(HomeData* data) {
+    if (!data) return;
+    if (data->ok) {
+        versions_ = data->releases;
+        latest_release_ = data->latest;
+        latest_snapshot_ = data->latest_snapshot;
+        version_total_ = data->total;
+    }
+    if (!data->loaders.empty()) loaders_ = data->loaders;
+    home_data_loading_ = false;
+    rebuild_home();
+    ui_apply_page();
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+void App::load_system_async() {
+    HWND target = hwnd_;
+    std::wstring shared = shared_dir_;
+    HANDLE thread = CreateThread(nullptr, 0, +[](LPVOID param) -> DWORD {
+        auto* job = reinterpret_cast<std::pair<HWND, std::wstring>*>(param);
+        HomeSystem* info = new HomeSystem();
+        info->shared_dir = job->second;
+        MEMORYSTATUSEX mem{};
+        mem.dwLength = sizeof(mem);
+        if (GlobalMemoryStatusEx(&mem)) {
+            info->total_mem = mem.ullTotalPhys;
+            info->free_mem = mem.ullAvailPhys;
+        }
+        SYSTEM_INFO sys{};
+        GetSystemInfo(&sys);
+        info->cpu_threads = int(sys.dwNumberOfProcessors);
+        wchar_t model[256]{};
+        DWORD size = sizeof(model);
+        if (RegGetValueW(HKEY_LOCAL_MACHINE,
+                         L"HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0",
+                         L"ProcessorNameString", RRF_RT_REG_SZ, nullptr, model, &size) == 0)
+            info->cpu_model = model;
+        info->ok = true;
+        ULARGE_INTEGER free_bytes{}, total_bytes{};
+        if (GetDiskFreeSpaceExW(info->shared_dir.c_str(), &free_bytes, &total_bytes, nullptr)) {
+            info->disk_total = total_bytes.QuadPart;
+            info->disk_free = free_bytes.QuadPart;
+        }
+        info->assets_bytes = directory_size(info->shared_dir);
+        std::wstring runtime = info->shared_dir + L"\\runtime";
+        WIN32_FIND_DATAW data{};
+        HANDLE find = FindFirstFileW((runtime + L"\\*").c_str(), &data);
+        if (find != INVALID_HANDLE_VALUE) {
+            do {
+                if (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY &&
+                    wcscmp(data.cFileName, L".") != 0 && wcscmp(data.cFileName, L"..") != 0) {
+                    std::wstring dir = runtime + L"\\" + data.cFileName;
+                    if (GetFileAttributesW((dir + L"\\bin\\java.exe").c_str()) !=
+                        INVALID_FILE_ATTRIBUTES) {
+                        ++info->java_count;
+                        info->java_bytes += directory_size(dir);
+                    }
+                }
+            } while (FindNextFileW(find, &data));
+            FindClose(find);
+        }
+        PostMessage(job->first, WM_APP + 11, 0, reinterpret_cast<LPARAM>(info));
+        delete job;
+        return 0;
+    }, new std::pair<HWND, std::wstring>(target, shared), 0, nullptr);
+    if (thread) CloseHandle(thread);
+}
+
+void App::apply_system_info(HomeSystem* info) {
+    if (!info) return;
+    system_info_ = *info;
+    system_loading_ = false;
+    if (!system_info_.shared_dir.empty()) shared_dir_ = system_info_.shared_dir;
+    rebuild_home();
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+static float node_max_bottom(Node* node) {
+    if (!node) return 0.0f;
+    float bottom = node->rect.bottom;
+    for (auto& kid : node->kids) bottom = std::max(bottom, node_max_bottom(kid.get()));
+    return bottom;
+}
+
+void App::layout_home() {
+    if (!home_) return;
+    RECT rc{};
+    GetClientRect(hwnd_, &rc);
+    Node* slot = ui_find(ui_.get(), L"home-slot");
+    if (!slot) return;
+    home_slot_rect_ = slot->rect;
+    float width = slot->rect.right - slot->rect.left;
+    if (width < 10.0f) return;
+    ui_layout(home_.get(), width, 100000.0f, renderer_);
+    home_content_h_ = 0.0f;
+    for (auto& kid : home_->kids) home_content_h_ = std::max(home_content_h_, node_max_bottom(kid.get()));
+    float view_h = slot->rect.bottom - slot->rect.top;
+    float max_scroll = std::max(0.0f, home_content_h_ - view_h);
+    home_scroll_ = std::clamp(home_scroll_, 0.0f, max_scroll);
+    ui_move(home_.get(), slot->rect.left, slot->rect.top - home_scroll_);
+}
+
+void App::on_wheel(int delta, int px, int py) {
+    if (page_ != L"home" || !home_) return;
+    RECT rc{};
+    GetClientRect(hwnd_, &rc);
+    float x = float(px) / renderer_.scale();
+    float y = float(py) / renderer_.scale();
+    if (x < home_slot_rect_.left || x > home_slot_rect_.right || y < home_slot_rect_.top ||
+        y > home_slot_rect_.bottom)
+        return;
+    layout_home();
+    float view_h = home_slot_rect_.bottom - home_slot_rect_.top;
+    float max_scroll = std::max(0.0f, home_content_h_ - view_h);
+    home_scroll_ = std::clamp(home_scroll_ + (delta > 0 ? -72.0f : 72.0f), 0.0f, max_scroll);
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+void App::rebuild_home() {
+    if (loaders_.empty()) loaders_ = default_loaders();
+    auto root = std::make_unique<Node>();
+    root->kind = Kind::Column;
+    root->style.gap = 18.0f;
+
+    auto text = [&](const std::wstring& value, float size, int weight, Color color,
+                    float width = -1.0f, bool mono = false, bool wrap = false) {
+        auto node = std::make_unique<Node>();
+        node->kind = Kind::Text;
+        node->text = value;
+        node->style.font_size = size;
+        node->style.weight = weight;
+        node->style.color = color;
+        node->style.mono = mono;
+        node->style.wrap = wrap;
+        if (width > 0.0f) node->style.width = width;
+        return node;
+    };
+    auto image = [&](const std::wstring& src, float width, float height, float radius = 0.0f,
+                     Color color = Color{}) {
+        auto node = std::make_unique<Node>();
+        node->kind = Kind::Image;
+        node->src = src;
+        node->style.width = width;
+        node->style.height = height;
+        node->style.radius = radius;
+        if (color.visible()) node->style.color = color;
+        return node;
+    };
+    auto spacer = [&](float width, float height, bool grow_x = false, bool grow_y = false) {
+        auto node = std::make_unique<Node>();
+        node->kind = Kind::Spacer;
+        node->style.width = width;
+        node->style.height = height;
+        node->style.grow_x = grow_x;
+        node->style.grow_y = grow_y;
+        return node;
+    };
+    auto box = [&](Kind kind, float height = -1.0f, float gap = 0.0f) {
+        auto node = std::make_unique<Node>();
+        node->kind = kind;
+        node->style.height = height;
+        node->style.gap = gap;
+        return node;
+    };
+    auto card = [&](Kind kind, float height = -1.0f, float gap = 0.0f) {
+        auto node = box(kind, height, gap);
+        node->style.bg = ui_token(L"surface");
+        node->style.border = true;
+        node->style.border_color = ui_token(L"border");
+        node->style.radius = 14.0f;
+        return node;
+    };
+    auto chip = [&](const std::wstring& value, bool dim = false) {
+        auto row = box(Kind::Row, 20.0f);
+        row->style.pad_l = row->style.pad_r = 6.0f;
+        row->style.radius = 5.0f;
+        row->style.bg = Color::rgb(0xFFFFFF, dim ? 0.08f : 0.12f);
+        row->style.border = true;
+        row->style.border_color = Color::rgb(0xFFFFFF, 0.16f);
+        row->kids.push_back(text(value, 9.0f, 400,
+                                 Color::rgb(0xFFFFFF, dim ? 0.6f : 0.82f), -1.0f, true));
+        return row;
+    };
+    auto status_dot = [&](const std::wstring& status) {
+        auto dot = spacer(6.0f, 6.0f);
+        dot->style.radius = 3.0f;
+        dot->style.bg = status_color(status);
+        return dot;
+    };
+    auto time_row = [&](const std::wstring& ago) {
+        auto row = box(Kind::Row, -1.0f, 4.0f);
+        row->kids.push_back(image(asset(L"assets/icons/clock.svg"), 11.0f, 11.0f, 0.0f,
+                                  ui_token(L"faint")));
+        row->kids.push_back(text(ago, 9.0f, 400, ui_token(L"faint"), -1.0f, true));
+        return row;
+    };
+    auto section = [&](const std::wstring& title, const std::wstring& hint,
+                       const std::wstring& action_text = L"", const std::wstring& action = L"") {
+        auto row = box(Kind::Row, 22.0f, 8.0f);
+        row->kids.push_back(text(title, 13.0f, 700, ui_token(L"text")));
+        if (!hint.empty()) row->kids.push_back(text(hint, 10.0f, 400, ui_token(L"label")));
+        row->kids.push_back(spacer(0, 0, true, false));
+        if (!action_text.empty()) {
+            auto link = text(action_text, 10.0f, 600, ui_token(L"accent"));
+            link->action = action;
+            row->kids.push_back(std::move(link));
+        }
+        root->kids.push_back(std::move(row));
+    };
+    auto loader_of = [&](const std::wstring& id) -> const LoaderInfo* {
+        for (const auto& loader : loaders_)
+            if (loader.id == id) return &loader;
+        return nullptr;
+    };
+    auto loader_by_index = [&](size_t index) -> const LoaderInfo* {
+        return index < loaders_.size() ? &loaders_[index] : nullptr;
+    };
+
+    std::wstring latest = latest_release_.empty() ? L"—" : latest_release_;
+    int running = 0;
+    for (const auto& inst : instances_)
+        if (inst.status == L"running") ++running;
+
+    if (home_tab_ == 0) {
+        section(L"Sẵn sàng chơi",
+                running ? (std::to_wstring(running) + L" đang chạy") : L"không có tiến trình");
+        const InstanceInfo* active = nullptr;
+        for (const auto& inst : instances_)
+            if (inst.status == L"running" || inst.status == L"starting") { active = &inst; break; }
+        if (!active && !instances_.empty()) active = &instances_.front();
+
+        auto hero = box(Kind::Row, 214.0f, 18.0f);
+        hero->style.pad_l = hero->style.pad_r = hero->style.pad_t = hero->style.pad_b = 20.0f;
+        hero->style.radius = 16.0f;
+        hero->style.bg_image = asset(L"assets/img/minecraft-background.png");
+        hero->style.overlay = Color::rgb(0x000000, 0.62f);
+        hero->style.border = true;
+        hero->style.border_color = ui_token(L"border");
+        if (active) {
+            Color sc = status_color(active->status);
+            bool busy = active->status == L"running" || active->status == L"starting" ||
+                        active->status == L"stopping";
+            bool spinning = active->status == L"starting" || active->status == L"installing";
+            Color play_bg = spinning ? Color::rgb(0xEAB308)
+                            : active->status == L"running" || active->status == L"stopping"
+                                ? Color::rgb(0xEF4444)
+                                : Color::rgb(0x22C55E);
+            Color play_ink = spinning ? Color::rgb(0x1A1405)
+                            : active->status == L"running" || active->status == L"stopping"
+                                ? Color::rgb(0xFFFFFF)
+                                : Color::rgb(0x04140A);
+            auto play = box(Kind::Row, 84.0f);
+            play->style.width = 84.0f;
+            play->style.radius = 16.0f;
+            play->style.bg = play_bg;
+            play->action = L"home:launch";
+            play->kids.push_back(spacer(0, 0, true, false));
+            play->kids.push_back(text(spinning ? L"⟳" : busy ? L"■" : L"▶", 30.0f, 700,
+                                      play_ink));
+            play->kids.push_back(spacer(0, 0, true, false));
+            hero->kids.push_back(std::move(play));
+
+            auto info = box(Kind::Column, -1.0f, 6.0f);
+            info->style.grow_x = true;
+            auto state_row = box(Kind::Row, 16.0f, 6.0f);
+            state_row->kids.push_back(status_dot(active->status));
+            state_row->kids.push_back(text(upper_text(status_label(active->status)), 9.0f, 700,
+                                           Color::rgb(0xFFFFFF, 0.6f)));
+            info->kids.push_back(std::move(state_row));
+            info->kids.push_back(text(active->name, 26.0f, 700, Color::rgb(0xFFFFFF)));
+            auto chips = box(Kind::Row, 20.0f, 6.0f);
+            std::wstring loader_chip = active->loader;
+            if (!active->loader_version.empty()) loader_chip += L" " + active->loader_version;
+            chips->kids.push_back(chip(loader_chip));
+            chips->kids.push_back(chip(active->version));
+            chips->kids.push_back(chip(std::to_wstring(active->memory_mb) + L" MB"));
+            info->kids.push_back(std::move(chips));
+            info->kids.push_back(spacer(0, 0, false, true));
+            auto facts = box(Kind::Row, -1.0f, 24.0f);
+            auto fact = [&](const wchar_t* icon_path, const std::wstring& label,
+                            const std::wstring& value) {
+                auto row = box(Kind::Row, -1.0f, 8.0f);
+                row->kids.push_back(image(asset(icon_path), 15.0f, 15.0f, 0.0f,
+                                          Color::rgb(0xFFFFFF, 0.6f)));
+                auto col = box(Kind::Column, -1.0f, 2.0f);
+                col->kids.push_back(
+                    text(label, 8.0f, 700, Color::rgb(0xFFFFFF, 0.55f)));
+                col->kids.push_back(text(value, 11.0f, 600, Color::rgb(0xFFFFFF)));
+                row->kids.push_back(std::move(col));
+                return row;
+            };
+            std::wstring loader_value = active->loader;
+            if (!active->loader_version.empty()) loader_value += L" " + active->loader_version;
+            facts->kids.push_back(fact(L"assets/icons/memory.svg", L"RAM",
+                                       std::to_wstring(active->memory_mb) + L" MB"));
+            facts->kids.push_back(fact(L"assets/icons/cube.svg", L"TRÌNH TẢI", loader_value));
+            facts->kids.push_back(fact(L"assets/icons/clock.svg", L"THỜI GIAN CHƠI",
+                                       format_playtime(active->playtime_ms)));
+            facts->kids.push_back(fact(L"assets/icons/calendar.svg", L"LẦN CHƠI CUỐI",
+                                       active->last_played.empty()
+                                           ? L"chưa chơi"
+                                           : iso_ago(active->last_played)));
+            info->kids.push_back(std::move(facts));
+            hero->kids.push_back(std::move(info));
+
+            auto open = box(Kind::Row, 36.0f);
+            open->style.width = 64.0f;
+            open->style.radius = 8.0f;
+            open->style.bg = Color::rgb(0xFFFFFF, 0.16f);
+            open->style.border = true;
+            open->style.border_color = Color::rgb(0xFFFFFF, 0.2f);
+            open->action = L"home:open";
+            open->kids.push_back(spacer(0, 0, true, false));
+            open->kids.push_back(text(L"Mở", 11.0f, 600, Color::rgb(0xFFFFFF)));
+            open->kids.push_back(spacer(0, 0, true, false));
+            hero->kids.push_back(std::move(open));
+        } else {
+            auto icon_box = box(Kind::Column, 80.0f);
+            icon_box->style.width = 80.0f;
+            icon_box->style.radius = 16.0f;
+            icon_box->style.bg = Color::rgb(0xFFFFFF, 0.1f);
+            icon_box->style.border = true;
+            icon_box->style.border_color = Color::rgb(0xFFFFFF, 0.16f);
+            icon_box->kids.push_back(spacer(0, 0, false, true));
+            auto cube = image(asset(L"assets/icons/cube.svg"), 30.0f, 30.0f, 0.0f,
+                              Color::rgb(0xFFFFFF));
+            cube->style.grow_x = true;
+            icon_box->kids.push_back(std::move(cube));
+            icon_box->kids.push_back(spacer(0, 0, false, true));
+            hero->kids.push_back(std::move(icon_box));
+            auto info = box(Kind::Column, -1.0f, 4.0f);
+            info->style.grow_x = true;
+            info->kids.push_back(text(L"Chưa có phiên bản nào", 20.0f, 700,
+                                      Color::rgb(0xFFFFFF)));
+            info->kids.push_back(text(L"Tạo phiên bản từ Minecraft " + latest +
+                                          L" để bắt đầu chơi.",
+                                      12.0f, 400, Color::rgb(0xFFFFFF, 0.66f)));
+            info->kids.push_back(text(std::to_wstring(version_total_) + L" bản phát hành · " +
+                                          std::to_wstring(loaders_.size()) + L" trình tải sẵn sàng",
+                                      10.0f, 400, Color::rgb(0xFFFFFF, 0.5f), -1.0f, true));
+            hero->kids.push_back(std::move(info));
+            auto create = box(Kind::Row, 40.0f);
+            create->style.pad_l = create->style.pad_r = 16.0f;
+            create->style.radius = 8.0f;
+            create->style.bg = ui_token(L"accent");
+            create->action = L"nav:versions";
+            create->kids.push_back(text(L"Tạo phiên bản", 12.0f, 700, ui_token(L"ink")));
+            hero->kids.push_back(std::move(create));
+        }
+        root->kids.push_back(std::move(hero));
+
+        section(L"Bản phát hành", std::to_wstring(version_total_) + L" bản", L"Xem tất cả →",
+                L"nav:versions");
+        auto release_row = box(Kind::Row, 360.0f, 12.0f);
+        auto latest_card = card(Kind::Column, 360.0f, 8.0f);
+        latest_card->style.grow = 1.15f;
+        latest_card->style.pad_l = latest_card->style.pad_r = 16.0f;
+        latest_card->style.pad_t = latest_card->style.pad_b = 16.0f;
+        auto latest_head = box(Kind::Row, 48.0f, 12.0f);
+        auto latest_icon = box(Kind::Column, 48.0f);
+        latest_icon->style.width = 48.0f;
+        latest_icon->style.radius = 10.0f;
+        latest_icon->style.bg = ui_token(L"input");
+        latest_icon->style.border = true;
+        latest_icon->style.border_color = ui_token(L"border");
+        latest_icon->kids.push_back(spacer(0, 0, true, false));
+        latest_icon->kids.push_back(
+            image(asset(L"assets/img/loader-icon/vanilla.png"), 32.0f, 32.0f));
+        latest_icon->kids.push_back(spacer(0, 0, true, false));
+        latest_head->kids.push_back(std::move(latest_icon));
+        auto latest_info = box(Kind::Column, -1.0f, 1.0f);
+        latest_info->style.grow_x = true;
+        auto version_line = box(Kind::Row, 24.0f, 6.0f);
+        version_line->kids.push_back(text(latest, 20.0f, 700, ui_token(L"text"), -1.0f, true));
+        version_line->kids.push_back(text(L"MỚI NHẤT", 8.0f, 700, ui_token(L"accent")));
+        latest_info->kids.push_back(std::move(version_line));
+        latest_info->kids.push_back(
+            text(L"Phát hành " + (versions_.empty() ? L"—" : iso_date(versions_[0].release_time)) +
+                     (versions_.empty() ? L"" : L" · " + iso_ago(versions_[0].release_time)),
+                 10.0f, 400, ui_token(L"label")));
+        if (!latest_snapshot_.empty())
+            latest_info->kids.push_back(text(L"Bản thử nghiệm: " + latest_snapshot_, 10.0f, 400,
+                                             ui_token(L"faint"), -1.0f, true));
+        latest_head->kids.push_back(std::move(latest_info));
+        latest_card->kids.push_back(std::move(latest_head));
+        auto line1 = spacer(0, 1);
+        line1->style.bg = ui_token(L"border");
+        latest_card->kids.push_back(std::move(line1));
+        latest_card->kids.push_back(
+            text(L"TRÌNH TẢI HỖ TRỢ BẢN NÀY", 9.0f, 700, ui_token(L"faint")));
+        for (size_t i = 0; i < loaders_.size(); ++i) {
+            const LoaderInfo& loader = loaders_[i];
+            auto row = box(Kind::Row, 25.0f, 8.0f);
+            row->kids.push_back(
+                image(asset(loader_icon_path(loader.id)), 16.0f, 16.0f));
+            row->kids.push_back(text(loader.name, 10.5f, 600, ui_token(L"text"), 64.0f));
+            if (!loader.loaded) {
+                row->kids.push_back(text(L"Đang tải…", 9.0f, 400, ui_token(L"faint")));
+            } else if (loader.supported) {
+                row->kids.push_back(image(asset(L"assets/icons/check.svg"), 10.0f, 10.0f, 0.0f,
+                                          Color::rgb(0x22C55E)));
+                row->kids.push_back(text(loader.build, 10.0f, 400, ui_token(L"label"), -1.0f,
+                                         true));
+                row->kids.push_back(spacer(0, 0, true, false));
+                if (loader.games > 0)
+                    row->kids.push_back(text(std::to_wstring(loader.games) + L" phiên bản", 9.0f,
+                                             400, ui_token(L"faint"), -1.0f, true));
+            } else {
+                row->kids.push_back(image(asset(L"assets/icons/minus.svg"), 10.0f, 10.0f, 0.0f,
+                                          ui_token(L"faint")));
+                row->kids.push_back(text(L"chưa phát hành cho bản này", 9.0f, 400,
+                                         ui_token(L"faint")));
+            }
+            latest_card->kids.push_back(std::move(row));
+        }
+        auto create_button = box(Kind::Row, 34.0f);
+        create_button->style.radius = 8.0f;
+        create_button->style.bg = ui_token(L"accent");
+        create_button->action = L"nav:versions";
+        create_button->kids.push_back(spacer(0, 0, true, false));
+        create_button->kids.push_back(text(L"Tạo phiên bản với " + latest, 11.0f, 700,
+                                           ui_token(L"ink")));
+        create_button->kids.push_back(spacer(0, 0, true, false));
+        latest_card->kids.push_back(std::move(create_button));
+        release_row->kids.push_back(std::move(latest_card));
+
+        auto list_card = card(Kind::Column, 360.0f, 0.0f);
+        list_card->style.grow = 1.0f;
+        list_card->style.pad_l = list_card->style.pad_r = 8.0f;
+        list_card->style.pad_t = list_card->style.pad_b = 8.0f;
+        if (versions_.empty()) {
+            list_card->kids.push_back(text(L"Không tải được danh sách phiên bản.", 10.0f, 400,
+                                           ui_token(L"label")));
+        } else {
+            for (size_t i = 0; i < versions_.size(); ++i) {
+                const VersionInfo& version = versions_[i];
+                bool first = i == 0;
+                auto row = box(Kind::Row, 32.0f, 8.0f);
+                if (first) { row->style.bg = ui_token(L"input"); row->style.radius = 8.0f; }
+                auto dot = spacer(6.0f, 6.0f);
+                dot->style.radius = 3.0f;
+                dot->style.bg = first ? ui_token(L"accent") : ui_token(L"faint");
+                row->kids.push_back(std::move(dot));
+                row->kids.push_back(text(version.id, 10.5f, 700,
+                                         first ? ui_token(L"accent") : ui_token(L"text"), 74.0f,
+                                         true));
+                row->kids.push_back(text(iso_date(version.release_time), 9.5f, 400,
+                                         ui_token(L"faint"), -1.0f, true));
+                row->kids.push_back(spacer(0, 0, true, false));
+                row->kids.push_back(text(iso_ago(version.release_time), 9.5f, 400,
+                                         ui_token(L"faint"), -1.0f, true));
+                list_card->kids.push_back(std::move(row));
+            }
+        }
+        release_row->kids.push_back(std::move(list_card));
+        root->kids.push_back(std::move(release_row));
+
+        section(L"Trình tải mod", L"bản mới nhất cho " + latest);
+        for (int start = 0; start < int(loaders_.size()); start += 3) {
+            auto row = box(Kind::Row, 76.0f, 10.0f);
+            for (int i = start; i < start + 3 && i < int(loaders_.size()); ++i) {
+                const LoaderInfo& loader = loaders_[size_t(i)];
+                auto tile = card(Kind::Row, 76.0f, 10.0f);
+                tile->style.grow = 1.0f;
+                tile->style.pad_l = tile->style.pad_r = tile->style.pad_t =
+                    tile->style.pad_b = 12.0f;
+                tile->style.radius = 12.0f;
+                auto icon_box = box(Kind::Column, 36.0f);
+                icon_box->style.width = 36.0f;
+                icon_box->style.radius = 8.0f;
+                icon_box->style.bg = ui_token(L"input");
+                icon_box->style.border = true;
+                icon_box->style.border_color = ui_token(L"border");
+                icon_box->kids.push_back(spacer(0, 0, true, false));
+                icon_box->kids.push_back(
+                    image(asset(loader_icon_path(loader.id)), 24.0f, 24.0f));
+                icon_box->kids.push_back(spacer(0, 0, true, false));
+                tile->kids.push_back(std::move(icon_box));
+                auto info = box(Kind::Column, -1.0f, 1.0f);
+                info->style.grow_x = true;
+                info->kids.push_back(text(loader.name, 11.5f, 700, ui_token(L"text")));
+                info->kids.push_back(text(loader.desc, 9.5f, 400, ui_token(L"faint")));
+                if (!loader.loaded)
+                    info->kids.push_back(text(L"Đang tải…", 9.5f, 400, ui_token(L"faint")));
+                else if (loader.supported) {
+                    std::wstring suffix = loader.vanilla ? L" · bản gốc"
+                                          : loader.stable ? L" · ổn định"
+                                                          : L" · thử nghiệm";
+                    info->kids.push_back(text(loader.build + suffix, 9.5f, 400,
+                                             loader.stable || loader.vanilla ? Color::rgb(0x22C55E)
+                                                                             : Color::rgb(0xEAB308),
+                                             -1.0f, true));
+                } else {
+                    info->kids.push_back(text(L"không có build", 9.5f, 400, ui_token(L"faint")));
+                }
+                tile->kids.push_back(std::move(info));
+                row->kids.push_back(std::move(tile));
+            }
+            root->kids.push_back(std::move(row));
+        }
+    } else if (home_tab_ == 1) {
+        struct RecentRow { const InstanceInfo* inst; std::wstring title; std::wstring sub; std::wstring played; };
+        std::vector<RecentRow> worlds;
+        std::vector<RecentRow> servers;
+        for (const auto& inst : instances_) {
+            for (const auto& world : inst.worlds) {
+                worlds.push_back({ &inst, world.name.empty() ? world.folder : world.name,
+                                   inst.name + L" · " + world.folder, world.played_at });
+            }
+            for (const auto& server : inst.servers) {
+                std::wstring host = server.host;
+                if (server.port != 25565) host += L":" + std::to_wstring(server.port);
+                servers.push_back({ &inst, host,
+                                    inst.name + L" · " + inst.loader + L" " + inst.version,
+                                    server.played_at });
+            }
+        }
+        auto by_time = [](const RecentRow& a, const RecentRow& b) { return a.played > b.played; };
+        std::sort(worlds.begin(), worlds.end(), by_time);
+        std::sort(servers.begin(), servers.end(), by_time);
+        if (worlds.size() > 8) worlds.resize(8);
+        if (servers.size() > 8) servers.resize(8);
+
+        auto recent_section = [&](const std::wstring& title, const std::wstring& hint,
+                                  const std::wstring& action, const std::vector<RecentRow>& rows,
+                                  const std::wstring& button_text, const std::wstring& empty) {
+            section(title, hint);
+            auto list = card(Kind::Column, -1.0f, 0.0f);
+            if (rows.empty()) {
+                list->kids.push_back(text(empty, 11.0f, 400, ui_token(L"faint"), -1.0f, false,
+                                          true));
+            } else {
+                for (size_t i = 0; i < rows.size(); ++i) {
+                    const RecentRow& row = rows[i];
+                    auto item = box(Kind::Row, 54.0f, 10.0f);
+                    item->style.pad_l = item->style.pad_r = 14.0f;
+                    item->kids.push_back(
+                        image(asset(loader_icon_path(row.inst->loader)), 26.0f, 26.0f, 6.0f));
+                    auto info = box(Kind::Column, -1.0f, 1.0f);
+                    info->style.grow_x = true;
+                    info->kids.push_back(text(row.title, 11.0f, 700, ui_token(L"text")));
+                    info->kids.push_back(text(row.sub, 9.0f, 400, ui_token(L"faint"), -1.0f, true));
+                    item->kids.push_back(std::move(info));
+                    item->kids.push_back(time_row(iso_ago(row.played)));
+                    auto play = box(Kind::Row, 28.0f);
+                    play->style.pad_l = play->style.pad_r = 10.0f;
+                    play->style.radius = 6.0f;
+                    play->style.bg = Color::rgb(0x22C55E, 0.14f);
+                    play->action = action;
+                    play->kids.push_back(text(button_text, 9.5f, 700, Color::rgb(0x22C55E)));
+                    item->kids.push_back(std::move(play));
+                    list->kids.push_back(std::move(item));
+                    if (i + 1 < rows.size()) {
+                        auto line = spacer(0, 1);
+                        line->style.bg = ui_token(L"border");
+                        list->kids.push_back(std::move(line));
+                    }
+                }
+            }
+            root->kids.push_back(std::move(list));
+        };
+        recent_section(L"Thế giới gần đây", L"bấm để vào nhanh", L"home:play-world", worlds,
+                       L"Vào world",
+                       L"Chưa có world nào được ghi lại. Vào Singleplayer một lần để lịch sử xuất hiện ở đây.");
+        recent_section(L"Server gần đây", L"tham gia lại nhanh", L"home:play-server", servers,
+                       L"Tham gia",
+                       L"Chưa có server nào được ghi lại. Tham gia Multiplayer một lần để lịch sử xuất hiện ở đây.");
+    } else if (home_tab_ == 2) {
+        std::vector<const InstanceInfo*> ordered;
+        for (const auto& inst : instances_) ordered.push_back(&inst);
+        std::sort(ordered.begin(), ordered.end(), [](const InstanceInfo* a, const InstanceInfo* b) {
+            std::wstring ak = !a->last_played.empty() ? a->last_played : a->created;
+            std::wstring bk = !b->last_played.empty() ? b->last_played : b->created;
+            return ak > bk;
+        });
+        if (!ordered.empty()) {
+            section(L"Phiên bản của bạn", std::to_wstring(ordered.size()) + L" phiên bản");
+            auto list = card(Kind::Column, -1.0f, 0.0f);
+            for (size_t i = 0; i < ordered.size(); ++i) {
+                const InstanceInfo& inst = *ordered[i];
+                auto item = box(Kind::Row, 48.0f, 10.0f);
+                item->style.pad_l = item->style.pad_r = 14.0f;
+                item->kids.push_back(image(inst.icon.empty()
+                                               ? asset(loader_icon_path(inst.loader))
+                                               : inst.icon,
+                                           26.0f, 26.0f, 6.0f));
+                auto info = box(Kind::Column, -1.0f, 1.0f);
+                info->style.grow_x = true;
+                info->kids.push_back(text(inst.name, 11.0f, 700, ui_token(L"text")));
+                std::wstring sub = inst.loader;
+                if (!inst.loader_version.empty()) sub += L" " + inst.loader_version;
+                sub += L" · " + inst.version + L" · " + std::to_wstring(inst.memory_mb) + L" MB";
+                info->kids.push_back(text(sub, 9.0f, 400, ui_token(L"faint"), -1.0f, true));
+                item->kids.push_back(std::move(info));
+                item->kids.push_back(time_row(inst.last_played.empty()
+                                                  ? L"chưa chơi"
+                                                  : iso_ago(inst.last_played)));
+                Color sc = status_color(inst.status);
+                auto badge = box(Kind::Row, 18.0f, 4.0f);
+                badge->style.pad_l = badge->style.pad_r = 6.0f;
+                badge->style.radius = 4.0f;
+                badge->style.bg = Color{ sc.r, sc.g, sc.b, 0.14f };
+                badge->kids.push_back(status_dot(inst.status));
+                badge->kids.push_back(text(status_label(inst.status), 9.0f, 700, sc));
+                item->kids.push_back(std::move(badge));
+                bool busy = inst.status == L"running" || inst.status == L"stopping";
+                auto launch = box(Kind::Row, 28.0f);
+                launch->style.width = 28.0f;
+                launch->style.radius = 6.0f;
+                launch->style.bg = busy ? Color::rgb(0xEF4444, 0.14f) : Color::rgb(0x22C55E, 0.14f);
+                launch->action = L"home:launch";
+                launch->kids.push_back(spacer(0, 0, true, false));
+                launch->kids.push_back(text(busy ? L"■" : L"▶", 11.0f, 700,
+                                            busy ? Color::rgb(0xEF4444)
+                                                 : Color::rgb(0x22C55E)));
+                launch->kids.push_back(spacer(0, 0, true, false));
+                item->kids.push_back(std::move(launch));
+                list->kids.push_back(std::move(item));
+                if (i + 1 < ordered.size()) {
+                    auto line = spacer(0, 1);
+                    line->style.bg = ui_token(L"border");
+                    list->kids.push_back(std::move(line));
+                }
+            }
+            root->kids.push_back(std::move(list));
+        } else {
+            auto empty = card(Kind::Row, 72.0f, 14.0f);
+            empty->style.pad_l = empty->style.pad_r = 18.0f;
+            empty->kids.push_back(image(asset(L"assets/icons/cube.svg"), 22.0f, 22.0f, 0.0f,
+                                        ui_token(L"accent")));
+            auto info = box(Kind::Column, -1.0f, 2.0f);
+            info->style.grow_x = true;
+            info->kids.push_back(text(L"Chưa có phiên bản nào", 12.0f, 700, ui_token(L"text")));
+            info->kids.push_back(text(L"Tạo phiên bản để bắt đầu chơi.", 10.0f, 400,
+                                      ui_token(L"faint")));
+            empty->kids.push_back(std::move(info));
+            auto create = box(Kind::Row, 32.0f);
+            create->style.pad_l = create->style.pad_r = 12.0f;
+            create->style.radius = 8.0f;
+            create->style.bg = ui_token(L"accent");
+            create->action = L"nav:versions";
+            create->kids.push_back(text(L"Tạo phiên bản", 10.0f, 700, ui_token(L"ink")));
+            empty->kids.push_back(std::move(create));
+            root->kids.push_back(std::move(empty));
+        }
+    } else {
+        section(L"Hệ thống & lưu trữ", L"");
+        auto row = box(Kind::Row, 320.0f, 12.0f);
+        auto left = card(Kind::Column, 320.0f, 10.0f);
+        left->style.grow = 1.0f;
+        left->style.pad_l = left->style.pad_r = left->style.pad_t = left->style.pad_b = 16.0f;
+        auto meter = [&](const std::wstring& label, unsigned long long used,
+                         unsigned long long total, Color color) {
+            auto col = box(Kind::Column, -1.0f, 4.0f);
+            auto line = box(Kind::Row, 16.0f, 6.0f);
+            line->kids.push_back(text(label, 10.0f, 700, ui_token(L"text")));
+            line->kids.push_back(spacer(0, 0, true, false));
+            std::wstring value = format_bytes(used) + L" / " + format_bytes(total);
+            line->kids.push_back(text(value, 9.0f, 400, ui_token(L"label"), -1.0f, true));
+            col->kids.push_back(std::move(line));
+            auto bar = box(Kind::Row, 6.0f, 0.0f);
+            bar->style.radius = 3.0f;
+            bar->style.bg = ui_token(L"borderSoft");
+            float fraction = total > 0 ? float(double(used) / double(total)) : 0.0f;
+            fraction = std::clamp(fraction, 0.0f, 1.0f);
+            if (fraction > 0.0f) {
+                auto fill = spacer(0, 6);
+                fill->style.grow = fraction;
+                fill->style.bg = color;
+                bar->kids.push_back(std::move(fill));
+            }
+            if (fraction < 1.0f) {
+                auto rest = spacer(0, 6);
+                rest->style.grow = 1.0f - fraction;
+                bar->kids.push_back(std::move(rest));
+            }
+            col->kids.push_back(std::move(bar));
+            return col;
+        };
+        if (system_info_.ok) {
+            unsigned long long used_mem =
+                system_info_.total_mem > system_info_.free_mem
+                    ? system_info_.total_mem - system_info_.free_mem
+                    : 0;
+            unsigned long long used_disk =
+                system_info_.disk_total > system_info_.disk_free
+                    ? system_info_.disk_total - system_info_.disk_free
+                    : 0;
+            left->kids.push_back(meter(L"RAM", used_mem, system_info_.total_mem,
+                                       ui_token(L"accent")));
+            left->kids.push_back(meter(L"Ổ ĐĨA", used_disk, system_info_.disk_total,
+                                       Color::rgb(0x22C55E)));
+            auto line = spacer(0, 1);
+            line->style.bg = ui_token(L"border");
+            left->kids.push_back(std::move(line));
+            auto fact = [&](const std::wstring& label, const std::wstring& value) {
+                auto r = box(Kind::Row, 18.0f, 8.0f);
+                r->kids.push_back(text(label, 10.0f, 400, ui_token(L"faint")));
+                r->kids.push_back(spacer(0, 0, true, false));
+                r->kids.push_back(text(value, 10.0f, 600, ui_token(L"text")));
+                return r;
+            };
+            left->kids.push_back(fact(L"CPU", std::to_wstring(system_info_.cpu_threads) +
+                                                   L" luồng"));
+            left->kids.push_back(fact(L"Kiến trúc", L"win32 x64"));
+            left->kids.push_back(text(system_info_.cpu_model, 9.0f, 400, ui_token(L"faint"),
+                                      -1.0f, true));
+        } else {
+            left->kids.push_back(text(L"Đang đọc thông tin hệ thống…", 10.0f, 400,
+                                      ui_token(L"label")));
+        }
+        row->kids.push_back(std::move(left));
+
+        auto right = card(Kind::Column, 320.0f, 8.0f);
+        right->style.grow = 1.0f;
+        right->style.pad_l = right->style.pad_r = right->style.pad_t = right->style.pad_b = 16.0f;
+        auto fact_row = [&](const std::wstring& label, const std::wstring& value) {
+            auto r = box(Kind::Column, -1.0f, 2.0f);
+            r->kids.push_back(text(label, 9.0f, 700, ui_token(L"faint")));
+            r->kids.push_back(text(value, 10.0f, 500, ui_token(L"text"), -1.0f, true));
+            return r;
+        };
+        right->kids.push_back(fact_row(L"THƯ MỤC CHUNG", shared_dir_));
+        right->kids.push_back(fact_row(L"DUNG LƯỢNG TÀI NGUYÊN",
+                                       format_bytes(system_info_.assets_bytes)));
+        right->kids.push_back(fact_row(
+            L"JAVA",
+            std::to_wstring(system_info_.java_count) + L" bản · " +
+                format_bytes(system_info_.java_bytes)));
+        right->kids.push_back(fact_row(L"JAVA MẶC ĐỊNH", L"Java tải kèm"));
+        right->kids.push_back(spacer(0, 0, false, true));
+        auto open = box(Kind::Row, 32.0f);
+        open->style.radius = 8.0f;
+        open->style.bg = ui_token(L"input");
+        open->style.border = true;
+        open->style.border_color = ui_token(L"border");
+        open->action = L"home:open-shared";
+        open->kids.push_back(spacer(0, 0, true, false));
+        open->kids.push_back(image(asset(L"assets/icons/folder-open.svg"), 12.0f, 12.0f, 0.0f,
+                                   ui_token(L"label")));
+        open->kids.push_back(text(L"  Mở thư mục", 10.0f, 600, ui_token(L"label")));
+        open->kids.push_back(spacer(0, 0, true, false));
+        right->kids.push_back(std::move(open));
+        row->kids.push_back(std::move(right));
+        root->kids.push_back(std::move(row));
+        if (!system_info_.ok)
+            root->kids.push_back(text(L"Đang đọc thông tin hệ thống…", 10.0f, 400,
+                                      ui_token(L"faint")));
+    }
+
+    root->kids.push_back(spacer(0, 12));
+    home_ = std::move(root);
+    hovered_ = nullptr;
+}
+
 void App::do_action(const std::wstring& action) {
     if (action == L"toggle:theme") {
         toggle_theme();
     } else if (action == L"menu:account") {
         toggle_account_menu();
+    } else if (action.rfind(L"home:tab:", 0) == 0) {
+        home_tab_ = std::stoi(action.substr(9));
+        home_scroll_ = 0.0f;
+        rebuild_home();
+        ui_apply_page();
+    } else if (action == L"home:launch") {
+        notify(L"Phiên bản", L"Chức năng khởi chạy game sẽ được port sau.", L"info");
+    } else if (action == L"home:open") {
+        notify(L"Phiên bản", L"Trang chi tiết phiên bản sẽ được port sau.", L"info");
+    } else if (action == L"home:play-world") {
+        notify(L"Thế giới", L"Vào world trực tiếp sẽ được port sau.", L"info");
+    } else if (action == L"home:play-server") {
+        notify(L"Server", L"Tham gia server trực tiếp sẽ được port sau.", L"info");
+    } else if (action == L"home:open-shared") {
+        ShellExecuteW(nullptr, L"open", shared_dir_.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
     } else if (action == L"account:add") {
         open_account_modal();
     } else if (action == L"discord:add") {
@@ -2336,6 +3485,12 @@ void App::paint() {
     }
     renderer_.begin(ui_color(L"bg"));
     ui_draw(ui_.get(), renderer_, hovered_);
+    if (page_ == L"home" && home_) {
+        layout_home();
+        renderer_.clip_push(home_slot_rect_);
+        ui_draw(home_.get(), renderer_, hovered_);
+        renderer_.clip_pop();
+    }
     draw_account_menu();
     draw_toasts();
     draw_account_modal();
@@ -2375,7 +3530,11 @@ void App::on_mouse_move(int px, int py) {
     }
     float x = px / renderer_.scale();
     float y = py / renderer_.scale();
-    Node* hit = menu_open_ ? ui_hit(menu_.get(), x, y) : nullptr;
+    Node* hit = nullptr;
+    if (page_ == L"home" && home_ && x >= home_slot_rect_.left && x <= home_slot_rect_.right &&
+        y >= home_slot_rect_.top && y <= home_slot_rect_.bottom)
+        hit = ui_hit(home_.get(), x, y);
+    if (!hit) hit = menu_open_ ? ui_hit(menu_.get(), x, y) : nullptr;
     if (!hit) hit = ui_hit(ui_.get(), x, y);
     if (hit != hovered_) {
         hovered_ = hit;
@@ -2806,7 +3965,10 @@ void App::on_mouse_down(int px, int py) {
     float x = px / renderer_.scale();
     float y = py / renderer_.scale();
     Node* hit = nullptr;
-    if (menu_open_) {
+    if (page_ == L"home" && home_ && x >= home_slot_rect_.left && x <= home_slot_rect_.right &&
+        y >= home_slot_rect_.top && y <= home_slot_rect_.bottom)
+        hit = ui_hit(home_.get(), x, y);
+    if (!hit && menu_open_) {
         hit = ui_hit(menu_.get(), x, y);
         if (hit) {
             pressed_ = hit->action;
@@ -2820,7 +3982,7 @@ void App::on_mouse_down(int px, int py) {
             return;
         }
     }
-    hit = ui_hit(ui_.get(), x, y);
+    if (!hit) hit = ui_hit(ui_.get(), x, y);
     pressed_ = hit ? hit->action : L"";
     if (pressed_ == L"window:drag") {
         pressed_.clear();
@@ -2834,7 +3996,11 @@ void App::on_mouse_up(int px, int py) {
     if (modal_open_) { pressed_.clear(); return; }
     float x = px / renderer_.scale();
     float y = py / renderer_.scale();
-    Node* hit = menu_open_ ? ui_hit(menu_.get(), x, y) : nullptr;
+    Node* hit = nullptr;
+    if (page_ == L"home" && home_ && x >= home_slot_rect_.left && x <= home_slot_rect_.right &&
+        y >= home_slot_rect_.top && y <= home_slot_rect_.bottom)
+        hit = ui_hit(home_.get(), x, y);
+    if (!hit) hit = menu_open_ ? ui_hit(menu_.get(), x, y) : nullptr;
     if (!hit) hit = ui_hit(ui_.get(), x, y);
     std::wstring action = hit ? hit->action : L"";
     if (!pressed_.empty() && action == pressed_) do_action(action);
@@ -2918,6 +4084,20 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_APP + 9:
             if (app) app->handle_discord_waiting_msg(lp);
             return 0;
+        case WM_APP + 10:
+            if (app) app->handle_home_data_msg(lp);
+            return 0;
+        case WM_APP + 11:
+            if (app) app->handle_system_msg(lp);
+            return 0;
+        case WM_MOUSEWHEEL: {
+            if (app) {
+                POINT pt{ GET_X_LPARAM(lp), GET_Y_LPARAM(lp) };
+                ScreenToClient(hwnd, &pt);
+                app->on_wheel(GET_WHEEL_DELTA_WPARAM(wp), pt.x, pt.y);
+            }
+            return 0;
+        }
         case WM_TIMER:
             if (wp == 4) { InvalidateRect(hwnd, nullptr, FALSE); return 0; }
             if (app && (wp == kSplashTimer || wp == 2)) app->tick();
