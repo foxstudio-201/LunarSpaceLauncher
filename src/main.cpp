@@ -1,6 +1,9 @@
 #include "common.h"
 #include "render.h"
 #include "ui.h"
+#include "json.h"
+#include "net.h"
+#include "auth.h"
 #include <d2d1helper.h>
 #include <windowsx.h>
 #include <shellapi.h>
@@ -8,6 +11,7 @@
 #include <vector>
 #include <cmath>
 #include <cstdio>
+#include <ctime>
 
 #pragma comment(lib, "d2d1")
 
@@ -116,6 +120,53 @@ struct Toast {
     float draw_alpha = 1.0f;
 };
 
+struct Account {
+    std::wstring id;
+    std::wstring name;
+    std::wstring type;
+    std::wstring uuid;
+    std::wstring xuid;
+    Json raw;
+};
+
+struct InstanceInfo {
+    std::wstring id;
+    std::wstring name;
+    std::wstring version;
+    std::wstring loader;
+    std::wstring status;
+    std::wstring icon;
+};
+
+struct AuthResult {
+    int kind = 0;
+    bool ok = false;
+    std::wstring error;
+    std::wstring name;
+    std::wstring uuid;
+    std::wstring xuid;
+    std::string token_json;
+};
+
+struct ModalLayout {
+    D2D1_RECT_F card = D2D1::RectF();
+    D2D1_RECT_F close = D2D1::RectF();
+    D2D1_RECT_F kinds[3]{};
+    D2D1_RECT_F name_input = D2D1::RectF();
+    D2D1_RECT_F user_input = D2D1::RectF();
+    D2D1_RECT_F pass_input = D2D1::RectF();
+    D2D1_RECT_F eye = D2D1::RectF();
+    D2D1_RECT_F cancel = D2D1::RectF();
+    D2D1_RECT_F submit = D2D1::RectF();
+};
+
+struct AuthJob {
+    HWND hwnd = nullptr;
+    int kind = 0;
+    std::wstring user;
+    std::wstring pass;
+};
+
 class App {
 public:
     explicit App(HWND hwnd) : hwnd_(hwnd) {}
@@ -136,6 +187,8 @@ public:
     void toggle_theme();
     std::wstring active_nav_id() const;
     void on_key_down(WPARAM key);
+    void on_char(wchar_t ch);
+    void handle_auth_result(LPARAM lp) { apply_auth_result(reinterpret_cast<AuthResult*>(lp)); }
     void on_dpi_changed();
     bool splash_active() const { return splash_.phase != Splash::Phase::None; }
 
@@ -145,10 +198,30 @@ private:
     void start_pill_slide();
     void toggle_account_menu();
     void draw_account_menu();
-    void select_account(int index);
+    void select_account(const std::wstring& id);
     void close_account_menu();
     void save_settings();
+    void save_token(const std::wstring& id, const std::string& json);
     std::wstring settings_path() const;
+    void load_data();
+    void save_accounts();
+    void rebuild_account_rows();
+    void rebuild_instance_rows();
+    const Account* find_account(const std::wstring& id) const;
+    const Account* active_account() const;
+    std::wstring account_head(const std::wstring& name) const;
+    std::wstring account_kind_label(const std::wstring& type) const;
+    void open_account_modal();
+    void close_account_modal();
+    ModalLayout modal_layout() const;
+    bool modal_valid() const;
+    void draw_account_modal();
+    bool account_modal_mouse_down(int px, int py);
+    bool account_modal_key(WPARAM key);
+    bool account_modal_char(wchar_t ch);
+    void submit_account_modal();
+    void start_auth_job(int kind);
+    void apply_auth_result(AuthResult* result);
     void notify(const std::wstring& title, const std::wstring& message,
                 const std::wstring& tone = L"info", float duration = 4200.0f);
     void update_toasts(ULONGLONG now);
@@ -192,9 +265,20 @@ private:
     bool caret_animating_ = false;
     float caret_cur_ = 0.0f, caret_from_ = 0.0f, caret_to_ = 0.0f;
     ULONGLONG caret_start_ = 0;
-    int active_account_ = 0;
+    std::vector<Account> accounts_;
+    std::wstring active_id_;
+    std::vector<InstanceInfo> instances_;
     bool accounts_skin_ = false;
     bool skin_upload_ = true;
+    bool modal_open_ = false;
+    int modal_kind_ = 0;
+    int modal_focus_ = 0;
+    bool modal_show_pass_ = false;
+    bool modal_busy_ = false;
+    std::wstring modal_name_;
+    std::wstring modal_user_;
+    std::wstring modal_pass_;
+    std::wstring modal_error_;
     std::vector<Toast> toasts_;
     int toast_seq_ = 0;
     float mouse_x_ = 0.0f;
@@ -226,8 +310,7 @@ bool App::init() {
     dark_ = wcscmp(value, L"light") != 0;
     ui_set_dark(dark_);
     ui_set_theme_anim(dark_ ? 1.0f : 0.0f);
-    active_account_ = GetPrivateProfileIntW(L"engine", L"account", 0, settings_path().c_str());
-    if (active_account_ != 1) active_account_ = 0;
+    load_data();
     ui_apply_page();
 
     for (int i = 1; i <= 156; ++i) {
@@ -267,8 +350,12 @@ void App::ui_apply_page() {
     if (Node* sub = ui_find(ui_.get(), L"page-subtitle")) {
         if (page_ == L"accounts")
             sub->text = L"Tài khoản dùng khi khởi chạy game";
-        else if (page_ == L"home")
-            sub->text = L"103 bản phát hành · 6 phiên bản đã tạo · mới nhất 26.3";
+        else if (page_ == L"home") {
+            wchar_t sub_text[128];
+            swprintf(sub_text, 128, L"103 bản phát hành · %d phiên bản đã tạo · mới nhất 26.3",
+                     int(instances_.size()));
+            sub->text = sub_text;
+        }
         else if (page_ == L"modpacks")
             sub->text = L"Quản lý modpack và nội dung tải về";
         else if (page_ == L"versions")
@@ -315,18 +402,22 @@ void App::ui_apply_page() {
     mode_style(L"skin-mode-draw", L"label-mode-draw", !skin_upload_);
     mode_style(L"skin-mode-upload", L"label-mode-upload", skin_upload_);
 
+    const Account* active = active_account();
+    std::wstring active_name = active ? active->name : L"Chưa có tài khoản";
+    const Account* skin_account = nullptr;
+    if (active && active->type == L"offline") skin_account = active;
+    if (!skin_account)
+        for (const auto& candidate : accounts_)
+            if (candidate.type == L"offline") { skin_account = &candidate; break; }
+    if (!skin_account) skin_account = active;
     if (Node* skin_name = ui_find(ui_.get(), L"skin-account-name"))
-        skin_name->text = active_account_ == 0 ? L"Sharks909" : L"hung";
+        skin_name->text = skin_account ? skin_account->name : L"Chưa có tài khoản ngoại tuyến";
     if (Node* name = ui_find(ui_.get(), L"label-account"))
-        name->text = active_account_ == 0 ? L"Sharks909" : L"hung";
-    if (Node* head = ui_find(ui_.get(), L"acct-head"))
-        head->src = asset(active_account_ == 0 ? L"assets\\img\\head.png"
-                                               : L"assets\\img\\head-hung.png");
-    bool first = active_account_ == 0;
-    ui_set_visible(ui_find(ui_.get(), L"active-badge-sharks"), first);
-    ui_set_visible(ui_find(ui_.get(), L"active-badge-hung"), !first);
-    ui_set_visible(ui_find(menu_.get(), L"menu-check-sharks"), first);
-    ui_set_visible(ui_find(menu_.get(), L"menu-check-hung"), !first);
+        name->text = active_name;
+    if (Node* head = ui_find(ui_.get(), L"acct-head")) {
+        head->src = active ? account_head(active->name) : L"";
+        head->style.visible = active && !head->src.empty();
+    }
 
     for (const auto& page : pages) {
         if (!page.nav) continue;
@@ -349,19 +440,845 @@ void App::ui_apply_page() {
         acct->style.bg = ui_token(page_ == L"accounts" ? L"surfaceActive" : L"hover");
         acct->style.accent = false;
     }
+    rebuild_account_rows();
     start_pill_slide();
     dirty_ = true;
 }
 
+void App::load_data() {
+    accounts_.clear();
+    instances_.clear();
+    Json root;
+    root.parse(read_file_utf8(user_data_dir() + L"\\settings.json"));
+    if (const Json* list = root.find("accounts")) {
+        for (const auto& item : list->arr) {
+            if (item.type != Json::Type::Object) continue;
+            Account account;
+            account.id = utf8_to_wide(item.text("id"));
+            account.name = utf8_to_wide(item.text("name"));
+            account.type = utf8_to_wide(item.text("type", "offline"));
+            account.uuid = utf8_to_wide(item.text("uuid"));
+            account.xuid = utf8_to_wide(item.text("xuid"));
+            account.raw = item;
+            if (!account.id.empty()) accounts_.push_back(std::move(account));
+        }
+    }
+    active_id_ = utf8_to_wide(root.text("activeAccountId"));
+    if (!find_account(active_id_) && !accounts_.empty()) active_id_ = accounts_.front().id;
+
+    Json index;
+    index.parse(read_file_utf8(user_data_dir() + L"\\instances.json"));
+    for (const auto& item : index.arr) {
+        if (item.type != Json::Type::Object) continue;
+        InstanceInfo info;
+        info.id = utf8_to_wide(item.text("id"));
+        info.name = utf8_to_wide(item.text("name", item.text("version")));
+        info.version = utf8_to_wide(item.text("version"));
+        info.loader = utf8_to_wide(item.text("loader", "vanilla"));
+        info.status = utf8_to_wide(item.text("status", "ready"));
+        std::wstring dir = utf8_to_wide(item.text("dir"));
+        std::wstring local_icon = dir + L"\\icon.png";
+        if (!dir.empty() && GetFileAttributesW(local_icon.c_str()) != INVALID_FILE_ATTRIBUTES)
+            info.icon = local_icon;
+        instances_.push_back(std::move(info));
+    }
+    rebuild_instance_rows();
+    rebuild_account_rows();
+}
+
+const Account* App::find_account(const std::wstring& id) const {
+    for (const auto& account : accounts_)
+        if (account.id == id) return &account;
+    return nullptr;
+}
+
+const Account* App::active_account() const { return find_account(active_id_); }
+
+std::wstring App::account_head(const std::wstring& name) const {
+    if (name == L"Sharks909") return asset(L"assets\\img\\head.png");
+    if (name == L"hung") return asset(L"assets\\img\\head-hung.png");
+    return asset(L"assets\\icons\\user-circle.svg");
+}
+
+std::wstring App::account_kind_label(const std::wstring& type) const {
+    if (type == L"microsoft") return L"Microsoft";
+    if (type == L"ely") return L"Ely.by";
+    return L"Offline";
+}
+
+void App::save_accounts() {
+    Json root;
+    root.parse(read_file_utf8(user_data_dir() + L"\\settings.json"));
+    if (root.type != Json::Type::Object) root = Json::object();
+    Json list = Json::array();
+    for (const auto& account : accounts_) {
+        Json item = account.raw.type == Json::Type::Object ? account.raw : Json::object();
+        item.set("id", Json::string(wide_to_utf8(account.id)));
+        item.set("name", Json::string(wide_to_utf8(account.name)));
+        item.set("type", Json::string(wide_to_utf8(account.type)));
+        item.set("uuid", Json::string(wide_to_utf8(account.uuid)));
+        if (!account.xuid.empty())
+            item.set("xuid", Json::string(wide_to_utf8(account.xuid)));
+        list.arr.push_back(std::move(item));
+    }
+    root.set("accounts", std::move(list));
+    if (active_id_.empty())
+        root.set("activeAccountId", Json());
+    else
+        root.set("activeAccountId", Json::string(wide_to_utf8(active_id_)));
+    write_file_utf8(user_data_dir() + L"\\settings.json", root.dump(2));
+}
+
+void App::rebuild_account_rows() {
+    hovered_ = nullptr;
+    auto make_head = [&](const Account& account, float size, float radius) {
+        auto image = std::make_unique<Node>();
+        image->kind = Kind::Image;
+        image->src = account_head(account.name);
+        image->style.width = size;
+        image->style.height = size;
+        image->style.radius = radius;
+        if (image->src.size() > 4 &&
+            image->src.substr(image->src.size() - 4) == L".svg")
+            image->style.color = ui_token(L"accent");
+        return image;
+    };
+    auto make_text = [](const std::wstring& value, float size, int weight, Color color,
+                        bool mono = false) {
+        auto text = std::make_unique<Node>();
+        text->kind = Kind::Text;
+        text->text = value;
+        text->style.font_size = size;
+        text->style.weight = weight;
+        text->style.color = color;
+        text->style.mono = mono;
+        return text;
+    };
+
+    if (Node* list = ui_find(menu_.get(), L"menu-accounts")) {
+        list->kids.clear();
+        for (const auto& account : accounts_) {
+            auto row = std::make_unique<Node>();
+            row->kind = Kind::Row;
+            row->action = L"account:" + account.id;
+            row->style.height = 46.0f;
+            row->style.pad_l = row->style.pad_r = 6.0f;
+            row->style.gap = 8.0f;
+            row->style.radius = 12.0f;
+            row->style.hover_bg = ui_token(L"hover");
+            row->kids.push_back(make_head(account, 30.0f, 15.0f));
+            auto column = std::make_unique<Node>();
+            column->kind = Kind::Column;
+            column->style.grow_x = true;
+            column->style.center_main = true;
+            column->kids.push_back(make_text(account.name, 13.0f, 600, ui_token(L"text")));
+            column->kids.push_back(
+                make_text(account_kind_label(account.type), 10.5f, 400, ui_token(L"label")));
+            row->kids.push_back(std::move(column));
+            if (account.id == active_id_) {
+                auto check = std::make_unique<Node>();
+                check->kind = Kind::Image;
+                check->src = asset(L"assets\\icons\\check.svg");
+                check->style.width = check->style.height = 16.0f;
+                check->style.color = ui_token(L"accent");
+                row->kids.push_back(std::move(check));
+            }
+            list->kids.push_back(std::move(row));
+        }
+        if (accounts_.empty()) {
+            auto empty = std::make_unique<Node>();
+            empty->kind = Kind::Text;
+            empty->text = L"Chưa có tài khoản";
+            empty->style.font_size = 12.0f;
+            empty->style.color = ui_token(L"label");
+            empty->style.height = 38.0f;
+            empty->style.pad_l = 10.0f;
+            list->kids.push_back(std::move(empty));
+        }
+    }
+
+    if (Node* list = ui_find(ui_.get(), L"accounts-list-rows")) {
+        list->kids.clear();
+        for (size_t i = 0; i < accounts_.size(); ++i) {
+            const Account& account = accounts_[i];
+            auto row = std::make_unique<Node>();
+            row->kind = Kind::Row;
+            row->action = L"account:" + account.id;
+            row->style.height = 60.0f;
+            row->style.pad_l = row->style.pad_r = 12.0f;
+            row->style.gap = 10.0f;
+            row->style.radius = 12.0f;
+            row->style.hover_bg = ui_token(L"hover");
+            row->kids.push_back(make_head(account, 30.0f, 15.0f));
+            auto column = std::make_unique<Node>();
+            column->kind = Kind::Column;
+            column->style.grow_x = true;
+            column->style.center_main = true;
+            column->style.gap = 2.0f;
+            column->kids.push_back(make_text(account.name, 12.5f, 600, ui_token(L"text")));
+            std::wstring provider = account.type == L"offline" ? L"Ngoại tuyến"
+                                     : account.type == L"microsoft" ? L"Microsoft"
+                                                                   : L"ely.by";
+            column->kids.push_back(make_text(provider + L" · " + account.uuid, 9.0f, 400,
+                                             ui_token(L"faint"), true));
+            row->kids.push_back(std::move(column));
+            if (account.id == active_id_) {
+                auto badge = std::make_unique<Node>();
+                badge->kind = Kind::Row;
+                badge->style.height = 22.0f;
+                badge->style.pad_l = badge->style.pad_r = 8.0f;
+                badge->style.radius = 6.0f;
+                badge->style.bg = ui_token(L"input");
+                badge->style.border = true;
+                badge->style.border_color = ui_token(L"border");
+                badge->kids.push_back(make_text(L"Đang dùng", 9.0f, 700, ui_token(L"accent")));
+                row->kids.push_back(std::move(badge));
+            }
+            auto caret = std::make_unique<Node>();
+            caret->kind = Kind::Image;
+            caret->src = asset(L"assets\\icons\\caret-right.svg");
+            caret->style.width = caret->style.height = 14.0f;
+            caret->style.color = ui_token(L"faint");
+            row->kids.push_back(std::move(caret));
+            list->kids.push_back(std::move(row));
+            if (i + 1 < accounts_.size()) {
+                auto divider = std::make_unique<Node>();
+                divider->kind = Kind::Spacer;
+                divider->style.height = 1.0f;
+                divider->style.bg = ui_token(L"border");
+                list->kids.push_back(std::move(divider));
+            }
+        }
+        if (accounts_.empty()) {
+            auto empty = std::make_unique<Node>();
+            empty->kind = Kind::Text;
+            empty->text = L"Chưa có tài khoản nào";
+            empty->style.font_size = 12.0f;
+            empty->style.color = ui_token(L"label");
+            empty->style.height = 48.0f;
+            list->kids.push_back(std::move(empty));
+        }
+    }
+}
+
+void App::rebuild_instance_rows() {
+    hovered_ = nullptr;
+    Node* list = ui_find(ui_.get(), L"instance-list");
+    if (!list) return;
+    list->kids.clear();
+    list->style.visible = !instances_.empty();
+    for (const auto& inst : instances_) {
+        auto row = std::make_unique<Node>();
+        row->kind = Kind::Row;
+        row->action = L"nav:versions";
+        row->style.height = 48.0f;
+        row->style.pad_l = 14.0f;
+        row->style.pad_r = 10.0f;
+        row->style.gap = 10.0f;
+        row->style.radius = 15.0f;
+        row->style.no_hover_bg = true;
+        auto icon = std::make_unique<Node>();
+        icon->kind = Kind::Image;
+        icon->src = inst.icon;
+        if (icon->src.empty()) {
+            std::wstring loader = inst.loader;
+            if (loader != L"vanilla" && loader != L"fabric" && loader != L"forge" &&
+                loader != L"lunar")
+                loader = L"vanilla";
+            icon->src = asset(L"assets\\img\\loader-icon\\" + loader + L".png");
+        }
+        icon->style.width = icon->style.height = 26.0f;
+        icon->style.radius = 6.0f;
+        icon->style.opacity = 0.62f;
+        icon->style.hover_opacity = 1.0f;
+        row->kids.push_back(std::move(icon));
+        auto name = std::make_unique<Node>();
+        name->kind = Kind::Text;
+        name->text = inst.name;
+        name->style.font_size = 13.5f;
+        name->style.weight = 600;
+        name->style.color = ui_token(L"label");
+        name->style.hover_color = ui_token(L"text");
+        row->kids.push_back(std::move(name));
+        auto spacer = std::make_unique<Node>();
+        spacer->kind = Kind::Spacer;
+        spacer->style.grow_x = true;
+        row->kids.push_back(std::move(spacer));
+        auto dot = std::make_unique<Node>();
+        dot->kind = Kind::Row;
+        dot->style.width = dot->style.height = 6.0f;
+        dot->style.radius = 3.0f;
+        dot->style.bg = inst.status == L"running"      ? Color::rgb(0x22C55E)
+                        : inst.status == L"installing" || inst.status == L"stopping" ||
+                                  inst.status == L"starting"
+                            ? Color::rgb(0xEAB308)
+                        : inst.status == L"error" ? Color::rgb(0xEF4444)
+                                                  : Color::rgb(0x6B7280);
+        row->kids.push_back(std::move(dot));
+        list->kids.push_back(std::move(row));
+    }
+}
+
+void App::select_account(const std::wstring& id) {
+    const Account* account = find_account(id);
+    if (!account) return;
+    active_id_ = id;
+    save_accounts();
+    rebuild_account_rows();
+    ui_apply_page();
+    notify(L"Tài khoản", L"Đang dùng " + account->name, L"ok");
+    close_account_menu();
+    dirty_ = true;
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+
+static std::wstring trim_text(const std::wstring& value) {
+    size_t start = 0, end = value.size();
+    while (start < end && iswspace(value[start])) ++start;
+    while (end > start && iswspace(value[end - 1])) --end;
+    return value.substr(start, end - start);
+}
+
+static bool valid_mc_name(const std::wstring& name) {
+    if (name.size() < 3 || name.size() > 16) return false;
+    for (wchar_t c : name) {
+        if (!((c >= L'a' && c <= L'z') || (c >= L'A' && c <= L'Z') ||
+              (c >= L'0' && c <= L'9') || c == L'_'))
+            return false;
+    }
+    return true;
+}
+
+static std::string iso_now() {
+    std::time_t raw = std::time(nullptr);
+    std::tm tm{};
+    gmtime_s(&tm, &raw);
+    char out[32];
+    std::strftime(out, sizeof(out), "%Y-%m-%dT%H:%M:%S.000Z", &tm);
+    return out;
+}
+
+ModalLayout App::modal_layout() const {
+    RECT rc{};
+    GetClientRect(hwnd_, &rc);
+    float w = float(rc.right - rc.left) / renderer_.scale();
+    float h = float(rc.bottom - rc.top) / renderer_.scale();
+    ModalLayout L;
+    float cw = 560.0f;
+    float ch = modal_kind_ == 0 ? 268.0f : modal_kind_ == 1 ? 330.0f : 384.0f;
+    if (!modal_error_.empty()) ch += 44.0f;
+    float x = (w - cw) * 0.5f;
+    float y = (h - ch) * 0.5f;
+    if (y < 16.0f) y = 16.0f;
+    L.card = D2D1::RectF(x, y, x + cw, y + ch);
+    L.close = D2D1::RectF(x + cw - 40.0f, y + 10.0f, x + cw - 16.0f, y + 34.0f);
+    float kx = x + 16.0f;
+    float ky = y + 56.0f;
+    float kw = (cw - 32.0f - 16.0f) / 3.0f;
+    for (int i = 0; i < 3; ++i)
+        L.kinds[i] = D2D1::RectF(kx + i * (kw + 8.0f), ky, kx + i * (kw + 8.0f) + kw, ky + 64.0f);
+    float desc_y = ky + 64.0f + 10.0f;
+    float body_y = desc_y + 36.0f + 10.0f;
+    if (modal_kind_ == 0) {
+        L.name_input = D2D1::RectF(x + 62.0f, body_y, x + cw - 16.0f, body_y + 38.0f);
+    } else if (modal_kind_ == 2) {
+        L.user_input = D2D1::RectF(x + 16.0f, body_y, x + cw - 16.0f, body_y + 38.0f);
+        L.pass_input = D2D1::RectF(x + 16.0f, body_y + 46.0f, x + cw - 16.0f, body_y + 84.0f);
+        L.eye = D2D1::RectF(L.pass_input.right - 30.0f, L.pass_input.top + 6.0f,
+                            L.pass_input.right - 4.0f, L.pass_input.bottom - 6.0f);
+    }
+    float footer = L.card.bottom - 52.0f;
+    L.submit = D2D1::RectF(x + cw - 16.0f - 96.0f, footer + 10.0f, x + cw - 16.0f,
+                           footer + 42.0f);
+    L.cancel = D2D1::RectF(L.submit.left - 8.0f - 72.0f, footer + 10.0f,
+                           L.submit.left - 8.0f, footer + 42.0f);
+    return L;
+}
+
+bool App::modal_valid() const {
+    if (modal_kind_ == 0) return valid_mc_name(trim_text(modal_name_));
+    if (modal_kind_ == 1) return true;
+    return !trim_text(modal_user_).empty() && !modal_pass_.empty();
+}
+
+void App::open_account_modal() {
+    close_account_menu();
+    modal_open_ = true;
+    modal_kind_ = 0;
+    modal_focus_ = 0;
+    modal_show_pass_ = false;
+    modal_busy_ = false;
+    modal_name_.clear();
+    modal_user_.clear();
+    modal_pass_.clear();
+    modal_error_.clear();
+    SetTimer(hwnd_, 4, 500, nullptr);
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+void App::close_account_modal() {
+    if (!modal_open_) return;
+    if (modal_busy_) return;
+    modal_open_ = false;
+    modal_busy_ = false;
+    modal_error_.clear();
+    KillTimer(hwnd_, 4);
+    hovered_ = nullptr;
+    pressed_.clear();
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+void App::save_token(const std::wstring& id, const std::string& json) {
+    if (id.empty() || json.empty()) return;
+    Json store;
+    store.parse(read_file_utf8(user_data_dir() + L"\\auth.json"));
+    if (store.type != Json::Type::Object) store = Json::object();
+    Json entry = Json::object();
+    entry.set("v", Json::number(1));
+    entry.set("enc", Json::boolean(true));
+    entry.set("data", Json::string(oscrypt_encrypt(json)));
+    store.set(wide_to_utf8(id), std::move(entry));
+    write_file_utf8(user_data_dir() + L"\\auth.json", store.dump(0));
+}
+
+
+static void draw_spinner(Renderer& renderer, float cx, float cy, float radius, Color color,
+                         float opacity) {
+    float base = float(GetTickCount64() % 1000) / 1000.0f * 6.28318f;
+    for (int i = 0; i < 8; ++i) {
+        float angle = base + float(i) * 0.785398f;
+        float x = cx + std::cos(angle) * radius;
+        float y = cy + std::sin(angle) * radius;
+        float a = 0.2f + 0.8f * (float(i) / 7.0f);
+        renderer.fill_rect(D2D1::RectF(x - 1.6f, y - 1.6f, x + 1.6f, y + 1.6f), 1.6f,
+                           Color{ color.r, color.g, color.b, a * opacity });
+    }
+}
+
+void App::draw_account_modal() {
+    if (!modal_open_) return;
+    RECT rc{};
+    GetClientRect(hwnd_, &rc);
+    float w = float(rc.right - rc.left) / renderer_.scale();
+    float h = float(rc.bottom - rc.top) / renderer_.scale();
+    ModalLayout L = modal_layout();
+    renderer_.fill_rect(D2D1::RectF(0, 0, w, h), 0.0f, Color::rgb(0x000000, 0.55f));
+    renderer_.fill_rect(D2D1::RectF(L.card.left + 2, L.card.top + 8, L.card.right + 2,
+                                    L.card.bottom + 8),
+                        16.0f, Color::rgb(0x000000, 0.35f));
+    renderer_.fill_rect(L.card, 16.0f, ui_color(L"surface"));
+    renderer_.stroke_rect(L.card, 16.0f, ui_color(L"border"), 1.0f);
+
+    auto icon = [&](const wchar_t* path, D2D1_RECT_F rect, Color color) {
+        renderer_.draw_svg(asset(path), rect, color);
+    };
+    icon(L"assets\\icons\\user.svg",
+         D2D1::RectF(L.card.left + 16, L.card.top + 15, L.card.left + 31, L.card.top + 30),
+         ui_color(L"accent"));
+    renderer_.draw_text(L"Thêm tài khoản",
+                        D2D1::RectF(L.card.left + 38, L.card.top + 10, L.card.right - 48,
+                                    L.card.top + 34),
+                        12.0f, 700, false, TextAlign::Left, ui_color(L"text"));
+    icon(L"assets\\icons\\x.svg",
+         D2D1::RectF(L.close.left + 5, L.close.top + 5, L.close.right - 5, L.close.bottom - 5),
+         ui_color(L"label"));
+
+    const wchar_t* kind_labels[3] = { L"Ngoại tuyến", L"Microsoft", L"ely.by" };
+    const wchar_t* kind_icons[3] = { L"assets\\icons\\user.svg",
+                                     L"assets\\icons\\windows-logo.svg",
+                                     L"assets\\icons\\globe.svg" };
+    for (int i = 0; i < 3; ++i) {
+        bool on = modal_kind_ == i;
+        D2D1_RECT_F box = L.kinds[i];
+        if (on) renderer_.fill_rect(box, 12.0f, ui_color(L"input"));
+        renderer_.stroke_rect(box, 12.0f, on ? ui_color(L"accent") : ui_color(L"border"), 1.0f,
+                              1.0f);
+        icon(kind_icons[i], D2D1::RectF(box.left + 10, box.top + 10, box.left + 25,
+                                       box.top + 25),
+             on ? ui_color(L"accent") : ui_color(L"label"));
+        renderer_.draw_text(kind_labels[i],
+                            D2D1::RectF(box.left + 10, box.top + 32, box.right - 8,
+                                        box.bottom - 6),
+                            11.0f, 700, false, TextAlign::Left,
+                            on ? ui_color(L"text") : ui_color(L"label"));
+    }
+
+    D2D1_RECT_F desc = D2D1::RectF(L.card.left + 16, L.kinds[0].bottom + 10, L.card.right - 16,
+                                   L.kinds[0].bottom + 42);
+    const wchar_t* desc_text = modal_kind_ == 0
+        ? L"Chơi không cần tài khoản Mojang. Tên chỉ gồm chữ, số, gạch dưới và dài 3–16 ký tự."
+        : modal_kind_ == 1
+            ? L"Đăng nhập bằng tài khoản Microsoft đã sở hữu Minecraft Java Edition. Launcher lưu refresh token và tự làm mới phiên mỗi lần khởi chạy."
+            : L"Tài khoản ely.by qua authlib-injector: chơi được trên server có bật ely.by và dùng skin của ely.by.";
+    renderer_.draw_text(desc_text, desc, 10.5f, 400, false, TextAlign::Left, ui_color(L"faint"),
+                        1.0f, true);
+
+    auto input_box = [&](D2D1_RECT_F box, const std::wstring& value,
+                         const wchar_t* placeholder, bool password, bool focused) {
+        renderer_.fill_rect(box, 8.0f, ui_color(L"input"));
+        renderer_.stroke_rect(box, 8.0f, focused ? ui_color(L"accent") : ui_color(L"border"),
+                              1.0f);
+        std::wstring shown = password ? std::wstring(value.size(), wchar_t(0x2022)) : value;
+        if (!shown.empty()) {
+            renderer_.draw_text(shown, D2D1::RectF(box.left + 10, box.top, box.right - 10,
+                                                   box.bottom),
+                                12.0f, 400, false, TextAlign::Left, ui_color(L"text"));
+        } else {
+            renderer_.draw_text(placeholder, D2D1::RectF(box.left + 10, box.top, box.right - 10,
+                                                          box.bottom),
+                                12.0f, 400, false, TextAlign::Left, ui_color(L"faint"));
+        }
+        if (focused && (GetTickCount64() / 500) % 2 == 0) {
+            float tw = 0.0f;
+            if (!value.empty())
+                tw = renderer_.measure_text(password ? std::wstring(value.size(), wchar_t(0x2022))
+                                                     : value,
+                                            12.0f, 400, false, 1e6f, 1e6f, false)
+                         .w;
+            float caret = std::min(box.left + 10 + tw + 1.0f, box.right - 8.0f);
+            renderer_.fill_rect(D2D1::RectF(caret, box.top + 10, caret + 1.0f, box.bottom - 10),
+                                0.5f, ui_color(L"text"));
+        }
+    };
+
+    if (modal_kind_ == 0) {
+        D2D1_RECT_F avatar = D2D1::RectF(L.card.left + 16, L.name_input.top,
+                                         L.card.left + 54, L.name_input.bottom);
+        std::wstring head = account_head(trim_text(modal_name_));
+        if (head.size() > 4 && head.substr(head.size() - 4) == L".png") {
+            renderer_.draw_image_path(head, avatar, 9.0f);
+        } else {
+            renderer_.fill_rect(avatar, 9.0f, ui_color(L"input"));
+            renderer_.stroke_rect(avatar, 9.0f, ui_color(L"border"), 1.0f);
+            icon(L"assets\\icons\\user-circle.svg",
+                 D2D1::RectF(avatar.left + 9, avatar.top + 9, avatar.right - 9, avatar.bottom - 9),
+                 ui_color(L"accent"));
+        }
+        input_box(L.name_input, modal_name_, L"Tên người chơi…", false, modal_focus_ == 0);
+    } else if (modal_kind_ == 1) {
+        D2D1_RECT_F note = D2D1::RectF(L.card.left + 16, L.kinds[0].bottom + 56,
+                                       L.card.right - 16, L.kinds[0].bottom + 112);
+        renderer_.fill_rect(note, 8.0f, ui_color(L"input"));
+        renderer_.stroke_rect(note, 8.0f, ui_color(L"border"), 1.0f);
+        icon(L"assets\\icons\\shield-check.svg",
+             D2D1::RectF(note.left + 10, note.top + 10, note.left + 25, note.top + 25),
+             ui_color(L"accent"));
+        renderer_.draw_text(L"Cửa sổ đăng nhập do Microsoft mở ra — launcher không thấy mật khẩu của bạn.",
+                            D2D1::RectF(note.left + 32, note.top + 8, note.right - 10,
+                                        note.bottom - 8),
+                            10.5f, 400, false, TextAlign::Left, ui_color(L"label"), 1.0f, true);
+        if (modal_busy_) {
+            draw_spinner(renderer_, L.card.left + 24, note.bottom + 24, 6.0f,
+                         ui_color(L"accent"), 1.0f);
+            renderer_.draw_text(L"Đang chờ bạn đăng nhập trong cửa sổ Microsoft…",
+                                D2D1::RectF(L.card.left + 38, note.bottom + 12, L.card.right - 16,
+                                            note.bottom + 38),
+                                11.0f, 400, false, TextAlign::Left, ui_color(L"label"));
+        }
+    } else {
+        input_box(L.user_input, modal_user_, L"Tên đăng nhập hoặc email ely.by", false,
+                  modal_focus_ == 0);
+        input_box(L.pass_input, modal_pass_, L"Mật khẩu ely.by", !modal_show_pass_,
+                  modal_focus_ == 1);
+        icon(modal_show_pass_ ? L"assets\\icons\\eye-slash.svg" : L"assets\\icons\\eye.svg",
+             L.eye, ui_color(L"faint"));
+        D2D1_RECT_F note = D2D1::RectF(L.card.left + 16, L.pass_input.bottom + 10,
+                                       L.card.right - 16, L.pass_input.bottom + 66);
+        renderer_.fill_rect(note, 8.0f, ui_color(L"input"));
+        renderer_.stroke_rect(note, 8.0f, ui_color(L"border"), 1.0f);
+        icon(L"assets\\icons\\shield-check.svg",
+             D2D1::RectF(note.left + 10, note.top + 10, note.left + 25, note.top + 25),
+             ui_color(L"accent"));
+        renderer_.draw_text(L"Mật khẩu chỉ gửi trực tiếp tới authserver.ely.by. authlib-injector được tải một lần khi khởi chạy game.",
+                            D2D1::RectF(note.left + 32, note.top + 8, note.right - 10,
+                                        note.bottom - 8),
+                            10.5f, 400, false, TextAlign::Left, ui_color(L"label"), 1.0f, true);
+    }
+
+    float footer_top = L.card.bottom - 52.0f;
+    if (!modal_error_.empty()) {
+        D2D1_RECT_F error = D2D1::RectF(L.card.left + 16, footer_top - 40, L.card.right - 16,
+                                        footer_top - 8);
+        renderer_.fill_rect(error, 8.0f, Color::rgb(0xEF4444, 0.10f));
+        renderer_.stroke_rect(error, 8.0f, Color::rgb(0xEF4444, 0.30f), 1.0f);
+        icon(L"assets\\icons\\warning-circle.svg",
+             D2D1::RectF(error.left + 10, error.top + 8, error.left + 23, error.bottom - 8),
+             ui_color(L"bad"));
+        renderer_.draw_text(modal_error_,
+                            D2D1::RectF(error.left + 30, error.top, error.right - 8, error.bottom),
+                            11.0f, 400, false, TextAlign::Left, ui_color(L"bad"));
+    }
+    renderer_.fill_rect(D2D1::RectF(L.card.left, footer_top, L.card.right, footer_top + 1),
+                        0.0f, ui_color(L"border"));
+    const wchar_t* hint = modal_kind_ == 0 ? L"Tên chỉ gồm chữ, số, gạch dưới và dài 3–16 ký tự."
+                         : modal_kind_ == 1 ? L"Cần tài khoản đã mua Minecraft Java Edition."
+                                            : L"Thông tin đăng nhập chỉ dùng để lấy token từ ely.by.";
+    renderer_.draw_text(hint,
+                        D2D1::RectF(L.card.left + 16, footer_top + 10, L.submit.left - 8,
+                                    footer_top + 42),
+                        10.0f, 400, false, TextAlign::Left, ui_color(L"faint"));
+    renderer_.draw_text(L"Hủy",
+                        D2D1::RectF(L.cancel.left, L.cancel.top, L.cancel.right, L.cancel.bottom),
+                        11.0f, 600, false, TextAlign::Center, ui_color(L"label"));
+    bool enabled = !modal_busy_ && modal_valid();
+    renderer_.fill_rect(L.submit, 8.0f, ui_color(L"accent"), enabled ? 1.0f : 0.4f);
+    if (modal_busy_) {
+        draw_spinner(renderer_, L.submit.left + 22, (L.submit.top + L.submit.bottom) * 0.5f, 5.0f,
+                     ui_color(L"ink"), 1.0f);
+    } else {
+        icon(L"assets\\icons\\check-circle.svg",
+             D2D1::RectF(L.submit.left + 12, L.submit.top + 10, L.submit.left + 24,
+                         L.submit.bottom - 10),
+             ui_color(L"ink"));
+    }
+    const wchar_t* submit_text = modal_kind_ == 0 ? L"Tạo" : L"Đăng nhập";
+    renderer_.draw_text(submit_text,
+                        D2D1::RectF(L.submit.left + 30, L.submit.top, L.submit.right - 8,
+                                    L.submit.bottom),
+                        11.0f, 700, false, TextAlign::Left, ui_color(L"ink"),
+                        enabled ? 1.0f : 0.5f);
+}
+
+bool App::account_modal_mouse_down(int px, int py) {
+    if (!modal_open_) return false;
+    float x = float(px) / renderer_.scale();
+    float y = float(py) / renderer_.scale();
+    ModalLayout L = modal_layout();
+    auto inside = [&](D2D1_RECT_F r) {
+        return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+    };
+    if (!inside(L.card)) {
+        close_account_modal();
+        return true;
+    }
+    if (inside(L.close)) {
+        close_account_modal();
+        return true;
+    }
+    if (modal_busy_) return true;
+    for (int i = 0; i < 3; ++i) {
+        if (inside(L.kinds[i])) {
+            modal_kind_ = i;
+            modal_focus_ = i == 2 ? 0 : (i == 0 ? 0 : -1);
+            modal_error_.clear();
+            InvalidateRect(hwnd_, nullptr, FALSE);
+            return true;
+        }
+    }
+    if (modal_kind_ == 0 && inside(L.name_input)) {
+        modal_focus_ = 0;
+        InvalidateRect(hwnd_, nullptr, FALSE);
+        return true;
+    }
+    if (modal_kind_ == 2) {
+        if (inside(L.user_input)) {
+            modal_focus_ = 0;
+            InvalidateRect(hwnd_, nullptr, FALSE);
+            return true;
+        }
+        if (inside(L.pass_input)) {
+            modal_focus_ = 1;
+            InvalidateRect(hwnd_, nullptr, FALSE);
+            return true;
+        }
+        if (inside(L.eye)) {
+            modal_show_pass_ = !modal_show_pass_;
+            InvalidateRect(hwnd_, nullptr, FALSE);
+            return true;
+        }
+    }
+    if (inside(L.cancel)) {
+        close_account_modal();
+        return true;
+    }
+    if (inside(L.submit)) {
+        if (modal_valid()) submit_account_modal();
+        return true;
+    }
+    return true;
+}
+
+bool App::account_modal_key(WPARAM key) {
+    if (!modal_open_) return false;
+    if (key == VK_ESCAPE) {
+        if (!modal_busy_) close_account_modal();
+        return true;
+    }
+    if (modal_busy_) return true;
+    if (key == VK_RETURN) {
+        if (modal_valid()) submit_account_modal();
+        return true;
+    }
+    if (key == VK_TAB) {
+        if (modal_kind_ == 2) modal_focus_ = modal_focus_ == 0 ? 1 : 0;
+        else if (modal_kind_ == 0) modal_focus_ = 0;
+        InvalidateRect(hwnd_, nullptr, FALSE);
+        return true;
+    }
+    if (key == VK_BACK) {
+        std::wstring* target = nullptr;
+        if (modal_kind_ == 0 && modal_focus_ == 0) target = &modal_name_;
+        else if (modal_kind_ == 2 && modal_focus_ == 0) target = &modal_user_;
+        else if (modal_kind_ == 2 && modal_focus_ == 1) target = &modal_pass_;
+        if (target && !target->empty()) target->pop_back();
+        modal_error_.clear();
+        InvalidateRect(hwnd_, nullptr, FALSE);
+        return true;
+    }
+    return true;
+}
+
+bool App::account_modal_char(wchar_t ch) {
+    if (!modal_open_ || modal_busy_ || ch < 32 || ch == 127) return false;
+    std::wstring* target = nullptr;
+    size_t limit = 64;
+    if (modal_kind_ == 0 && modal_focus_ == 0) {
+        target = &modal_name_;
+        limit = 16;
+    } else if (modal_kind_ == 2 && modal_focus_ == 0) {
+        target = &modal_user_;
+    } else if (modal_kind_ == 2 && modal_focus_ == 1) {
+        target = &modal_pass_;
+    }
+    if (!target) return false;
+    if (target->size() >= limit) return true;
+    target->push_back(ch);
+    modal_error_.clear();
+    InvalidateRect(hwnd_, nullptr, FALSE);
+    return true;
+}
+
+void App::submit_account_modal() {
+    if (modal_busy_ || !modal_valid()) return;
+    if (modal_kind_ == 0) {
+        std::wstring name = trim_text(modal_name_);
+        std::string uuid = offline_uuid(name);
+        std::wstring wide_uuid = utf8_to_wide(uuid);
+        for (const auto& account : accounts_) {
+            if (account.uuid == wide_uuid) {
+                active_id_ = account.id;
+                save_accounts();
+                rebuild_account_rows();
+                ui_apply_page();
+                close_account_modal();
+                notify(L"Tài khoản", L"Tài khoản này đã có trong danh sách", L"info");
+                return;
+            }
+        }
+        Account account;
+        account.id = L"off-" + wide_uuid.substr(0, 8);
+        account.name = name;
+        account.type = L"offline";
+        account.uuid = wide_uuid;
+        account.raw = Json::object();
+        account.raw.set("created", Json::string(iso_now()));
+        accounts_.push_back(account);
+        active_id_ = account.id;
+        save_accounts();
+        rebuild_account_rows();
+        ui_apply_page();
+        close_account_modal();
+        notify(L"Đã thêm tài khoản", name, L"ok");
+        return;
+    }
+    start_auth_job(modal_kind_);
+}
+
+void App::start_auth_job(int kind) {
+    if (modal_busy_) return;
+    modal_busy_ = true;
+    modal_error_.clear();
+    AuthJob* job = new AuthJob{};
+    job->hwnd = hwnd_;
+    job->kind = kind;
+    job->user = modal_user_;
+    job->pass = modal_pass_;
+    SetTimer(hwnd_, 2, 16, nullptr);
+    InvalidateRect(hwnd_, nullptr, FALSE);
+    HANDLE thread = CreateThread(nullptr, 0, +[](LPVOID param) -> DWORD {
+        AuthJob* job = reinterpret_cast<AuthJob*>(param);
+        AuthResult* result = new AuthResult();
+        result->kind = job->kind;
+        AuthSession session = job->kind == 1 ? microsoft_login()
+                                             : ely_login(job->user, job->pass);
+        if (session.ok && job->kind == 2) {
+            std::wstring error;
+            std::wstring jar = ensure_ely_injector(&error);
+            if (jar.empty()) {
+                session.ok = false;
+                session.error = error.empty() ? L"Không tải được authlib-injector." : error;
+            }
+        }
+        result->ok = session.ok;
+        result->error = session.error;
+        result->name = session.name;
+        result->uuid = session.uuid;
+        result->xuid = session.xuid;
+        result->token_json = session.token_json;
+        if (!result->ok && result->error.empty())
+            result->error = job->kind == 1 ? L"Đăng nhập Microsoft thất bại."
+                                           : L"Đăng nhập ely.by thất bại.";
+        PostMessage(job->hwnd, WM_APP + 3, 0, reinterpret_cast<LPARAM>(result));
+        delete job;
+        return 0;
+    }, job, 0, nullptr);
+    if (thread) CloseHandle(thread);
+}
+
+void App::apply_auth_result(AuthResult* result) {
+    modal_busy_ = false;
+    if (!result) return;
+    if (!result->ok) {
+        modal_error_ = result->error.empty() ? L"Đăng nhập thất bại." : result->error;
+        delete result;
+        InvalidateRect(hwnd_, nullptr, FALSE);
+        return;
+    }
+    std::wstring type = result->kind == 1 ? L"microsoft" : L"ely";
+    std::wstring id = type + L"-" + result->uuid.substr(0, 8);
+    Account* existing = nullptr;
+    for (auto& account : accounts_) {
+        if (account.type == type && account.uuid == result->uuid) {
+            existing = &account;
+            break;
+        }
+    }
+    if (existing) {
+        existing->name = result->name;
+        existing->xuid = result->xuid;
+        id = existing->id;
+    } else {
+        Account account;
+        account.id = id;
+        account.name = result->name;
+        account.type = type;
+        account.uuid = result->uuid;
+        account.xuid = result->xuid;
+        account.raw = Json::object();
+        account.raw.set("created", Json::string(iso_now()));
+        accounts_.push_back(account);
+    }
+    active_id_ = id;
+    save_token(id, result->token_json);
+    save_accounts();
+    rebuild_account_rows();
+    ui_apply_page();
+    close_account_modal();
+    notify(L"Đã thêm tài khoản",
+           result->name + (result->kind == 1 ? L" · Microsoft" : L" · ely.by"), L"ok");
+    delete result;
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
 void App::do_action(const std::wstring& action) {
     if (action == L"toggle:theme") {
         toggle_theme();
     } else if (action == L"menu:account") {
         toggle_account_menu();
-    } else if (action == L"account:sharks") {
-        select_account(0);
-    } else if (action == L"account:hung") {
-        select_account(1);
+    } else if (action == L"account:add") {
+        open_account_modal();
+    } else if (action.rfind(L"account:", 0) == 0) {
+        select_account(action.substr(8));
     } else if (action == L"accounts:tab-list") {
         accounts_skin_ = false;
         ui_apply_page();
@@ -419,7 +1336,7 @@ void App::tick() {
         if (t >= 1.0f) { caret_animating_ = false; caret_cur_ = caret_to_; } else busy = true;
     }
     update_toasts(now);
-    if (!toasts_.empty()) busy = true;
+    if (!toasts_.empty() || (modal_open_ && modal_busy_)) busy = true;
     if (busy) InvalidateRect(hwnd_, nullptr, FALSE);
     else KillTimer(hwnd_, 2);
 }
@@ -635,6 +1552,7 @@ void App::paint() {
     ui_draw(ui_.get(), renderer_, hovered_);
     draw_account_menu();
     draw_toasts();
+    draw_account_modal();
     draw_splash(now_ms());
     renderer_.end();
 }
@@ -656,6 +1574,11 @@ void App::on_mouse_move(int px, int py) {
     mouse_x_ = float(px) / renderer_.scale();
     mouse_y_ = float(py) / renderer_.scale();
     if (splash_active()) return;
+    if (modal_open_) {
+        hovered_ = nullptr;
+        SetCursor(LoadCursorW(nullptr, IDC_ARROW));
+        return;
+    }
     if (toast_mouse_move(px, py)) {
         if (hovered_) {
             hovered_ = nullptr;
@@ -687,8 +1610,6 @@ std::wstring App::settings_path() const {
 void App::save_settings() {
     std::wstring path = settings_path();
     WritePrivateProfileStringW(L"engine", L"theme", dark_ ? L"dark" : L"light", path.c_str());
-    WritePrivateProfileStringW(L"engine", L"account", active_account_ == 1 ? L"1" : L"0",
-                               path.c_str());
 }
 
 std::wstring App::active_nav_id() const {
@@ -763,26 +1684,12 @@ void App::close_account_menu() {
 }
 
 void App::on_key_down(WPARAM key) {
+    if (account_modal_key(key)) return;
     if (key == VK_ESCAPE) close_account_menu();
 }
 
-void App::select_account(int index) {
-    active_account_ = index;
-    bool first = index == 0;
-    if (Node* name = ui_find(ui_.get(), L"label-account"))
-        name->text = first ? L"Sharks909" : L"hung";
-    if (Node* name = ui_find(ui_.get(), L"skin-account-name"))
-        name->text = first ? L"Sharks909" : L"hung";
-    if (Node* head = ui_find(ui_.get(), L"acct-head"))
-        head->src = asset(first ? L"assets\\img\\head.png" : L"assets\\img\\head-hung.png");
-    ui_set_visible(ui_find(menu_.get(), L"menu-check-sharks"), first);
-    ui_set_visible(ui_find(menu_.get(), L"menu-check-hung"), !first);
-    ui_set_visible(ui_find(ui_.get(), L"active-badge-sharks"), first);
-    ui_set_visible(ui_find(ui_.get(), L"active-badge-hung"), !first);
-    notify(L"Tài khoản", first ? L"Đang dùng Sharks909" : L"Đang dùng hung", L"ok");
-    save_settings();
-    close_account_menu();
-    dirty_ = true;
+void App::on_char(wchar_t ch) {
+    if (modal_open_) account_modal_char(ch);
 }
 
 void App::draw_account_menu() {
@@ -794,7 +1701,7 @@ void App::draw_account_menu() {
     Node* acct = ui_find(ui_.get(), L"acct-btn");
     if (!acct) return;
     const float menu_w = 180.0f;
-    const float menu_h = 247.0f;
+    const float menu_h = 151.0f + 48.0f * float(std::max<size_t>(1, accounts_.size()));
     float x = acct->rect.left;
     float bottom = acct->rect.top - 6.0f;
     float y = bottom - menu_h;
@@ -1102,7 +2009,7 @@ void App::on_tray(UINT event) {
 }
 
 void App::on_double_click(int px, int py) {
-    if (splash_active()) return;
+    if (splash_active() || modal_open_) return;
     float x = px / renderer_.scale();
     float y = py / renderer_.scale();
     Node* hit = ui_hit(ui_.get(), x, y);
@@ -1111,6 +2018,7 @@ void App::on_double_click(int px, int py) {
 
 void App::on_mouse_down(int px, int py) {
     if (splash_active()) return;
+    if (account_modal_mouse_down(px, py)) return;
     if (toast_mouse_down(px, py)) return;
     float x = px / renderer_.scale();
     float y = py / renderer_.scale();
@@ -1140,6 +2048,7 @@ void App::on_mouse_down(int px, int py) {
 
 void App::on_mouse_up(int px, int py) {
     if (splash_active()) { pressed_.clear(); return; }
+    if (modal_open_) { pressed_.clear(); return; }
     float x = px / renderer_.scale();
     float y = py / renderer_.scale();
     Node* hit = menu_open_ ? ui_hit(menu_.get(), x, y) : nullptr;
@@ -1208,7 +2117,14 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_KEYDOWN:
             if (app) app->on_key_down(wp);
             return 0;
+        case WM_CHAR:
+            if (app) app->on_char(wchar_t(wp));
+            return 0;
+        case WM_APP + 3:
+            if (app) app->handle_auth_result(lp);
+            return 0;
         case WM_TIMER:
+            if (wp == 4) { InvalidateRect(hwnd, nullptr, FALSE); return 0; }
             if (app && (wp == kSplashTimer || wp == 2)) app->tick();
             return 0;
         case WM_PAINT: {

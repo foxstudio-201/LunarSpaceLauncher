@@ -129,7 +129,15 @@ void ui_set_caret_angle(float degrees) { g_caret_angle = degrees; }
 
 Color ui_color(const wchar_t* token) {
     std::wstring key = token ? token : L"";
-    return pick(g_dark ? palette_dark() : palette_light(), key);
+    float night = g_night;
+    if (g_theme_anim) {
+        float p = std::clamp(float(GetTickCount64() - g_theme_start) / 900.0f, 0.0f, 1.0f);
+        p = 1.0f - std::pow(1.0f - p, 3.0f);
+        night = g_theme_from + (g_theme_to - g_theme_from) * p;
+    }
+    if (night >= 0.999f) return pick(palette_dark(), key);
+    if (night <= 0.001f) return pick(palette_light(), key);
+    return blend(pick(palette_light(), key), pick(palette_dark(), key), night);
 }
 
 Color ui_token(const wchar_t* token) {

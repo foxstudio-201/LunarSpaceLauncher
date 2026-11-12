@@ -10,6 +10,8 @@ add_executable(XyoLauncherEngine WIN32
   src/main.cpp
   src/render.cpp
   src/ui.cpp
+  src/net.cpp
+  src/auth.cpp
   resource.rc
 )
 
@@ -19,6 +21,7 @@ target_compile_definitions(XyoLauncherEngine PRIVATE UNICODE _UNICODE NOMINMAX W
 target_compile_options(XyoLauncherEngine PRIVATE -O2 -fno-exceptions -fno-rtti -Wall -Wextra -Wno-unused-parameter)
 target_link_libraries(XyoLauncherEngine PRIVATE
   d3d11 dxgi d2d1 dwrite windowscodecs ole32 uuid user32 gdi32 shell32
+  winhttp bcrypt crypt32 ws2_32
 )
 target_link_options(XyoLauncherEngine PRIVATE -municode -static-libgcc -static-libstdc++)
 

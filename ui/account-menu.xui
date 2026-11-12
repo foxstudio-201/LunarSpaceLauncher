@@ -3,21 +3,7 @@ column id=account-menu growx=1 growy=1 padding=4 gap=2 radius=18 bg=$surface bor
     text value="TÀI KHOẢN" size=10.5 weight=700 color=$faint
   }
 
-  row height=46 paddingx=6 gap=8 radius=12 action=account:sharks hoverbg=$hover {
-    image src=assets/img/head.png width=30 height=30 radius=15
-    column growx=1 justify=center {
-      text value="Sharks909" size=13 weight=600 color=$text
-      text value="Offline" size=10.5 color=$label
-    }
-    image id=menu-check-sharks src=assets/icons/check.svg width=16 height=16 color=$accent
-  }
-  row height=46 paddingx=6 gap=8 radius=12 action=account:hung hoverbg=$hover {
-    image src=assets/img/head-hung.png width=30 height=30 radius=15
-    column growx=1 justify=center {
-      text value="hung" size=13 weight=600 color=$text
-      text value="Offline" size=10.5 color=$label
-    }
-    image id=menu-check-hung src=assets/icons/check.svg width=16 height=16 color=$accent hidden=1
+  column id=menu-accounts gap=2 {
   }
 
   spacer height=8
