@@ -468,6 +468,7 @@ private:
     void save_user_setting(const std::string& key, Json value);
     void browse_java_exe();
     void remove_java_dir(const std::wstring& dir);
+    void sync_shell_palette(bool animate);
     void settings_toggle_bool(bool& value, const char* key);
     void refresh_discord_links();
     void apply_discord_links_body(const std::string& body);
@@ -851,11 +852,7 @@ void App::load_data() {
         if (Node* root_node = ui_find(ui_.get(), L"root"))
             root_node->style.bg_image = file;
         theme_locked_ = !file.empty();
-        if (theme_locked_) {
-            ui_set_dark(dark_);
-            ui_set_theme_anim(dark_ ? 1.0f : 0.0f);
-            theme_animating_ = false;
-        }
+        if (theme_locked_) sync_shell_palette(false);
     }
 
     Json skin_cache;
@@ -3500,6 +3497,22 @@ static bool remove_tree(const std::wstring& dir) {
     return RemoveDirectoryW(dir.c_str()) != FALSE;
 }
 
+void App::sync_shell_palette(bool animate) {
+    // Wallpaper mode has its own fixed glass palette (dark) so toggling the
+    // light/dark switch cannot repaint the cards.
+    bool target_dark = theme_locked_ ? true : dark_;
+    if (animate && ui_is_dark() != target_dark) {
+        ui_set_dark(target_dark);
+        ui_start_theme_anim(target_dark);
+        theme_animating_ = true;
+        SetTimer(hwnd_, 2, 16, nullptr);
+    } else {
+        ui_set_dark(target_dark);
+        ui_set_theme_anim(target_dark ? 1.0f : 0.0f);
+        theme_animating_ = false;
+    }
+}
+
 void App::save_user_setting(const std::string& key, Json value) {
     std::wstring path = user_data_dir() + L"\\settings.json";
     Json root;
@@ -3569,11 +3582,7 @@ void App::apply_background(const std::wstring& id) {
         root->style.bg_image = file;
     }
     theme_locked_ = id != L"theme";
-    if (theme_locked_) {
-        ui_set_dark(dark_);
-        ui_set_theme_anim(dark_ ? 1.0f : 0.0f);
-        theme_animating_ = false;
-    }
+    sync_shell_palette(true);
     rebuild_settings();
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
@@ -4068,7 +4077,7 @@ void App::rebuild_settings() {
         theme_switch->action = L"toggle:theme";
         if (theme_locked_) theme_switch->style.opacity = 0.55f;
         appearance->kids.push_back(row(
-            dark_ ? L"assets/icons/moon-stars.svg" : L"assets/icons/sun.svg", L"Giao diện",
+            ui_is_dark() ? L"assets/icons/moon-stars.svg" : L"assets/icons/sun.svg", L"Giao diện",
             theme_locked_ ? L"Đang khóa khi dùng ảnh nền — chọn \"Theo giao diện\" để đổi sáng/tối"
                           : L"Bật/tắt chế độ tối",
             std::move(theme_switch)));
