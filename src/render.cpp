@@ -687,7 +687,10 @@ void Renderer::project_item_quad(const D2D1_RECT_F& item, const D2D1_RECT_F& sid
     float w = item.right - item.left;
     float h = item.bottom - item.top;
     const float depth = 900.0f;
-    float radians = std::fabs(angle_degrees) * 3.14159265358979f / 180.0f;
+    float base = std::fabs(angle_degrees) * 3.14159265358979f / 180.0f;
+    // The tile hinges out of the sidebar on its left edge: as it rises, it
+    // turns toward the viewer, so its foreshortening relaxes.
+    float radians = base * (1.0f - 0.34f * std::clamp(lift, 0.0f, 1.0f));
     float cs = std::cos(radians);
     float sn = std::fabs(std::sin(radians));
     float side_left = sidebar.left;
@@ -700,8 +703,7 @@ void Renderer::project_item_quad(const D2D1_RECT_F& item, const D2D1_RECT_F& sid
         { 0.0f, 0.0f }, { 1.0f, 0.0f }, { 1.0f, 1.0f }, { 0.0f, 1.0f },
     };
     for (int i = 0; i < 4; ++i) {
-        // Project from the sidebar origin so the quad lands exactly on the
-        // row's place on the rotated surface.
+        // Project from the sidebar origin so the quad lands on its row.
         float xa = (item.left - side_left) + local[i][0];
         float ya = item.top + local[i][1];
         float z = xa * sn;
@@ -713,20 +715,6 @@ void Renderer::project_item_quad(const D2D1_RECT_F& item, const D2D1_RECT_F& sid
         v[3] = uv[i][1];
         v[4] = 1.0f / s;
     }
-
-    if (lift > 0.0001f) {
-        // Toward the viewer: the surface normal points right/out because the
-        // sidebar's right edge recedes. Elements rise off the plane, so they
-        // grow and slide slightly right, expanding away from the centre line.
-        float cx = (verts[0] + verts[5] + verts[10] + verts[15]) * 0.25f;
-        float scale = 1.0f + 0.07f * lift;
-        float dx = 4.0f * lift;
-        for (int i = 0; i < 4; ++i) {
-            float* v = verts + i * 5;
-            v[0] = cx + (v[0] - cx) * scale + dx;
-            v[1] = center_y + (v[1] - center_y) * scale;
-        }
-    }
 }
 
 bool Renderer::draw_sidebar_item_3d(const D2D1_RECT_F& rect, const D2D1_RECT_F& sidebar,
@@ -734,15 +722,6 @@ bool Renderer::draw_sidebar_item_3d(const D2D1_RECT_F& rect, const D2D1_RECT_F& 
     if (!sidebar_item_ready() || !d3d_context_ || !item_bitmap_) return false;
     if (rect.right - rect.left <= 0.0f || rect.bottom - rect.top <= 0.0f) return false;
     lift = std::clamp(lift, 0.0f, 1.5f);
-
-    float shadow[4 * 5];
-    project_item_quad(rect, sidebar, angle_degrees, 0.0f, shadow);
-    for (int i = 0; i < 4; ++i) {
-        shadow[i * 5] += 2.5f * lift;
-        shadow[i * 5 + 1] += 3.5f * lift;
-    }
-    const float shadow_tint[4] = { 0.0f, 0.0f, 0.0f, 0.40f * lift };
-    draw_textured_quad(item_srv_.get(), shadow, shadow_tint);
 
     float verts[4 * 5];
     project_item_quad(rect, sidebar, angle_degrees, lift, verts);
