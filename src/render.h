@@ -61,11 +61,21 @@ public:
     void capture_end();
     bool sidebar_3d_ready();
     bool draw_sidebar_3d(const D2D1_RECT_F& rect, float angle_degrees);
+    bool capture_item_begin(float width, float height, float translate_x, float translate_y);
+    void capture_item_end();
+    bool sidebar_item_ready();
+    bool draw_sidebar_item_3d(const D2D1_RECT_F& rect, float angle_degrees, float lift);
 
 private:
     bool create_target();
     bool ensure_quad_pipeline();
-    bool ensure_sidebar_surface(float width, float height);
+    bool ensure_surface(float width, float height, ComPtr<ID3D11Texture2D>& tex,
+                        ComPtr<ID3D11ShaderResourceView>& srv, ComPtr<ID2D1Bitmap1>& bitmap,
+                        UINT& pixel_w, UINT& pixel_h);
+    void draw_textured_quad(ID3D11ShaderResourceView* srv, const float* verts,
+                            const float* tint);
+    void project_sidebar_quad(const D2D1_RECT_F& rect, float angle_degrees, float lift,
+                              float* verts) const;
     IDWriteTextFormat* format(float size, int weight, bool mono, TextAlign align, bool wrap);
     IDWriteTextLayout* layout(const std::wstring& text, float size, int weight, bool mono,
                               float max_width, float max_height, TextAlign align,
@@ -113,6 +123,9 @@ private:
     ComPtr<ID3D11Texture2D> sidebar_tex_;
     ComPtr<ID3D11ShaderResourceView> sidebar_srv_;
     ComPtr<ID2D1Bitmap1> sidebar_bitmap_;
+    ComPtr<ID3D11Texture2D> item_tex_;
+    ComPtr<ID3D11ShaderResourceView> item_srv_;
+    ComPtr<ID2D1Bitmap1> item_bitmap_;
     ComPtr<ID3D11VertexShader> quad_vs_;
     ComPtr<ID3D11PixelShader> quad_ps_;
     ComPtr<ID3D11InputLayout> quad_layout_;
@@ -125,4 +138,6 @@ private:
     bool quad_ok_ = false;
     UINT sidebar_px_w_ = 0;
     UINT sidebar_px_h_ = 0;
+    UINT item_px_w_ = 0;
+    UINT item_px_h_ = 0;
 };

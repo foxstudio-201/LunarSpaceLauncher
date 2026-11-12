@@ -387,15 +387,17 @@ void Renderer::opacity_pop() {
 }
 
 
-bool Renderer::ensure_sidebar_surface(float width, float height) {
+bool Renderer::ensure_surface(float width, float height, ComPtr<ID3D11Texture2D>& tex,
+                              ComPtr<ID3D11ShaderResourceView>& srv,
+                              ComPtr<ID2D1Bitmap1>& bitmap, UINT& pixel_w, UINT& pixel_h) {
     if (!d3d_device_ || !main_context_) return false;
     UINT pw = std::max<UINT>(1, UINT(width * scale_ + 0.5f));
     UINT ph = std::max<UINT>(1, UINT(height * scale_ + 0.5f));
-    if (sidebar_bitmap_ && sidebar_px_w_ == pw && sidebar_px_h_ == ph) return true;
+    if (bitmap && pixel_w == pw && pixel_h == ph) return true;
 
-    sidebar_bitmap_.reset();
-    sidebar_srv_.reset();
-    sidebar_tex_.reset();
+    bitmap.reset();
+    srv.reset();
+    tex.reset();
 
     D3D11_TEXTURE2D_DESC desc{};
     desc.Width = pw;
@@ -406,23 +408,20 @@ bool Renderer::ensure_sidebar_surface(float width, float height) {
     desc.SampleDesc.Count = 1;
     desc.Usage = D3D11_USAGE_DEFAULT;
     desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-    if (FAILED(d3d_device_->CreateTexture2D(&desc, nullptr, sidebar_tex_.put())))
-        return false;
-    if (FAILED(d3d_device_->CreateShaderResourceView(sidebar_tex_.get(), nullptr,
-                                                     sidebar_srv_.put())))
+    if (FAILED(d3d_device_->CreateTexture2D(&desc, nullptr, tex.put()))) return false;
+    if (FAILED(d3d_device_->CreateShaderResourceView(tex.get(), nullptr, srv.put())))
         return false;
     ComPtr<IDXGISurface> surface;
-    if (FAILED(sidebar_tex_->QueryInterface(__uuidof(IDXGISurface), (void**)surface.put())))
+    if (FAILED(tex->QueryInterface(__uuidof(IDXGISurface), (void**)surface.put())))
         return false;
     D2D1_BITMAP_PROPERTIES1 props = D2D1::BitmapProperties1(
         D2D1_BITMAP_OPTIONS_TARGET,
         D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED),
         96.0f * scale_, 96.0f * scale_);
-    if (FAILED(main_context_->CreateBitmapFromDxgiSurface(surface.get(), &props,
-                                                          sidebar_bitmap_.put())))
+    if (FAILED(main_context_->CreateBitmapFromDxgiSurface(surface.get(), &props, bitmap.put())))
         return false;
-    sidebar_px_w_ = pw;
-    sidebar_px_h_ = ph;
+    pixel_w = pw;
+    pixel_h = ph;
     return true;
 }
 
@@ -432,7 +431,9 @@ bool Renderer::capture_begin(float width, float height, float translate_x, float
         UINT dpi = GetDpiForWindow(hwnd_);
         if (dpi > 0) scale_ = dpi / 96.0f;
     }
-    if (!ensure_sidebar_surface(width, height)) return false;
+    if (!ensure_surface(width, height, sidebar_tex_, sidebar_srv_, sidebar_bitmap_,
+                        sidebar_px_w_, sidebar_px_h_))
+        return false;
     main_context_->SetTarget(sidebar_bitmap_.get());
     main_context_->BeginDraw();
     main_context_->Clear(D2D1::ColorF(0, 0.0f));
@@ -456,12 +457,43 @@ void Renderer::capture_end() {
     if (target_) target_->SetTransform(base_transform_);
 }
 
+bool Renderer::capture_item_begin(float width, float height, float translate_x,
+                                  float translate_y) {
+    if (!main_context_ || !render_target_) return false;
+    if (!ensure_surface(width, height, item_tex_, item_srv_, item_bitmap_, item_px_w_,
+                        item_px_h_))
+        return false;
+    main_context_->SetTarget(item_bitmap_.get());
+    main_context_->BeginDraw();
+    main_context_->Clear(D2D1::ColorF(0, 0.0f));
+    base_transform_ = D2D1::Matrix3x2F::Translation(-translate_x, -translate_y);
+    target_ = main_context_.get();
+    target_->SetTransform(base_transform_);
+    return true;
+}
+
+void Renderer::capture_item_end() {
+    if (!main_context_) return;
+    HRESULT hr = main_context_->EndDraw();
+    if (FAILED(hr) && hr != D2DERR_RECREATE_TARGET) {
+        item_bitmap_.reset();
+        item_srv_.reset();
+        item_tex_.reset();
+    }
+    main_context_->SetTarget(render_target_.get());
+    target_ = d2d_context_;
+    base_transform_ = D2D1::Matrix3x2F::Scale(scale_, scale_);
+    if (target_) target_->SetTransform(base_transform_);
+}
+
 bool Renderer::ensure_quad_pipeline() {
     if (quad_ok_) return true;
     if (!d3d_device_) return false;
 
     static const char* vs_src =
-        "cbuffer QuadCB : register(b0) { float2 half_dip; float2 pad; };\n"
+        "cbuffer QuadCB : register(b0) {\n"
+        "  float2 half_dip; float2 pad; float4 tint;\n"
+        "};\n"
         "struct VSIn { float2 pos : POSITION; float2 uv : TEXCOORD0; float w : TEXCOORD1; };\n"
         "struct VSOut { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; };\n"
         "VSOut VSMain(VSIn i) {\n"
@@ -472,10 +504,13 @@ bool Renderer::ensure_quad_pipeline() {
         "  return o;\n"
         "}\n";
     static const char* ps_src =
+        "cbuffer QuadCB : register(b0) {\n"
+        "  float2 half_dip; float2 pad; float4 tint;\n"
+        "};\n"
         "Texture2D sideTex : register(t0);\n"
         "SamplerState sideSamp : register(s0);\n"
         "float4 PSMain(float4 pos : SV_POSITION, float2 uv : TEXCOORD0) : SV_Target {\n"
-        "  return sideTex.Sample(sideSamp, uv);\n"
+        "  return sideTex.Sample(sideSamp, uv) * tint;\n"
         "}\n";
 
     ComPtr<ID3DBlob> vs_blob, ps_blob, errors;
@@ -525,7 +560,7 @@ bool Renderer::ensure_quad_pipeline() {
     if (FAILED(d3d_device_->CreateBuffer(&ib_desc, &ib_data, quad_ib_.put()))) return false;
 
     D3D11_BUFFER_DESC cb_desc{};
-    cb_desc.ByteWidth = 16;
+    cb_desc.ByteWidth = 32;
     cb_desc.Usage = D3D11_USAGE_DYNAMIC;
     cb_desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
     cb_desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
@@ -563,25 +598,27 @@ bool Renderer::sidebar_3d_ready() {
     return ensure_quad_pipeline() && sidebar_srv_ && backbuffer_rtv_;
 }
 
-bool Renderer::draw_sidebar_3d(const D2D1_RECT_F& rect, float angle_degrees) {
-    if (!sidebar_3d_ready() || !d3d_context_ || !sidebar_bitmap_) return false;
+bool Renderer::sidebar_item_ready() {
+    return ensure_quad_pipeline() && item_srv_ && backbuffer_rtv_;
+}
+
+void Renderer::project_sidebar_quad(const D2D1_RECT_F& rect, float angle_degrees, float lift,
+                                    float* verts) const {
     float w = rect.right - rect.left;
     float h = rect.bottom - rect.top;
-    if (w <= 0.0f || h <= 0.0f) return false;
-
     const float depth = 900.0f;
     float radians = std::fabs(angle_degrees) * 3.14159265358979f / 180.0f;
     float cs = std::cos(radians);
     float sn = std::fabs(std::sin(radians));
     float pivot_y = rect.top + h * 0.5f;
 
-    float verts[4 * 5];
     const float local[4][2] = {
         { 0.0f, 0.0f }, { w, 0.0f }, { w, h }, { 0.0f, h },
     };
     const float uv[4][2] = {
         { 0.0f, 0.0f }, { 1.0f, 0.0f }, { 1.0f, 1.0f }, { 0.0f, 1.0f },
     };
+    float cx = 0.0f;
     for (int i = 0; i < 4; ++i) {
         float x = local[i][0];
         float y = local[i][1];
@@ -593,18 +630,37 @@ bool Renderer::draw_sidebar_3d(const D2D1_RECT_F& rect, float angle_degrees) {
         v[2] = uv[i][0];
         v[3] = uv[i][1];
         v[4] = 1.0f / s;
+        cx += v[0] * 0.25f;
     }
 
+    if (lift > 0.0001f) {
+        // Toward the viewer means: scale up about the sidebar's horizontal
+        // centre line (so items below it sink downward, above it rise) and
+        // drift toward the near (left) edge of the rotated plane.
+        float px = cx;
+        float py = rect.top + h * 0.5f;
+        float scale = 1.0f + 0.10f * lift;
+        float dx = -3.5f * lift;
+        for (int i = 0; i < 4; ++i) {
+            float* v = verts + i * 5;
+            v[0] = px + (v[0] - px) * scale + dx;
+            v[1] = py + (v[1] - py) * scale;
+        }
+    }
+}
+
+void Renderer::draw_textured_quad(ID3D11ShaderResourceView* srv, const float* verts,
+                                  const float* tint) {
     D3D11_MAPPED_SUBRESOURCE mapped{};
     if (FAILED(d3d_context_->Map(quad_vb_.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
-        return false;
-    memcpy(mapped.pData, verts, sizeof(verts));
+        return;
+    memcpy(mapped.pData, verts, sizeof(float) * 5 * 4);
     d3d_context_->Unmap(quad_vb_.get(), 0);
 
-    float cb[4] = { float(width_) / scale_ * 0.5f, float(height_) / scale_ * 0.5f, 0.0f,
-                    0.0f };
+    float cb[8] = { float(width_) / scale_ * 0.5f, float(height_) / scale_ * 0.5f,
+                    0.0f, 0.0f, tint[0], tint[1], tint[2], tint[3] };
     if (FAILED(d3d_context_->Map(quad_cb_.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
-        return false;
+        return;
     memcpy(mapped.pData, cb, sizeof(cb));
     d3d_context_->Unmap(quad_cb_.get(), 0);
 
@@ -622,13 +678,45 @@ bool Renderer::draw_sidebar_3d(const D2D1_RECT_F& rect, float angle_degrees) {
     ID3D11Buffer* cb_buf = quad_cb_.get();
     d3d_context_->VSSetConstantBuffers(0, 1, &cb_buf);
     d3d_context_->PSSetShader(quad_ps_.get(), nullptr, 0);
-    ID3D11ShaderResourceView* srv = sidebar_srv_.get();
+    d3d_context_->PSSetConstantBuffers(0, 1, &cb_buf);
     d3d_context_->PSSetShaderResources(0, 1, &srv);
     ID3D11SamplerState* sampler = quad_sampler_.get();
     d3d_context_->PSSetSamplers(0, 1, &sampler);
     d3d_context_->OMSetBlendState(quad_blend_.get(), nullptr, 0xFFFFFFFF);
     d3d_context_->RSSetState(quad_raster_.get());
     d3d_context_->DrawIndexed(6, 0, 0);
+}
+
+bool Renderer::draw_sidebar_3d(const D2D1_RECT_F& rect, float angle_degrees) {
+    if (!sidebar_3d_ready() || !d3d_context_ || !sidebar_bitmap_) return false;
+    if (rect.right - rect.left <= 0.0f || rect.bottom - rect.top <= 0.0f) return false;
+    float verts[4 * 5];
+    project_sidebar_quad(rect, angle_degrees, 0.0f, verts);
+    const float tint[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+    draw_textured_quad(sidebar_srv_.get(), verts, tint);
+    ID3D11ShaderResourceView* null_srv = nullptr;
+    d3d_context_->PSSetShaderResources(0, 1, &null_srv);
+    return true;
+}
+
+bool Renderer::draw_sidebar_item_3d(const D2D1_RECT_F& rect, float angle_degrees, float lift) {
+    if (!sidebar_item_ready() || !d3d_context_ || !item_bitmap_) return false;
+    if (rect.right - rect.left <= 0.0f || rect.bottom - rect.top <= 0.0f) return false;
+    lift = std::clamp(lift, 0.0f, 1.5f);
+
+    float shadow[4 * 5];
+    project_sidebar_quad(rect, angle_degrees, lift * 0.15f, shadow);
+    for (int i = 0; i < 4; ++i) {
+        shadow[i * 5] += 3.0f * lift;
+        shadow[i * 5 + 1] += 4.0f * lift;
+    }
+    const float shadow_tint[4] = { 0.0f, 0.0f, 0.0f, 0.40f * lift };
+    draw_textured_quad(item_srv_.get(), shadow, shadow_tint);
+
+    float verts[4 * 5];
+    project_sidebar_quad(rect, angle_degrees, lift, verts);
+    const float tint[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+    draw_textured_quad(item_srv_.get(), verts, tint);
 
     ID3D11ShaderResourceView* null_srv = nullptr;
     d3d_context_->PSSetShaderResources(0, 1, &null_srv);

@@ -22,6 +22,7 @@ float g_pill_top = 0.0f;
 bool g_pill_show = false;
 float g_caret_angle = 0.0f;
 std::wstring g_skip_id;
+Node* g_skip_node = nullptr;
 
 Palette make_palette(bool dark) {
     if (dark) {
@@ -557,6 +558,8 @@ void ui_set_visible(Node* node, bool visible) {
 
 void ui_set_skip_id(const wchar_t* id) { g_skip_id = id ? id : L""; }
 
+void ui_set_skip_node(Node* node) { g_skip_node = node; }
+
 static Color cv(const Color& color) {
     if (color.r <= kTokenBase + 0.5f) {
         int index = int(kTokenBase - color.r);
@@ -666,6 +669,7 @@ static void draw_theme_switch(Renderer& renderer, D2D1_RECT_F r, float opacity) 
 
 static void draw_node(Node* node, Renderer& renderer, Node* hovered, bool inside_hover) {
     if (!node || !node->style.visible || node->style.opacity <= 0.001f) return;
+    if (node == g_skip_node) return;
     if (!g_skip_id.empty() && node->id == g_skip_id) return;
     const auto& r = node->rect;
     const auto& st = node->style;

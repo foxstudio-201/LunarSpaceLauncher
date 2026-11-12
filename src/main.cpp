@@ -362,6 +362,8 @@ public:
     void on_key_down(WPARAM key);
     void on_char(wchar_t ch);
     void on_wheel(int delta, int px, int py);
+    void update_sidebar_lift(Node* hit);
+    void clear_sidebar_lift();
     void sidebar_project(float u, float v, float& x, float& y) const;
     bool sidebar_unproject(float x, float y, float& u, float& v) const;
     Node* hit_test(float x, float y);
@@ -482,6 +484,10 @@ private:
     std::wstring shared_dir_;
     D2D1_RECT_F sidebar_rect_ = D2D1::RectF();
     bool sidebar3d_active_ = false;
+    Node* sidebar_item_ = nullptr;
+    D2D1_RECT_F sidebar_item_rect_ = D2D1::RectF();
+    float sidebar_rise_ = 0.0f;
+    bool sidebar_item_valid_ = false;
     int discord_phase_ = 0;
     int discord_seq_ = 0;
     bool discord_force_ = false;
@@ -1103,6 +1109,7 @@ void App::rebuild_account_rows() {
 
 void App::rebuild_instance_rows() {
     hovered_ = nullptr;
+    clear_sidebar_lift();
     Node* list = ui_find(ui_.get(), L"instance-list");
     if (!list) return;
     list->kids.clear();
@@ -3300,6 +3307,28 @@ Node* App::hit_test(float x, float y) {
     return hit;
 }
 
+void App::update_sidebar_lift(Node* hit) {
+    Node* target = nullptr;
+    if (hit && sidebar_rect_.right > sidebar_rect_.left && hit->style.no_hover_bg &&
+        hit->rect.left >= sidebar_rect_.left - 1.0f &&
+        hit->rect.right <= sidebar_rect_.right + 1.0f &&
+        hit->rect.top >= sidebar_rect_.top - 1.0f &&
+        hit->rect.bottom <= sidebar_rect_.bottom + 1.0f)
+        target = hit;
+    if (target == sidebar_item_) return;
+    sidebar_item_ = target;
+    anims_.run(L"sidebar.rise", sidebar_rise_, target ? 1.0f : 0.0f, target ? 240 : 200,
+               anim_ease::Spring, [this](float v) { sidebar_rise_ = v; });
+    SetTimer(hwnd_, 2, 16, nullptr);
+}
+
+void App::clear_sidebar_lift() {
+    anims_.cancel(L"sidebar.rise");
+    sidebar_item_ = nullptr;
+    sidebar_rise_ = 0.0f;
+    sidebar_item_valid_ = false;
+}
+
 void App::do_action(const std::wstring& action) {
     if (action == L"toggle:theme") {
         toggle_theme();
@@ -3585,9 +3614,32 @@ void App::paint() {
     }
     Node* sidebar_node = ui_find(ui_.get(), L"sidebar");
     bool captured = false;
-    if (sidebar_node) {
-        sidebar_rect_ = sidebar_node->rect;
+    bool item_captured = false;
+    if (sidebar_node) sidebar_rect_ = sidebar_node->rect;
+    if (sidebar_item_ && sidebar_rise_ > 0.01f && sidebar_rect_.right > sidebar_rect_.left) {
+        const float pad = 10.0f;
+        D2D1_RECT_F row = sidebar_item_->rect;
+        sidebar_item_rect_ = D2D1::RectF(row.left - pad, row.top - pad, row.right + pad,
+                                         row.bottom + pad);
+        float iw = sidebar_item_rect_.right - sidebar_item_rect_.left;
+        float ih = sidebar_item_rect_.bottom - sidebar_item_rect_.top;
         ui_set_skip_id(L"");
+        if (renderer_.capture_item_begin(iw, ih, sidebar_item_rect_.left,
+                                         sidebar_item_rect_.top)) {
+            float lift_alpha = std::clamp(sidebar_rise_, 0.0f, 1.0f);
+            renderer_.fill_rect(row, sidebar_item_->style.radius, ui_token(L"surfaceActive"),
+                                lift_alpha);
+            renderer_.stroke_rect(row, sidebar_item_->style.radius, ui_token(L"border"), 1.0f,
+                                  lift_alpha * 0.5f);
+            ui_draw(sidebar_item_, renderer_, hovered_);
+            renderer_.capture_item_end();
+            item_captured = true;
+            sidebar_item_valid_ = true;
+        }
+    }
+    if (sidebar_node) {
+        ui_set_skip_id(L"");
+        ui_set_skip_node(item_captured ? sidebar_item_ : nullptr);
         float sidebar_w = sidebar_rect_.right - sidebar_rect_.left;
         float sidebar_h = sidebar_rect_.bottom - sidebar_rect_.top;
         if (renderer_.capture_begin(sidebar_w, sidebar_h, sidebar_rect_.left, sidebar_rect_.top)) {
@@ -3595,6 +3647,7 @@ void App::paint() {
             renderer_.capture_end();
             captured = true;
         }
+        ui_set_skip_node(nullptr);
     }
     bool use3d = captured && renderer_.sidebar_3d_ready();
     renderer_.begin(ui_color(L"bg"));
@@ -3611,6 +3664,9 @@ void App::paint() {
     sidebar3d_active_ = false;
     if (use3d && main_ok)
         sidebar3d_active_ = renderer_.draw_sidebar_3d(sidebar_rect_, kSidebarDepth * 180.0f);
+    if (sidebar3d_active_ && sidebar_item_valid_ && sidebar_rise_ > 0.005f)
+        renderer_.draw_sidebar_item_3d(sidebar_item_rect_, kSidebarDepth * 180.0f,
+                                       sidebar_rise_);
     renderer_.begin_overlay();
     draw_account_menu();
     draw_toasts();
@@ -3659,6 +3715,7 @@ void App::on_mouse_move(int px, int py) {
     float x = px / renderer_.scale();
     float y = py / renderer_.scale();
     Node* hit = hit_test(x, y);
+    update_sidebar_lift(hit);
     if (hit != hovered_) {
         hovered_ = hit;
         InvalidateRect(hwnd_, nullptr, FALSE);
@@ -3668,6 +3725,7 @@ void App::on_mouse_move(int px, int py) {
 
 void App::on_mouse_leave() {
     mouse_tracking_ = false;
+    update_sidebar_lift(nullptr);
     if (hovered_) {
         hovered_ = nullptr;
         InvalidateRect(hwnd_, nullptr, FALSE);
