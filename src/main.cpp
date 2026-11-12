@@ -815,9 +815,9 @@ void App::rebuild_account_rows() {
             link_btn->style.border_color = Color::rgb(0x5865F2);
             auto link_icon = std::make_unique<Node>();
             link_icon->kind = Kind::Image;
-            link_icon->src = asset(L"assets/icons/discord.svg");
+            link_icon->src = asset(L"assets/img/discord-logo.png");
             link_icon->style.width = link_icon->style.height = 12.0f;
-            link_icon->style.color = Color::rgb(0x5865F2);
+            link_icon->style.radius = 3.0f;
             link_btn->kids.push_back(std::move(link_icon));
             link_btn->kids.push_back(make_text(dlink ? L"Đã liên kết" : L"Liên kết Discord", 9.5f, 600,
                                                Color::rgb(0x5865F2)));
@@ -1082,18 +1082,22 @@ void App::draw_account_modal() {
     float h = float(rc.bottom - rc.top) / renderer_.scale();
     ModalLayout L = modal_layout();
     renderer_.fill_rect(D2D1::RectF(0, 0, w, h), 0.0f, Color::rgb(0x000000, 0.55f));
-    renderer_.fill_rect(D2D1::RectF(L.card.left + 2, L.card.top + 8, L.card.right + 2,
-                                    L.card.bottom + 8),
-                        16.0f, Color::rgb(0x000000, 0.35f));
     renderer_.fill_rect(L.card, 16.0f, ui_color(L"surface"));
     renderer_.stroke_rect(L.card, 16.0f, ui_color(L"border"), 1.0f);
 
     auto icon = [&](const wchar_t* path, D2D1_RECT_F rect, Color color) {
         renderer_.draw_svg(asset(path), rect, color);
     };
-    icon(modal_kind_ == 3 ? L"assets\\icons\\discord.svg" : L"assets\\icons\\user.svg",
-         D2D1::RectF(L.card.left + 16, L.card.top + 15, L.card.left + 31, L.card.top + 30),
-         modal_kind_ == 3 ? Color::rgb(0x5865F2) : ui_color(L"accent"));
+    if (modal_kind_ == 3)
+        renderer_.draw_image_path(asset(L"assets/img/discord-logo.png"),
+                                  D2D1::RectF(L.card.left + 16, L.card.top + 14,
+                                              L.card.left + 32, L.card.top + 30),
+                                  4.0f);
+    else
+        icon(L"assets\\icons\\user.svg",
+             D2D1::RectF(L.card.left + 16, L.card.top + 15, L.card.left + 31,
+                         L.card.top + 30),
+             ui_color(L"accent"));
     renderer_.draw_text(modal_kind_ == 3 ? L"Liên kết Discord" : L"Thêm tài khoản",
                         D2D1::RectF(L.card.left + 38, L.card.top + 10, L.card.right - 48,
                                     L.card.top + 34),
@@ -1103,19 +1107,20 @@ void App::draw_account_modal() {
          ui_color(L"label"));
 
     const wchar_t* kind_labels[4] = { L"Ngoại tuyến", L"Microsoft", L"ely.by", L"Discord" };
-    const wchar_t* kind_icons[4] = { L"assets\\icons\\user.svg",
-                                     L"assets\\icons\\windows-logo.svg",
-                                     L"assets\\icons\\globe.svg",
-                                     L"assets\\icons\\discord.svg" };
+    const wchar_t* kind_icons[4] = { L"assets/img/offline-head.png",
+                                     L"assets/img/ms-logo.png",
+                                     L"assets/img/ely-logo.png",
+                                     L"assets/img/discord-logo.png" };
     for (int i = 0; i < 4; ++i) {
         bool on = modal_kind_ == i;
         D2D1_RECT_F box = L.kinds[i];
         if (on) renderer_.fill_rect(box, 12.0f, ui_color(L"input"));
         Color tint = (i == 3) ? Color::rgb(0x5865F2) : ui_color(L"accent");
         renderer_.stroke_rect(box, 12.0f, on ? tint : ui_color(L"border"), 1.0f, 1.0f);
-        icon(kind_icons[i], D2D1::RectF(box.left + 10, box.top + 10, box.left + 25,
-                                       box.top + 25),
-             on ? ((i == 3) ? Color::rgb(0x5865F2) : ui_color(L"accent")) : ui_color(L"label"));
+        renderer_.draw_image_path(asset(kind_icons[i]),
+                                  D2D1::RectF(box.left + 10, box.top + 8, box.left + 30,
+                                              box.top + 28),
+                                  4.0f, on ? 1.0f : 0.55f);
         renderer_.draw_text(kind_labels[i],
                             D2D1::RectF(box.left + 10, box.top + 32, box.right - 8,
                                         box.bottom - 6),
@@ -1232,9 +1237,10 @@ void App::draw_account_modal() {
                                        L.card.right - 16, L.name_input.top + 110.0f);
         renderer_.fill_rect(note, 8.0f, ui_color(L"input"));
         renderer_.stroke_rect(note, 8.0f, ui_color(L"border"), 1.0f);
-        icon(L"assets\\icons\\discord.svg",
-             D2D1::RectF(note.left + 10, note.top + 10, note.left + 25, note.top + 25),
-             Color::rgb(0x5865F2));
+        renderer_.draw_image_path(asset(L"assets/img/discord-logo.png"),
+                                  D2D1::RectF(note.left + 10, note.top + 9, note.left + 26,
+                                              note.top + 25),
+                                  4.0f);
         renderer_.draw_text(L"Trình duyệt sẽ mở trang xác thực Discord. Launcher tự nhận kết quả và tạo tài khoản nếu chưa có.",
                             D2D1::RectF(note.left + 32, note.top + 8, note.right - 10,
                                         note.bottom - 8),
@@ -2298,9 +2304,6 @@ void App::draw_toasts() {
                               : toast.tone == L"load"   ? L"assets\\icons\\upload.svg"
                                                         : L"assets\\icons\\info.svg";
 
-        renderer_.fill_rect(D2D1::RectF(r.left + 2.0f, r.top + 8.0f, r.right + 2.0f,
-                                        r.bottom + 8.0f),
-                            20.0f * f, Color::rgb(0x000000, 0.30f * alpha));
         renderer_.fill_rect(r, 20.0f * f, ui_color(L"surface"), alpha);
         renderer_.stroke_rect(r, 20.0f * f, ui_color(L"border"), 1.0f, alpha);
 

@@ -92,7 +92,7 @@ column bg=$bg growx=1 growy=1 {
         }
         row id=header-tools-accounts hidden=1 gap=8 {
           row id=btn-discord-link height=34 paddingx=12 gap=6 radius=8 bg=$input border=1 bordercolor=#5865F2 action=discord:add {
-            image src=assets/icons/discord.svg width=14 height=14 color=#5865F2
+            image src=assets/img/discord-logo.png width=14 height=14 radius=3
             text value="Liên kết Discord" size=11 weight=600 color=#5865F2
           }
           row id=btn-add-account height=34 paddingx=12 radius=8 bg=$accent action=account:add {

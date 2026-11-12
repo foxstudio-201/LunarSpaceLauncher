@@ -101,6 +101,7 @@ void ui_set_dark(bool dark) { g_dark = dark; }
 bool ui_is_dark() { return g_dark; }
 void ui_set_theme_anim(float value) {
     g_night = std::clamp(value, 0.0f, 1.0f);
+    g_theme_from = g_theme_to = g_night;
     g_theme_anim = false;
 }
 static float spring_curve(float x);
