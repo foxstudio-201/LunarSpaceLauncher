@@ -714,15 +714,17 @@ void Renderer::project_item_quad(const D2D1_RECT_F& item, const D2D1_RECT_F& sid
     }
 
     if (lift > 0.0001f) {
-        // Rise toward the viewer: grow and drift right, expanding away from
-        // the sidebar's horizontal centre line.
+        // Same direction for every row: grow about the row's own centre and
+        // drift up/right toward the viewer (no per-row fan-out).
         float cx = (verts[0] + verts[5] + verts[10] + verts[15]) * 0.25f;
+        float cy = (verts[1] + verts[6] + verts[11] + verts[16]) * 0.25f;
         float scale = 1.0f + 0.07f * lift;
         float dx = 4.0f * lift;
+        float dy = -2.5f * lift;
         for (int i = 0; i < 4; ++i) {
             float* v = verts + i * 5;
             v[0] = cx + (v[0] - cx) * scale + dx;
-            v[1] = center_y + (v[1] - center_y) * scale;
+            v[1] = cy + (v[1] - cy) * scale + dy;
         }
     }
 }

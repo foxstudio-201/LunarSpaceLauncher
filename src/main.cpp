@@ -3317,8 +3317,15 @@ void App::update_sidebar_lift(Node* hit) {
         target = hit;
     if (target == sidebar_item_) return;
     sidebar_item_ = target;
-    anims_.run(L"sidebar.rise", sidebar_rise_, target ? 1.0f : 0.0f, target ? 240 : 200,
-               anim_ease::Spring, [this](float v) { sidebar_rise_ = v; });
+    sidebar_rise_ = 0.0f;
+    if (!target) {
+        anims_.cancel(L"sidebar.rise");
+        sidebar_item_valid_ = false;
+        InvalidateRect(hwnd_, nullptr, FALSE);
+        return;
+    }
+    anims_.run(L"sidebar.rise", 0.0f, 1.0f, 240, anim_ease::Spring,
+               [this](float v) { sidebar_rise_ = v; });
     SetTimer(hwnd_, 2, 16, nullptr);
 }
 
