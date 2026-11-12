@@ -184,6 +184,11 @@ struct DiscordAuthResult {
     std::wstring discord_avatar;
     std::wstring link_id;
     bool created = false;
+    bool conflict = false;
+    std::wstring holder;
+    std::wstring moved_from;
+    bool replaced = false;
+    int seq = 0;
 };
 
 struct DiscordJob {
@@ -193,6 +198,8 @@ struct DiscordJob {
     std::wstring name;
     std::wstring account_id;
     std::wstring account_uuid;
+    bool force = false;
+    int seq = 0;
 };
 
 struct AuthJob {
@@ -227,6 +234,7 @@ public:
     void handle_discord_links_msg(LPARAM lp) { auto* body = reinterpret_cast<std::string*>(lp); if (body) { apply_discord_links_body(*body); delete body; } }
     void handle_discord_result_msg(LPARAM lp) { auto* result = reinterpret_cast<DiscordAuthResult*>(lp); if (result) { apply_discord_result(result); delete result; } }
     void handle_unlink_msg(LPARAM lp) { auto* payload = reinterpret_cast<std::pair<bool, std::wstring>*>(lp); if (payload) { handle_unlink_result(payload->first, payload->second); delete payload; } }
+    void handle_discord_waiting_msg(LPARAM lp) { auto* payload = reinterpret_cast<std::pair<std::wstring, int>*>(lp); if (payload) { if (payload->second == discord_seq_ && modal_open_ && modal_kind_ == 3 && (discord_phase_ == 1 || discord_phase_ == 2)) { discord_authorize_url_ = payload->first; discord_phase_ = 2; modal_busy_ = true; InvalidateRect(hwnd_, nullptr, FALSE); } delete payload; } }
     void on_dpi_changed();
     bool splash_active() const { return splash_.phase != Splash::Phase::None; }
 
@@ -251,8 +259,10 @@ private:
     void refresh_discord_links();
     void apply_discord_links_body(const std::string& body);
     const DiscordLink* discord_link_for(const Account& account) const;
-    void open_discord_link_modal(const std::wstring& account_id);
-    void start_discord_job();
+    void open_discord_link_modal(const std::wstring& account_id, const std::wstring& name = L"");
+    void start_discord_job(bool force);
+    void cancel_discord_wait();
+    void update_discord_rects(const ModalLayout& layout);
     void apply_discord_result(DiscordAuthResult* result);
     void unlink_discord(const std::wstring& account_id);
     void handle_unlink_result(bool ok, const std::wstring& error);
@@ -319,6 +329,23 @@ private:
     std::wstring discord_api_url_;
     std::wstring discord_api_key_;
     std::wstring modal_discord_account_;
+    int discord_phase_ = 0;
+    int discord_seq_ = 0;
+    bool discord_force_ = false;
+    bool discord_conflict_ = false;
+    std::wstring discord_holder_;
+    std::wstring discord_authorize_url_;
+    std::wstring discord_result_tag_;
+    std::wstring discord_result_name_;
+    std::wstring discord_result_avatar_;
+    std::wstring discord_result_moved_;
+    std::wstring discord_avatar_file_;
+    bool discord_result_created_ = false;
+    bool discord_result_replaced_ = false;
+    D2D1_RECT_F discord_reopen_ = D2D1::RectF();
+    D2D1_RECT_F discord_cancel_wait_ = D2D1::RectF();
+    D2D1_RECT_F discord_reopen_app_ = D2D1::RectF();
+    D2D1_RECT_F discord_override_ = D2D1::RectF();
     Json skin_index_;
     bool accounts_skin_ = false;
     bool skin_upload_ = true;
@@ -983,6 +1010,12 @@ ModalLayout App::modal_layout() const {
     ModalLayout L;
     float cw = 560.0f;
     float ch = modal_kind_ == 0 ? 268.0f : modal_kind_ == 1 ? 330.0f : modal_kind_ == 2 ? 384.0f : 380.0f;
+    if (modal_kind_ == 3) {
+        if (discord_phase_ == 2) ch = 300.0f;
+        else if (discord_phase_ == 3) ch = 290.0f;
+        else if (discord_phase_ == 4) ch = 286.0f;
+        else ch = 286.0f;
+    }
     if (!modal_error_.empty()) ch += 44.0f;
     float x = (w - cw) * 0.5f;
     float y = (h - ch) * 0.5f;
@@ -995,7 +1028,7 @@ ModalLayout App::modal_layout() const {
     for (int i = 0; i < 4; ++i)
         L.kinds[i] = D2D1::RectF(kx + i * (kw + 8.0f), ky, kx + i * (kw + 8.0f) + kw, ky + 64.0f);
     float desc_y = ky + 64.0f + 10.0f;
-    float body_y = desc_y + 36.0f + 10.0f;
+    float body_y = modal_kind_ == 3 ? y + 56.0f + 16.0f : desc_y + 36.0f + 10.0f;
     if (modal_kind_ == 0 || modal_kind_ == 3) {
         L.name_input = D2D1::RectF(x + 62.0f, body_y, x + cw - 16.0f, body_y + 38.0f);
     } else if (modal_kind_ == 2) {
@@ -1005,7 +1038,8 @@ ModalLayout App::modal_layout() const {
                             L.pass_input.right - 4.0f, L.pass_input.bottom - 6.0f);
     }
     float footer = L.card.bottom - 52.0f;
-    L.submit = D2D1::RectF(x + cw - 16.0f - 96.0f, footer + 10.0f, x + cw - 16.0f,
+    float submit_w = modal_kind_ == 3 ? 140.0f : 96.0f;
+    L.submit = D2D1::RectF(x + cw - 16.0f - submit_w, footer + 10.0f, x + cw - 16.0f,
                            footer + 42.0f);
     L.cancel = D2D1::RectF(L.submit.left - 8.0f - 72.0f, footer + 10.0f,
                            L.submit.left - 8.0f, footer + 42.0f);
@@ -1037,7 +1071,15 @@ void App::open_account_modal() {
 
 void App::close_account_modal() {
     if (!modal_open_) return;
-    if (modal_busy_) return;
+    if (modal_busy_) {
+        if (modal_kind_ == 3 && (discord_phase_ == 1 || discord_phase_ == 2)) {
+            discord_cancel_link();
+            ++discord_seq_;
+            modal_busy_ = false;
+        } else {
+            return;
+        }
+    }
     modal_open_ = false;
     modal_busy_ = false;
     modal_error_.clear();
@@ -1106,6 +1148,7 @@ void App::draw_account_modal() {
          D2D1::RectF(L.close.left + 5, L.close.top + 5, L.close.right - 5, L.close.bottom - 5),
          ui_color(L"label"));
 
+    if (modal_kind_ != 3) {
     const wchar_t* kind_labels[4] = { L"Ngoại tuyến", L"Microsoft", L"ely.by", L"Discord" };
     const wchar_t* kind_icons[4] = { L"assets/img/offline-head.png",
                                      L"assets/img/ms-logo.png",
@@ -1138,6 +1181,8 @@ void App::draw_account_modal() {
             : L"Liên kết tài khoản launcher với Discord để nhận vai trò và đồng bộ trên server.";
     renderer_.draw_text(desc_text, desc, 10.5f, 400, false, TextAlign::Left, ui_color(L"faint"),
                         1.0f, true);
+
+    }
 
     auto input_box = [&](D2D1_RECT_F box, const std::wstring& value,
                          const wchar_t* placeholder, bool password, bool focused) {
@@ -1220,38 +1265,143 @@ void App::draw_account_modal() {
                                         note.bottom - 8),
                             10.5f, 400, false, TextAlign::Left, ui_color(L"label"), 1.0f, true);
     } else {
-        if (!modal_discord_account_.empty()) {
-            D2D1_RECT_F chip = D2D1::RectF(L.card.left + 16, L.name_input.top,
-                                           L.card.right - 16, L.name_input.top + 44.0f);
-            renderer_.fill_rect(chip, 8.0f, ui_color(L"input"));
-            renderer_.stroke_rect(chip, 8.0f, ui_color(L"border"), 1.0f);
-            const Account* account = find_account(modal_discord_account_);
-            renderer_.draw_text(account ? account->name : L"Tài khoản",
-                                D2D1::RectF(chip.left + 12, chip.top, chip.right - 12,
-                                            chip.bottom),
-                                12.0f, 600, false, TextAlign::Left, ui_color(L"text"));
-        } else {
-            input_box(L.name_input, modal_name_, L"Tên tài khoản…", false, modal_focus_ == 0);
-        }
-        D2D1_RECT_F note = D2D1::RectF(L.card.left + 16, L.name_input.top + 54.0f,
-                                       L.card.right - 16, L.name_input.top + 110.0f);
-        renderer_.fill_rect(note, 8.0f, ui_color(L"input"));
-        renderer_.stroke_rect(note, 8.0f, ui_color(L"border"), 1.0f);
-        renderer_.draw_image_path(asset(L"assets/img/discord-logo.png"),
-                                  D2D1::RectF(note.left + 10, note.top + 9, note.left + 26,
-                                              note.top + 25),
-                                  4.0f);
-        renderer_.draw_text(L"Trình duyệt sẽ mở trang xác thực Discord. Launcher tự nhận kết quả và tạo tài khoản nếu chưa có.",
-                            D2D1::RectF(note.left + 32, note.top + 8, note.right - 10,
-                                        note.bottom - 8),
-                            10.5f, 400, false, TextAlign::Left, ui_color(L"label"), 1.0f, true);
-        if (modal_busy_) {
-            draw_spinner(renderer_, L.card.left + 24, note.bottom + 24, 6.0f,
+        update_discord_rects(L);
+        if (discord_phase_ == 3) {
+            D2D1_RECT_F box = D2D1::RectF(L.card.left + 16, L.name_input.top,
+                                          L.card.right - 16, L.name_input.top + 146.0f);
+            renderer_.fill_rect(box, 12.0f, ui_color(L"input"));
+            renderer_.stroke_rect(box, 12.0f, ui_color(L"accent"), 1.0f);
+            D2D1_RECT_F avatar = D2D1::RectF(box.left + 16, box.top + 16, box.left + 52,
+                                             box.top + 52);
+            if (!discord_avatar_file_.empty())
+                renderer_.draw_image_path(discord_avatar_file_, avatar, 18.0f);
+            else
+                renderer_.draw_image_path(asset(L"assets/img/discord-logo.png"), avatar, 4.0f);
+            renderer_.draw_text(discord_result_tag_.empty() ? L"Discord" : discord_result_tag_,
+                                D2D1::RectF(box.left + 62, box.top + 12, box.right - 12,
+                                            box.top + 36),
+                                12.5f, 700, false, TextAlign::Left, ui_color(L"text"));
+            renderer_.draw_text(L"→ " + discord_result_name_,
+                                D2D1::RectF(box.left + 62, box.top + 36, box.right - 12,
+                                            box.top + 56),
+                                10.5f, 400, false, TextAlign::Left, ui_color(L"label"));
+            float text_y = box.top + 66;
+            if (discord_result_created_) {
+                renderer_.draw_text(L"Đã tạo tài khoản " + discord_result_name_ +
+                                        L" và liên kết Discord.",
+                                    D2D1::RectF(box.left + 16, text_y, box.right - 16,
+                                                text_y + 24),
+                                    10.0f, 400, false, TextAlign::Left, ui_color(L"accent"),
+                                    1.0f, true);
+                text_y += 24;
+            }
+            if (!discord_result_moved_.empty()) {
+                renderer_.draw_text(L"Discord này trước đó liên kết với tài khoản " +
+                                        discord_result_moved_ + L" — liên kết đó đã bị bỏ.",
+                                    D2D1::RectF(box.left + 16, text_y, box.right - 16,
+                                                text_y + 34),
+                                    10.0f, 400, false, TextAlign::Left, ui_color(L"faint"),
+                                    1.0f, true);
+                text_y += 34;
+            }
+            if (discord_result_replaced_ && discord_result_moved_.empty()) {
+                renderer_.draw_text(L"Liên kết cũ của tài khoản này đã được thay bằng liên kết mới.",
+                                    D2D1::RectF(box.left + 16, text_y, box.right - 16,
+                                                text_y + 24),
+                                    10.0f, 400, false, TextAlign::Left, ui_color(L"faint"),
+                                    1.0f, true);
+            }
+            renderer_.draw_text(L"Uỷ quyền xong, bạn có thể đóng cửa sổ trình duyệt.",
+                                D2D1::RectF(box.left + 16, box.bottom - 26, box.right - 16,
+                                            box.bottom - 6),
+                                10.0f, 400, false, TextAlign::Left, ui_color(L"faint"));
+        } else if (discord_phase_ == 2) {
+            D2D1_RECT_F box = D2D1::RectF(L.card.left + 16, L.name_input.top,
+                                          L.card.right - 16, L.name_input.top + 190.0f);
+            renderer_.fill_rect(box, 12.0f, ui_color(L"input"));
+            renderer_.stroke_rect(box, 12.0f, ui_color(L"border"), 1.0f);
+            draw_spinner(renderer_, box.left + 26, box.top + 24, 7.0f,
                          Color::rgb(0x5865F2), 1.0f);
-            renderer_.draw_text(L"Đang chờ bạn xác thực trong Discord…",
-                                D2D1::RectF(L.card.left + 38, note.bottom + 12, L.card.right - 16,
-                                            note.bottom + 38),
-                                11.0f, 400, false, TextAlign::Left, ui_color(L"label"));
+            renderer_.draw_text(L"Đang chờ uỷ quyền trong trình duyệt…",
+                                D2D1::RectF(box.left + 44, box.top + 12, box.right - 16,
+                                            box.top + 38),
+                                11.0f, 600, false, TextAlign::Left, ui_color(L"text"));
+            renderer_.draw_text(L"Uỷ quyền xong, launcher tự nhận kết quả và hoàn tất liên kết. Có thể đóng cửa sổ trình duyệt sau đó.",
+                                D2D1::RectF(box.left + 16, box.top + 48, box.right - 16,
+                                            box.top + 96),
+                                10.0f, 400, false, TextAlign::Left, ui_color(L"faint"), 1.0f,
+                                true);
+            renderer_.fill_rect(discord_reopen_, 8.0f, Color::rgb(0x5865F2));
+            renderer_.draw_text(L"Mở lại trang uỷ quyền",
+                                D2D1::RectF(discord_reopen_.left, discord_reopen_.top,
+                                            discord_reopen_.right, discord_reopen_.bottom),
+                                10.5f, 600, false, TextAlign::Center, Color::rgb(0xFFFFFF));
+            renderer_.fill_rect(discord_cancel_wait_, 8.0f, ui_color(L"input"));
+            renderer_.stroke_rect(discord_cancel_wait_, 8.0f, ui_color(L"border"), 1.0f);
+            renderer_.draw_text(L"Huỷ chờ",
+                                D2D1::RectF(discord_cancel_wait_.left,
+                                            discord_cancel_wait_.top,
+                                            discord_cancel_wait_.right,
+                                            discord_cancel_wait_.bottom),
+                                10.5f, 600, false, TextAlign::Center, ui_color(L"label"));
+            renderer_.fill_rect(discord_reopen_app_, 8.0f, ui_color(L"input"));
+            renderer_.stroke_rect(discord_reopen_app_, 8.0f, ui_color(L"border"), 1.0f);
+            renderer_.draw_text(L"Mở lại launcher",
+                                D2D1::RectF(discord_reopen_app_.left,
+                                            discord_reopen_app_.top,
+                                            discord_reopen_app_.right,
+                                            discord_reopen_app_.bottom),
+                                10.5f, 600, false, TextAlign::Center, ui_color(L"label"));
+        } else {
+            if (!modal_discord_account_.empty()) {
+                D2D1_RECT_F chip = D2D1::RectF(L.card.left + 16, L.name_input.top,
+                                               L.card.right - 16, L.name_input.top + 44.0f);
+                renderer_.fill_rect(chip, 8.0f, ui_color(L"input"));
+                renderer_.stroke_rect(chip, 8.0f, ui_color(L"border"), 1.0f);
+                const Account* account = find_account(modal_discord_account_);
+                std::wstring head = account ? account_head(account->name) : L"";
+                if (head.size() <= 4 || head.substr(head.size() - 4) != L".png")
+                    head = asset(L"assets/img/offline-head.png");
+                renderer_.draw_image_path(head,
+                                          D2D1::RectF(chip.left + 8, chip.top + 7,
+                                                      chip.left + 38, chip.bottom - 7),
+                                          7.0f);
+                renderer_.draw_text(account ? account->name : L"Tài khoản",
+                                    D2D1::RectF(chip.left + 46, chip.top, chip.right - 12,
+                                                chip.bottom),
+                                    12.0f, 600, false, TextAlign::Left, ui_color(L"text"));
+            } else {
+                std::wstring head = account_head(trim_text(modal_name_));
+                if (head.size() <= 4 || head.substr(head.size() - 4) != L".png")
+                    head = asset(L"assets/img/offline-head.png");
+                renderer_.draw_image_path(head,
+                                          D2D1::RectF(L.card.left + 16, L.name_input.top,
+                                                      L.card.left + 54, L.name_input.bottom),
+                                          9.0f);
+                input_box(L.name_input, modal_name_, L"Tên người chơi, ví dụ: Steve…", false,
+                          modal_focus_ == 0 && !modal_busy_);
+            }
+            D2D1_RECT_F note = D2D1::RectF(L.card.left + 16, L.name_input.top + 54.0f,
+                                           L.card.right - 16, L.name_input.top + 110.0f);
+            renderer_.fill_rect(note, 8.0f, ui_color(L"input"));
+            renderer_.stroke_rect(note, 8.0f, ui_color(L"border"), 1.0f);
+            renderer_.draw_image_path(asset(L"assets/img/discord-logo.png"),
+                                      D2D1::RectF(note.left + 10, note.top + 9, note.left + 26,
+                                                  note.top + 25),
+                                      4.0f);
+            renderer_.draw_text(L"Launcher mở trình duyệt để uỷ quyền Discord, sau đó tự nhận kết quả và hoàn tất liên kết.",
+                                D2D1::RectF(note.left + 32, note.top + 8, note.right - 10,
+                                            note.bottom - 8),
+                                10.5f, 400, false, TextAlign::Left, ui_color(L"label"), 1.0f,
+                                true);
+            if (discord_phase_ == 1) {
+                draw_spinner(renderer_, L.card.left + 24, note.bottom + 24, 6.0f,
+                             Color::rgb(0x5865F2), 1.0f);
+                renderer_.draw_text(L"Đang mở trang xác thực Discord…",
+                                    D2D1::RectF(L.card.left + 38, note.bottom + 12,
+                                                L.card.right - 16, note.bottom + 38),
+                                    11.0f, 400, false, TextAlign::Left, ui_color(L"label"));
+            }
         }
     }
 
@@ -1267,25 +1417,48 @@ void App::draw_account_modal() {
         renderer_.draw_text(modal_error_,
                             D2D1::RectF(error.left + 30, error.top, error.right - 8, error.bottom),
                             11.0f, 400, false, TextAlign::Left, ui_color(L"bad"));
+        if (modal_kind_ == 3 && discord_phase_ == 4 && discord_conflict_) {
+            renderer_.fill_rect(discord_override_, 8.0f, Color::rgb(0x5865F2));
+            renderer_.draw_text(L"Ghi đè liên kết",
+                                D2D1::RectF(discord_override_.left, discord_override_.top,
+                                            discord_override_.right, discord_override_.bottom),
+                                10.5f, 600, false, TextAlign::Center, Color::rgb(0xFFFFFF));
+        }
+    }
+    if (modal_kind_ == 3 && discord_phase_ == 2) {
+        return;
     }
     renderer_.fill_rect(D2D1::RectF(L.card.left, footer_top, L.card.right, footer_top + 1),
                         0.0f, ui_color(L"border"));
+    bool discord_done = modal_kind_ == 3 && discord_phase_ == 3;
     const wchar_t* hint = modal_kind_ == 0 ? L"Tên chỉ gồm chữ, số, gạch dưới và dài 3–16 ký tự."
                          : modal_kind_ == 1 ? L"Cần tài khoản đã mua Minecraft Java Edition."
                          : modal_kind_ == 2 ? L"Thông tin đăng nhập chỉ dùng để lấy token từ ely.by."
-                                            : L"Tài khoản sẽ được tạo nếu chưa tồn tại.";
-    renderer_.draw_text(hint,
-                        D2D1::RectF(L.card.left + 16, footer_top + 10, L.submit.left - 8,
-                                    footer_top + 42),
-                        10.0f, 400, false, TextAlign::Left, ui_color(L"faint"));
-    renderer_.draw_text(L"Hủy",
-                        D2D1::RectF(L.cancel.left, L.cancel.top, L.cancel.right, L.cancel.bottom),
-                        11.0f, 600, false, TextAlign::Center, ui_color(L"label"));
-    bool enabled = !modal_busy_ && modal_valid();
+                                            : L"Gắn tài khoản launcher với Discord để nhận thông báo";
+    if (!discord_done)
+        renderer_.draw_text(hint,
+                            D2D1::RectF(L.card.left + 16, footer_top + 10, L.submit.left - 8,
+                                        footer_top + 42),
+                            10.0f, 400, false, TextAlign::Left, ui_color(L"faint"));
+    if (!discord_done)
+        renderer_.draw_text(L"Hủy",
+                            D2D1::RectF(L.cancel.left, L.cancel.top, L.cancel.right,
+                                        L.cancel.bottom),
+                            11.0f, 600, false, TextAlign::Center, ui_color(L"label"));
+    bool enabled = modal_valid();
+    const wchar_t* submit_text = modal_kind_ == 0 ? L"Tạo" : L"Đăng nhập";
+    if (modal_kind_ == 3) {
+        if (discord_phase_ == 3) { submit_text = L"Xong"; enabled = true; }
+        else if (discord_phase_ == 4) { submit_text = L"Thử lại"; enabled = modal_valid(); }
+        else if (discord_phase_ == 1) { submit_text = L"Đang mở…"; enabled = false; }
+        else { submit_text = L"Mở web xác thực"; enabled = modal_valid(); }
+    } else {
+        enabled = enabled && !modal_busy_;
+    }
     Color submit_bg = modal_kind_ == 3 ? Color::rgb(0x5865F2) : ui_color(L"accent");
     Color submit_ink = modal_kind_ == 3 ? Color::rgb(0xFFFFFF) : ui_color(L"ink");
     renderer_.fill_rect(L.submit, 8.0f, submit_bg, enabled ? 1.0f : 0.4f);
-    if (modal_busy_) {
+    if (modal_busy_ || (modal_kind_ == 3 && discord_phase_ == 1)) {
         draw_spinner(renderer_, L.submit.left + 22, (L.submit.top + L.submit.bottom) * 0.5f, 5.0f,
                      submit_ink, 1.0f);
     } else {
@@ -1294,13 +1467,13 @@ void App::draw_account_modal() {
                          L.submit.bottom - 10),
              submit_ink);
     }
-    const wchar_t* submit_text = modal_kind_ == 0 ? L"Tạo" : L"Đăng nhập";
     renderer_.draw_text(submit_text,
                         D2D1::RectF(L.submit.left + 30, L.submit.top, L.submit.right - 8,
                                     L.submit.bottom),
                         11.0f, 700, false, TextAlign::Left, submit_ink,
                         enabled ? 1.0f : 0.5f);
 }
+
 
 bool App::account_modal_mouse_down(int px, int py) {
     if (!modal_open_) return false;
@@ -1318,7 +1491,37 @@ bool App::account_modal_mouse_down(int px, int py) {
         close_account_modal();
         return true;
     }
+    if (modal_kind_ == 3) {
+        update_discord_rects(L);
+        if (discord_phase_ == 2) {
+            if (inside(discord_reopen_)) {
+                if (!discord_authorize_url_.empty())
+                    ShellExecuteW(nullptr, L"open", discord_authorize_url_.c_str(), nullptr,
+                                  nullptr, SW_SHOWNORMAL);
+                return true;
+            }
+            if (inside(discord_cancel_wait_)) {
+                cancel_discord_wait();
+                return true;
+            }
+            if (inside(discord_reopen_app_)) {
+                ShowWindow(hwnd_, SW_RESTORE);
+                SetForegroundWindow(hwnd_);
+                return true;
+            }
+            return true;
+        }
+        if (discord_phase_ == 4 && discord_conflict_ && inside(discord_override_)) {
+            start_discord_job(true);
+            return true;
+        }
+        if (discord_phase_ == 3) {
+            if (inside(L.submit)) close_account_modal();
+            return true;
+        }
+    }
     if (modal_busy_) return true;
+    if (modal_kind_ != 3) {
     for (int i = 0; i < 4; ++i) {
         if (inside(L.kinds[i])) {
             modal_kind_ = i;
@@ -1328,7 +1531,9 @@ bool App::account_modal_mouse_down(int px, int py) {
             return true;
         }
     }
-    if ((modal_kind_ == 0 || modal_kind_ == 3) && inside(L.name_input)) {
+    }
+    if ((modal_kind_ == 0 || (modal_kind_ == 3 && (discord_phase_ == 0 || discord_phase_ == 4))) &&
+        inside(L.name_input)) {
         modal_focus_ = 0;
         InvalidateRect(hwnd_, nullptr, FALSE);
         return true;
@@ -1363,6 +1568,21 @@ bool App::account_modal_mouse_down(int px, int py) {
 
 bool App::account_modal_key(WPARAM key) {
     if (!modal_open_) return false;
+    if (modal_kind_ == 3) {
+        if (discord_phase_ == 1 || discord_phase_ == 2) {
+            if (key == VK_ESCAPE) cancel_discord_wait();
+            return true;
+        }
+        if (discord_phase_ == 3) {
+            if (key == VK_ESCAPE || key == VK_RETURN) close_account_modal();
+            return true;
+        }
+        if (discord_phase_ == 4) {
+            if (key == VK_ESCAPE) close_account_modal();
+            if (key == VK_RETURN && modal_valid()) start_discord_job(false);
+            return true;
+        }
+    }
     if (key == VK_ESCAPE) {
         if (!modal_busy_) close_account_modal();
         return true;
@@ -1393,6 +1613,7 @@ bool App::account_modal_key(WPARAM key) {
 
 bool App::account_modal_char(wchar_t ch) {
     if (!modal_open_ || modal_busy_ || ch < 32 || ch == 127) return false;
+    if (modal_kind_ == 3 && discord_phase_ != 0 && discord_phase_ != 4) return true;
     std::wstring* target = nullptr;
     size_t limit = 64;
     if ((modal_kind_ == 0 || modal_kind_ == 3) && modal_focus_ == 0) {
@@ -1446,7 +1667,12 @@ void App::submit_account_modal() {
         return;
     }
     if (modal_kind_ == 3) {
-        start_discord_job();
+        if (discord_phase_ == 3) {
+            close_account_modal();
+            return;
+        }
+        if (discord_phase_ == 1 || discord_phase_ == 2) return;
+        start_discord_job(false);
         return;
     }
     start_auth_job(modal_kind_);
@@ -1583,7 +1809,7 @@ void App::apply_discord_links_body(const std::string& body) {
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
-void App::open_discord_link_modal(const std::wstring& account_id) {
+void App::open_discord_link_modal(const std::wstring& account_id, const std::wstring& name) {
     close_account_menu();
     modal_open_ = true;
     modal_kind_ = 3;
@@ -1594,22 +1820,45 @@ void App::open_discord_link_modal(const std::wstring& account_id) {
     modal_pass_.clear();
     modal_discord_account_ = account_id;
     const Account* account = find_account(account_id);
-    modal_name_ = account ? account->name : L"";
-    modal_focus_ = account ? -1 : 0;
+    modal_name_ = account ? account->name : name;
+    modal_focus_ = (account || !name.empty()) ? -1 : 0;
+    discord_phase_ = 0;
+    discord_force_ = false;
+    discord_conflict_ = false;
+    discord_holder_.clear();
+    discord_authorize_url_.clear();
+    discord_result_tag_.clear();
+    discord_result_name_.clear();
+    discord_result_avatar_.clear();
+    discord_result_moved_.clear();
+    discord_avatar_file_.clear();
+    discord_result_created_ = false;
+    discord_result_replaced_ = false;
     SetTimer(hwnd_, 4, 500, nullptr);
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
-void App::start_discord_job() {
+static void notify_discord_waiting(void* ctx, const std::wstring& url) {
+    auto* info = reinterpret_cast<std::pair<HWND, int>*>(ctx);
+    auto* payload = new std::pair<std::wstring, int>(url, info->second);
+    PostMessage(info->first, WM_APP + 9, 0, reinterpret_cast<LPARAM>(payload));
+}
+
+void App::start_discord_job(bool force) {
     if (modal_busy_) return;
     modal_busy_ = true;
+    discord_phase_ = 1;
+    discord_force_ = force;
     modal_error_.clear();
+    int seq = ++discord_seq_;
     DiscordJob* job = new DiscordJob{};
     job->hwnd = hwnd_;
     job->api_url = discord_api_url_;
     job->api_key = discord_api_key_;
     job->name = trim_text(modal_name_);
     job->account_id = modal_discord_account_;
+    job->force = force;
+    job->seq = seq;
     const Account* account = find_account(modal_discord_account_);
     if (account) {
         job->name = account->name;
@@ -1619,8 +1868,11 @@ void App::start_discord_job() {
     InvalidateRect(hwnd_, nullptr, FALSE);
     HANDLE thread = CreateThread(nullptr, 0, +[](LPVOID param) -> DWORD {
         DiscordJob* job = reinterpret_cast<DiscordJob*>(param);
+        auto* wait_ctx = new std::pair<HWND, int>(job->hwnd, job->seq);
         DiscordResult flow = discord_link_flow(job->api_url, job->api_key, job->name,
-                                               job->account_id, job->account_uuid);
+                                               job->account_id, job->account_uuid, job->force,
+                                               notify_discord_waiting, wait_ctx);
+        delete wait_ctx;
         DiscordAuthResult* result = new DiscordAuthResult();
         result->ok = flow.ok;
         result->error = flow.error;
@@ -1632,6 +1884,11 @@ void App::start_discord_job() {
         result->discord_avatar = flow.discord_avatar;
         result->link_id = flow.link_id;
         result->created = flow.created;
+        result->conflict = flow.conflict;
+        result->holder = flow.holder;
+        result->moved_from = flow.moved_from;
+        result->replaced = flow.replaced;
+        result->seq = job->seq;
         PostMessage(job->hwnd, WM_APP + 8, 0, reinterpret_cast<LPARAM>(result));
         delete job;
         return 0;
@@ -1639,11 +1896,42 @@ void App::start_discord_job() {
     if (thread) CloseHandle(thread);
 }
 
-void App::apply_discord_result(DiscordAuthResult* result) {
+void App::cancel_discord_wait() {
+    if (discord_phase_ != 1 && discord_phase_ != 2) return;
+    discord_cancel_link();
+    ++discord_seq_;
     modal_busy_ = false;
+    discord_phase_ = 0;
+    modal_error_.clear();
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+void App::update_discord_rects(const ModalLayout& layout) {
+    float footer = layout.card.bottom - 52.0f;
+    float top = layout.name_input.top;
+    discord_reopen_ = D2D1::RectF(layout.card.left + 16.0f, top + 150.0f,
+                                  layout.card.left + 16.0f + 170.0f, top + 182.0f);
+    discord_cancel_wait_ = D2D1::RectF(layout.card.right - 16.0f - 92.0f, top + 150.0f,
+                                       layout.card.right - 16.0f, top + 182.0f);
+    discord_reopen_app_ = D2D1::RectF(discord_reopen_.right + 8.0f, top + 150.0f,
+                                      discord_reopen_.right + 8.0f + 140.0f, top + 182.0f);
+    discord_override_ = D2D1::RectF(layout.card.left + 16.0f, footer - 86.0f,
+                                    layout.card.left + 16.0f + 160.0f, footer - 54.0f);
+}
+
+void App::apply_discord_result(DiscordAuthResult* result) {
     if (!result) return;
+    if (result->seq != discord_seq_) return;
+    modal_busy_ = false;
     if (!result->ok) {
-        modal_error_ = result->error.empty() ? L"Không liên kết được Discord." : result->error;
+        discord_phase_ = 4;
+        discord_conflict_ = result->conflict;
+        discord_holder_ = result->holder;
+        if (result->conflict && !result->holder.empty())
+            modal_error_ = L"Tài khoản này đang liên kết với Discord " + result->holder +
+                           L". Ghi đè bằng liên kết mới?";
+        else
+            modal_error_ = result->error.empty() ? L"Không liên kết được Discord." : result->error;
         InvalidateRect(hwnd_, nullptr, FALSE);
         return;
     }
@@ -1654,6 +1942,7 @@ void App::apply_discord_result(DiscordAuthResult* result) {
             break;
         }
     }
+    bool created_now = false;
     if (!account) {
         Account created;
         created.id = result->account_id.empty()
@@ -1669,6 +1958,7 @@ void App::apply_discord_result(DiscordAuthResult* result) {
         accounts_.push_back(created);
         account = &accounts_.back();
         active_id_ = created.id;
+        created_now = true;
     }
     if (!result->link_id.empty()) {
         bool found = false;
@@ -1699,9 +1989,25 @@ void App::apply_discord_result(DiscordAuthResult* result) {
     save_accounts();
     rebuild_account_rows();
     ui_apply_page();
-    close_account_modal();
-    std::wstring tag = result->discord_tag.empty() ? result->discord_name : result->discord_tag;
-    notify(L"Đã liên kết Discord", account->name + L" · " + tag, L"ok");
+    discord_phase_ = 3;
+    discord_result_tag_ = result->discord_tag.empty() ? result->discord_name : result->discord_tag;
+    discord_result_name_ = account->name;
+    discord_result_avatar_ = result->discord_avatar;
+    discord_result_moved_ = result->moved_from;
+    discord_result_created_ = created_now;
+    discord_result_replaced_ = result->replaced;
+    discord_avatar_file_.clear();
+    if (!result->discord_avatar.empty()) {
+        HttpResult avatar = http_request(result->discord_avatar, L"GET");
+        if (avatar.ok() && avatar.status == 200 && avatar.body.size() > 64 &&
+            (unsigned char)avatar.body[0] == 0x89) {
+            std::wstring path = engine_data_dir() + L"\\discord-avatar.png";
+            write_file_bytes(path, std::vector<unsigned char>(avatar.body.begin(), avatar.body.end()));
+            discord_avatar_file_ = path;
+        }
+    }
+    std::wstring tag = discord_result_tag_.empty() ? result->discord_name : discord_result_tag_;
+    notify(L"Liên kết Discord", account->name + L" · " + tag, L"ok");
     refresh_discord_links();
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
@@ -2608,6 +2914,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         case WM_APP + 8:
             if (app) app->handle_discord_result_msg(lp);
+            return 0;
+        case WM_APP + 9:
+            if (app) app->handle_discord_waiting_msg(lp);
             return 0;
         case WM_TIMER:
             if (wp == 4) { InvalidateRect(hwnd, nullptr, FALSE); return 0; }

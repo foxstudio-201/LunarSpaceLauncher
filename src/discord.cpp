@@ -10,6 +10,7 @@
 #include <cstring>
 #include <cctype>
 #include <cstdlib>
+#include <atomic>
 
 #pragma comment(lib, "bcrypt")
 #pragma comment(lib, "ws2_32")
@@ -134,10 +135,15 @@ static void send_json(SOCKET client, const Json& value) {
     send_all(client, head + body);
 }
 
+static std::atomic<bool> g_discord_cancel{false};
+void discord_cancel_link() { g_discord_cancel = true; }
+
 DiscordResult discord_link_flow(const std::wstring& api_url, const std::wstring& api_key,
                                 const std::wstring& name, const std::wstring& account_id,
-                                const std::wstring& account_uuid) {
+                                const std::wstring& account_uuid, bool force,
+                                DiscordNotify notify, void* ctx) {
     DiscordResult result;
+    g_discord_cancel = false;
     HttpResult config = api_request(api_url, api_key, L"GET", L"/api/config");
     Json cfg;
     cfg.parse(config.body);
@@ -177,6 +183,7 @@ DiscordResult discord_link_flow(const std::wstring& api_url, const std::wstring&
     }
     ShellExecuteW(nullptr, L"open", utf8_to_wide(authorize).c_str(), nullptr, nullptr,
                   SW_SHOWNORMAL);
+    if (notify) notify(ctx, utf8_to_wide(authorize));
 
     std::wstring account_name = sanitize_name(name);
     std::wstring uuid = account_uuid.empty()
@@ -188,6 +195,10 @@ DiscordResult discord_link_flow(const std::wstring& api_url, const std::wstring&
     ULONGLONG deadline = GetTickCount64() + 300000;
     bool finished = false;
     while (!finished && GetTickCount64() < deadline) {
+        if (g_discord_cancel.load()) {
+            result.error = L"Đã huỷ chờ uỷ quyền Discord.";
+            break;
+        }
         fd_set set;
         FD_ZERO(&set);
         FD_SET(server, &set);
@@ -240,7 +251,7 @@ DiscordResult discord_link_flow(const std::wstring& api_url, const std::wstring&
         Json link_body = Json::object();
         link_body.set("token", Json::string(token));
         link_body.set("name", Json::string(""));
-        link_body.set("force", Json::boolean(false));
+        link_body.set("force", Json::boolean(force));
         link_body.set("account", std::move(account));
         HttpResult link_res = api_request(api_url, api_key, L"POST", L"/api/link",
                                           link_body.dump(0));
@@ -260,6 +271,8 @@ DiscordResult discord_link_flow(const std::wstring& api_url, const std::wstring&
                 result.link_id = utf8_to_wide(link->text("id"));
                 if (!link->text("accountName").empty())
                     result.name = utf8_to_wide(link->text("accountName"));
+                result.moved_from = utf8_to_wide(link->text("movedFrom"));
+                result.replaced = link->boolean("replaced");
             }
             reply.set("ok", Json::boolean(true));
             reply.set("discord", Json::string(
@@ -268,6 +281,12 @@ DiscordResult discord_link_flow(const std::wstring& api_url, const std::wstring&
             reply.set("account", Json::string(wide_to_utf8(result.name)));
         } else {
             result.error = utf8_to_wide(link_json.text("error", "Không liên kết được Discord."));
+            result.conflict = link_json.boolean("conflict");
+            const Json* holder = link_json.find("holder");
+            if (holder) {
+                if (holder->type == Json::Type::String) result.holder = utf8_to_wide(holder->str);
+                else result.holder = utf8_to_wide(holder->text("discordTag", holder->text("discordName", holder->text("name"))));
+            }
             reply.set("ok", Json::boolean(false));
             reply.set("error", Json::string(wide_to_utf8(result.error)));
         }
