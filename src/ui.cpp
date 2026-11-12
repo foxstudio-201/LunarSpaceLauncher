@@ -694,8 +694,9 @@ static void draw_node(Node* node, Renderer& renderer, Node* hovered, bool inside
         renderer.fill_rect(r, st.radius, cv(st.bg), st.opacity);
     if (g_glass && st.glass && g_glass_bitmap) {
         renderer.draw_glass_backdrop(r, st.radius, g_glass_bitmap);
-        Color tint = g_dark ? Color::rgb(0x0B0E13, 0.46f)
-                            : Color::rgb(0xFFFFFF, 0.52f);
+        float alpha = node->id == L"sidebar" ? 0.62f : 0.46f;
+        Color tint = g_dark ? Color::rgb(0x0B0E13, alpha)
+                            : Color::rgb(0xFFFFFF, node->id == L"sidebar" ? 0.68f : 0.52f);
         renderer.fill_rect(r, st.radius, tint, st.opacity);
     }
     if (!st.bg_image.empty()) {

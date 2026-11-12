@@ -796,6 +796,8 @@ void App::ui_apply_page() {
         acct_card->style.glass = true;
     if (Node* titlebar = ui_find(ui_.get(), L"titlebar"))
         titlebar->style.glass = true;
+    if (Node* sidebar = ui_find(ui_.get(), L"sidebar"))
+        sidebar->style.glass = true;
     if (Node* header = ui_find(ui_.get(), L"content-header"))
         header->style.glass = true;
     if (page_ == L"settings" && last_page_ != L"settings") settings_scroll_ = 0.0f;
