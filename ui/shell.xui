@@ -1,0 +1,290 @@
+// XyoLauncher engine - declarative UI (layout mirrored from the Electron sidebar/titlebar).
+// attrs: width/height, grow/growx/growy, gap, padding/paddingx/paddingy,
+// paddingleft/right/top/bottom, radius, bg, bgimage, overlay, border=#color,
+// bordercolor, size, weight, color, mono, wrap, align, hoverbg, accent,
+// id, action, value (text), src (image/svg), hidden=1, opacity.
+// colors accept $tokens (bg, bar, surface, surfaceActive, text, label, faint,
+// border, borderSoft, input, hover, accent, accentHover, accentSoft, ...).
+
+column bg=$bg growx=1 growy=1 {
+  row id=titlebar height=44 gap=0 action=window:drag {
+    row paddingleft=16 gap=10 {
+      image src=assets/img/xyolauncher.png width=28 height=28 radius=7
+      column height=30 gap=3 {
+        text value="XyoLauncher+" size=13 weight=600 color=$text
+        text value="L A U N C H E R" size=8.5 weight=500 color=$faint
+      }
+    }
+    spacer growx=1
+    row paddingright=8 gap=2 {
+      row id=btn-min width=38 height=28 radius=6 hoverbg=$hover action=window:minimize {
+        spacer growx=1
+        image src=assets/icons/minus.svg width=13 height=13 color=$label hovercolor=$text
+        spacer growx=1
+      }
+      row id=btn-max width=38 height=28 radius=6 hoverbg=$hover action=window:maximize {
+        spacer growx=1
+        image src=assets/icons/square.svg width=12 height=12 color=$label hovercolor=$text
+        spacer growx=1
+      }
+      row id=btn-close width=38 height=28 radius=6 hoverbg=$hover action=window:close {
+        spacer growx=1
+        image src=assets/icons/x.svg width=13 height=13 color=$label hovercolor=$bad
+        spacer growx=1
+      }
+    }
+  }
+
+  spacer height=1 bg=$borderSoft
+
+  row growx=1 growy=1 paddingx=8 paddingtop=8 paddingbottom=8 gap=8 {
+    column id=sidebar width=200 radius=24 bg=$bar border=1 bordercolor=$border padding=10 gap=4 {
+      spacer height=44
+
+      row id=nav-home height=48 paddingleft=16 paddingright=10 gap=14 radius=15 nohoverbg=1 action=nav:home {
+        image id=icon-home src=assets/icons/house.svg width=22 height=22 color=$label hovercolor=$text
+        text id=label-home value="Trang chủ" size=14 weight=600 color=$label hovercolor=$text
+      }
+      row id=nav-modpacks height=48 paddingleft=16 paddingright=10 gap=14 radius=15 nohoverbg=1 action=nav:modpacks {
+        image id=icon-modpacks src=assets/icons/stack.svg width=22 height=22 color=$label hovercolor=$text
+        text id=label-modpacks value="Modpack" size=14 weight=600 color=$label hovercolor=$text
+      }
+      row id=nav-versions height=48 paddingleft=16 paddingright=10 gap=14 radius=15 nohoverbg=1 action=nav:versions {
+        image id=icon-versions src=assets/icons/plus.svg width=22 height=22 color=$label hovercolor=$text
+        text id=label-versions value="Tạo phiên bản mới" size=14 weight=600 color=$label hovercolor=$text
+      }
+
+      spacer height=8
+      spacer height=1 bg=$borderSoft
+      spacer height=4
+
+      row height=48 paddingleft=14 paddingright=10 gap=10 radius=15 nohoverbg=1 action=nav:versions {
+        image src=assets/img/loader-icon/vanilla.png width=26 height=26 radius=6
+        text value="Vanilla 26.2" size=13.5 weight=600 color=$label hovercolor=$text
+        spacer growx=1
+        text value="●" size=8 color=$faint
+      }
+      row height=48 paddingleft=14 paddingright=10 gap=10 radius=15 action=nav:versions {
+        image src=assets/img/loader-icon/fabric.png width=26 height=26 radius=6
+        text value="BerryRPG" size=13.5 weight=600 color=$label hovercolor=$text
+        spacer growx=1
+        text value="●" size=8 color=$faint
+      }
+      row height=48 paddingleft=14 paddingright=10 gap=10 radius=15 action=nav:versions {
+        image src=assets/img/loader-icon/forge.png width=26 height=26 radius=6
+        text value="XyoCraft" size=13.5 weight=600 color=$label hovercolor=$text
+        spacer growx=1
+        text value="●" size=8 color=$faint
+      }
+      row height=48 paddingleft=14 paddingright=10 gap=10 radius=15 action=nav:versions {
+        image src=assets/img/loader-icon/lunar.png width=26 height=26 radius=6
+        text value="LunarLoader" size=13.5 weight=600 color=$label hovercolor=$text
+        spacer growx=1
+        text value="●" size=8 color=$faint
+      }
+
+      spacer growy=1
+
+      row id=acct-btn height=52 paddingleft=10 paddingright=8 gap=8 radius=16 bg=$hover hoverbg=$surfaceActive action=menu:account {
+        image id=acct-head src=assets/img/head.png width=34 height=34 radius=17
+        column growx=1 justify=center paddingtop=6 {
+          text id=label-account value="Sharks909" size=13 weight=600 color=$text
+          text id=label-account-sub value="Tài khoản · v2.0.0" size=10.5 color=$label
+        }
+        image id=acct-caret src=assets/icons/caret-right.svg width=16 height=16 color=$label
+      }
+    }
+
+    column id=content growx=1 growy=1 padding=16 gap=14 {
+      row id=content-header {
+        column growx=1 gap=3 {
+          text id=page-title value="Trang chủ" size=22 weight=700 color=$text
+          text id=page-subtitle value="103 bản phát hành · 6 phiên bản đã tạo · mới nhất 26.3" size=11 color=$label
+        }
+        spacer growx=1
+        row id=header-tools-home gap=8 {
+          row id=btn-versions height=34 paddingx=12 radius=8 bg=$input border=1 bordercolor=$border action=nav:versions {
+            text value="Phiên bản  →" size=11 weight=600 color=$label
+          }
+          row id=theme-switch width=74 height=30 radius=15 action=toggle:theme {
+          }
+        }
+        row id=header-tools-accounts hidden=1 gap=8 {
+          row id=btn-add-account height=34 paddingx=12 radius=8 bg=$accent action=skin:add-account {
+            text value="Thêm tài khoản" size=11 weight=600 color=$ink
+          }
+        }
+      }
+
+      row id=home-tabs gap=4 {
+        row height=30 paddingx=10 radius=8 bg=$input border=1 bordercolor=$border action=noop {
+          text value="Tổng quan" size=11 weight=600 color=$text
+        }
+        row height=30 paddingx=10 radius=8 action=noop {
+          text value="Chơi gần đây" size=11 weight=600 color=$faint
+        }
+        row height=30 paddingx=10 radius=8 action=noop {
+          text value="Phiên bản" size=11 weight=600 color=$faint
+        }
+        row height=30 paddingx=10 radius=8 action=noop {
+          text value="Hệ thống" size=11 weight=600 color=$faint
+        }
+      }
+
+      row id=accounts-tabs hidden=1 gap=6 {
+        row id=tab-list height=30 paddingx=10 radius=8 action=accounts:tab-list {
+          text id=label-tab-list value="Danh sách tài khoản" size=11 weight=600 color=$faint
+        }
+        row id=tab-skin height=30 paddingx=10 radius=8 action=accounts:tab-skin {
+          text id=label-tab-skin value="Skin" size=11 weight=600 color=$faint
+        }
+      }
+
+      column id=home-view growx=1 growy=1 gap=14 {
+        row id=hero height=200 radius=16 bg=$surface bgimage=assets/img/background.png overlay=#0000007A border=1 bordercolor=$border padding=20 gap=18 {
+          row width=84 height=84 radius=16 bg=$ok {
+            spacer growx=1
+            text value="▶" size=32 color=#04140A
+            spacer growx=1
+          }
+          column growx=1 growy=1 gap=8 {
+            row gap=6 {
+              text value="●" size=9 color=$ok
+              text value="SẴN SÀNG" size=9 weight=700 color=$ok
+            }
+            text value="Vanilla 26.2" size=28 weight=700 color=#F4F5F8
+            row gap=6 {
+              row height=20 paddingx=6 radius=5 bg=#FFFFFF1A { text value="vanilla" size=9 weight=600 color=#F4F5F8 }
+              row height=20 paddingx=6 radius=5 bg=#FFFFFF1A { text value="26.2" size=9 weight=600 color=#F4F5F8 }
+              row height=20 paddingx=6 radius=5 bg=#FFFFFF1A { text value="6144 MB" size=9 weight=600 color=#F4F5F8 }
+            }
+            spacer growy=1
+            row gap=24 {
+              column { text value="RAM" size=8 weight=700 color=#E8EBF1 text value="6144 MB" size=11 weight=600 color=#F4F5F8 }
+              column { text value="TRÌNH TẢI" size=8 weight=700 color=#E8EBF1 text value="vanilla" size=11 weight=600 color=#F4F5F8 }
+              column { text value="THỜI GIAN CHƠI" size=8 weight=700 color=#E8EBF1 text value="2h 0m" size=11 weight=600 color=#F4F5F8 }
+              column { text value="LẦN CHƠI CUỐI" size=8 weight=700 color=#E8EBF1 text value="hôm nay" size=11 weight=600 color=#F4F5F8 }
+            }
+          }
+          row id=btn-open width=64 height=40 radius=10 bg=#F4F5F8 action=nav:versions {
+            spacer growx=1
+            text value="Mở" size=11 weight=700 color=#1B1409
+            spacer growx=1
+          }
+        }
+
+        text value="BẢN PHÁT HÀNH" size=10 weight=700 color=$faint
+
+        row gap=10 {
+          column width=190 height=104 radius=12 bg=$surface border=1 bordercolor=$border padding=14 gap=6 {
+            text value="26.3" size=18 weight=700 color=$text
+            text value="RELEASE · MỚI NHẤT" size=9 weight=700 color=$ok
+          }
+          column width=190 height=104 radius=12 bg=$surface border=1 bordercolor=$border padding=14 gap=6 {
+            text value="26.2" size=18 weight=700 color=$text
+            text value="RELEASE" size=9 weight=700 color=$ok
+          }
+          column width=190 height=104 radius=12 bg=$surface border=1 bordercolor=$border padding=14 gap=6 {
+            text value="26.1.2" size=18 weight=700 color=$text
+            text value="RELEASE" size=9 weight=700 color=$ok
+          }
+          column width=190 height=104 radius=12 bg=$surface border=1 bordercolor=$border padding=14 gap=6 {
+            text value="1.21.11" size=18 weight=700 color=$text
+            text value="RELEASE" size=9 weight=700 color=$ok
+          }
+        }
+
+        text value="Ghi chú: engine MVP đang dựng shell + splash + home bằng DSL riêng (Direct2D, một process)." size=10 color=$faint
+      }
+
+      column id=accounts-view hidden=1 growx=1 growy=1 gap=10 {
+        column id=accounts-list-view growx=1 growy=1 gap=10 {
+          row padding=10 gap=8 radius=10 bg=$input border=1 bordercolor=$border {
+            image src=assets/icons/user-circle.svg width=14 height=14 color=$accent
+            text value="Hỗ trợ 3 loại tài khoản: Ngoại tuyến, Microsoft và ely.by. Phiên đăng nhập được lưu trên máy và tự làm mới khi hết hạn." size=11 color=$label wrap=1
+          }
+          column growx=1 radius=12 bg=$surface border=1 bordercolor=$border {
+            row height=60 paddingx=12 gap=10 radius=12 action=account:sharks hoverbg=$hover {
+              image src=assets/img/head.png width=30 height=30 radius=15
+              column growx=1 justify=center gap=2 {
+                text value="Sharks909" size=12.5 weight=600 color=$text
+                text value="Ngoại tuyến · OfflinePlayer:Sharks909" size=9 mono color=$faint
+              }
+              row id=active-badge-sharks height=22 paddingx=8 radius=6 bg=$input border=1 bordercolor=$border {
+                text value="Đang dùng" size=9 weight=700 color=$accent
+              }
+              image src=assets/icons/caret-right.svg width=14 height=14 color=$faint
+            }
+            spacer height=1 bg=$border
+            row height=60 paddingx=12 gap=10 radius=12 action=account:hung hoverbg=$hover {
+              image src=assets/img/head-hung.png width=30 height=30 radius=15
+              column growx=1 justify=center gap=2 {
+                text value="hung" size=12.5 weight=600 color=$text
+                text value="Ngoại tuyến · OfflinePlayer:hung" size=9 mono color=$faint
+              }
+              row id=active-badge-hung hidden=1 height=22 paddingx=8 radius=6 bg=$input border=1 bordercolor=$border {
+                text value="Đang dùng" size=9 weight=700 color=$accent
+              }
+              image src=assets/icons/caret-right.svg width=14 height=14 color=$faint
+            }
+          }
+          spacer growy=1
+        }
+
+        column id=skin-view hidden=1 growx=1 growy=1 gap=10 {
+          row id=skin-header height=56 paddingleft=32 paddingright=12 gap=8 radius=12 bg=$surface border=1 bordercolor=$border {
+            column growx=1 justify=center gap=2 {
+              text id=skin-account-name value="Sharks909" size=14 weight=700 color=$text
+              text value="Đổi skin và cape cho tài khoản ngoại tuyến" size=10 color=$label
+            }
+            row height=30 padding=2 gap=2 radius=8 bg=$input border=1 bordercolor=$border {
+              row id=skin-mode-draw width=64 height=26 radius=6 action=accounts:mode-draw {
+                spacer growx=1
+                text id=label-mode-draw value="Vẽ" size=10 weight=600 color=$label
+                spacer growx=1
+              }
+              row id=skin-mode-upload width=72 height=26 radius=6 action=accounts:mode-upload {
+                spacer growx=1
+                text id=label-mode-upload value="Tải tệp" size=10 weight=600 color=$ink
+                spacer growx=1
+              }
+            }
+            row id=btn-back-list height=32 paddingx=10 gap=6 radius=8 bg=$input border=1 bordercolor=$border action=accounts:tab-list {
+              image src=assets/icons/corners-in.svg width=14 height=14 color=$text
+              text value="Danh sách" size=10 weight=600 color=$text
+            }
+          }
+
+          column id=skin-upload growx=1 growy=1 gap=10 {
+            row gap=12 {
+              column growx=1 height=170 radius=12 bg=$surface border=1 bordercolor=$border padding=20 gap=6 action=skin:pick-skin hoverbg=$hover {
+                image src=assets/icons/upload.svg width=24 height=24 color=$accent
+                spacer growy=1
+                text value="Tải skin PNG" size=14 weight=700 color=$text
+                text value="PNG 64×64 cho skin, 64×32 cho cape." size=10 color=$label
+              }
+              column growx=1 height=170 radius=12 bg=$surface border=1 bordercolor=$border padding=20 gap=6 action=skin:pick-cape hoverbg=$hover {
+                image src=assets/icons/upload.svg width=24 height=24 color=$accent
+                spacer growy=1
+                text value="Tải cape PNG" size=14 weight=700 color=$text
+                text value="PNG 64×64 cho skin, 64×32 cho cape." size=10 color=$label
+              }
+            }
+            text value="Skin và cape lưu theo tài khoản. Launcher chia sẻ skin để người chơi khác dùng launcher nhìn thấy." size=9 color=$faint wrap=1
+            spacer growy=1
+          }
+
+          column id=skin-draw hidden=1 growx=1 growy=1 radius=12 bg=$surface border=1 bordercolor=$border padding=20 gap=6 {
+            text value="Chế độ vẽ 3D" size=14 weight=700 color=$text
+            text value="Engine MVP giữ chế độ tải tệp; trình vẽ 3D sẽ được port sau." size=11 color=$label
+          }
+        }
+      }
+
+      column id=placeholder hidden=1 growx=1 growy=1 padding=18 gap=8 radius=16 bg=$surface border=1 bordercolor=$border {
+        text id=placeholder-title value="Phiên bản" size=22 weight=700 color=$text
+        text id=placeholder-note value="Trang này sẽ được port sang engine ở bước tiếp theo." size=12 color=$label
+      }
+    }
+  }
+}

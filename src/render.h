@@ -1,0 +1,93 @@
+#pragma once
+#include "common.h"
+#include <d3d11.h>
+#include <dxgi1_3.h>
+#include <d2d1_1.h>
+#include <wincodec.h>
+
+struct SizeF {
+    float w = 0.0f;
+    float h = 0.0f;
+};
+
+enum class TextAlign { Left, Center, Right };
+
+class Renderer {
+public:
+    bool init(HWND hwnd);
+    void resize(UINT width, UINT height);
+    float scale() const { return scale_; }
+    UINT pixel_width() const { return width_; }
+    UINT pixel_height() const { return height_; }
+
+    void begin(Color clear);
+    void end();
+    bool ready() const { return !!render_target_; }
+
+    ID2D1Bitmap* image(const std::wstring& path);
+    void unload(const std::wstring& path);
+
+    SizeF measure_text(const std::wstring& text, float size, int weight, bool mono,
+                       float max_width, float max_height, bool wrap = false);
+    void draw_text(const std::wstring& text, D2D1_RECT_F rect, float size, int weight,
+                   bool mono, TextAlign align, Color color, float opacity = 1.0f,
+                   bool wrap = false);
+    void fill_rect(D2D1_RECT_F rect, float radius, Color color, float opacity = 1.0f);
+    void stroke_rect(D2D1_RECT_F rect, float radius, Color color, float width,
+                     float opacity = 1.0f);
+    void draw_image(ID2D1Bitmap* bitmap, D2D1_RECT_F rect, float radius, float opacity = 1.0f);
+    void draw_image_path(const std::wstring& path, D2D1_RECT_F rect, float radius,
+                         float opacity = 1.0f);
+    void draw_svg(const std::wstring& path, D2D1_RECT_F rect, Color color, float opacity = 1.0f,
+                  float rotation = 0.0f);
+    void draw_rgba(const std::vector<unsigned char>& pixels, int width, int height,
+                   D2D1_RECT_F rect, float opacity = 1.0f);
+    bool load_pixels(const std::wstring& path, std::vector<unsigned char>& pixels,
+                     unsigned& width, unsigned& height);
+    void clip_push(D2D1_RECT_F rect);
+    void clip_pop();
+    void opacity_push(float value);
+    void opacity_pop();
+
+private:
+    bool create_target();
+    IDWriteTextFormat* format(float size, int weight, bool mono, TextAlign align, bool wrap);
+    IDWriteTextLayout* layout(const std::wstring& text, float size, int weight, bool mono,
+                              float max_width, float max_height, TextAlign align,
+                              SizeF* metrics, bool wrap);
+    struct SvgPart {
+        ComPtr<ID2D1PathGeometry> geometry;
+        float opacity = 1.0f;
+    };
+    struct SvgDef {
+        std::vector<SvgPart> parts;
+        float vb_w = 256.0f;
+        float vb_h = 256.0f;
+    };
+    struct FormatCache {
+        ComPtr<IDWriteTextFormat> fmt;
+        ComPtr<IDWriteInlineObject> sign;
+    };
+    SvgDef* ensure_svg(const std::wstring& path);
+
+    HWND hwnd_ = nullptr;
+    UINT width_ = 1;
+    UINT height_ = 1;
+    float scale_ = 1.0f;
+
+    ComPtr<ID3D11Device> d3d_device_;
+    ComPtr<ID3D11DeviceContext> d3d_context_;
+    ComPtr<IDXGISwapChain1> swap_chain_;
+    ComPtr<ID2D1Factory> d2d_factory_;
+    ComPtr<ID2D1Device> d2d_device_;
+    ComPtr<ID2D1DeviceContext> d2d_context_;
+    ComPtr<ID2D1Bitmap1> render_target_;
+    ComPtr<IDWriteFactory> dwrite_;
+    ComPtr<IWICImagingFactory> wic_;
+
+    std::unordered_map<std::wstring, ComPtr<ID2D1Bitmap>> images_;
+    std::unordered_map<std::wstring, FormatCache> formats_;
+    std::unordered_map<std::wstring, SvgDef> svgs_;
+    std::vector<ComPtr<ID2D1Layer>> layers_;
+    D2D1_MATRIX_3X2_F base_transform_ = D2D1::IdentityMatrix();
+};

@@ -1,0 +1,702 @@
+#include "render.h"
+#include <d2d1helper.h>
+#include <d2d1_1helper.h>
+#include <wincodec.h>
+#include <dxgi1_3.h>
+#include <cstring>
+#include <cstdio>
+#include <cstdlib>
+#include <cctype>
+#include <cmath>
+#include <iterator>
+
+#pragma comment(lib, "d3d11")
+#pragma comment(lib, "dxgi")
+#pragma comment(lib, "d2d1")
+#pragma comment(lib, "dwrite")
+#pragma comment(lib, "windowscodecs")
+
+static DWRITE_FONT_WEIGHT dw_weight(int weight) {
+    if (weight >= 700) return DWRITE_FONT_WEIGHT_BOLD;
+    if (weight >= 600) return DWRITE_FONT_WEIGHT_SEMI_BOLD;
+    if (weight >= 500) return DWRITE_FONT_WEIGHT_MEDIUM;
+    return DWRITE_FONT_WEIGHT_NORMAL;
+}
+
+static DWRITE_TEXT_ALIGNMENT dw_align(TextAlign align) {
+    switch (align) {
+        case TextAlign::Center: return DWRITE_TEXT_ALIGNMENT_CENTER;
+        case TextAlign::Right: return DWRITE_TEXT_ALIGNMENT_TRAILING;
+        default: return DWRITE_TEXT_ALIGNMENT_LEADING;
+    }
+}
+
+bool Renderer::init(HWND hwnd) {
+    hwnd_ = hwnd;
+    RECT rc{};
+    GetClientRect(hwnd, &rc);
+    width_ = std::max<UINT>(1, UINT(rc.right - rc.left));
+    height_ = std::max<UINT>(1, UINT(rc.bottom - rc.top));
+    UINT dpi = GetDpiForWindow(hwnd);
+    scale_ = dpi > 0 ? dpi / 96.0f : 1.0f;
+
+    D3D_FEATURE_LEVEL levels[] = { D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0,
+                                   D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_10_0 };
+    D3D_FEATURE_LEVEL feature{};
+    HRESULT hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
+                                   D3D11_CREATE_DEVICE_BGRA_SUPPORT, levels,
+                                   UINT(std::size(levels)), D3D11_SDK_VERSION,
+                                   d3d_device_.put(), &feature, d3d_context_.put());
+    if (FAILED(hr)) return false;
+
+    ComPtr<IDXGIDevice> dxgi_device;
+    if (FAILED(d3d_device_->QueryInterface(__uuidof(IDXGIDevice),
+                                           (void**)dxgi_device.put())))
+        return false;
+    ComPtr<IDXGIAdapter> adapter;
+    if (FAILED(dxgi_device->GetAdapter(adapter.put()))) return false;
+    ComPtr<IDXGIFactory2> factory;
+    if (FAILED(adapter->GetParent(__uuidof(IDXGIFactory2), (void**)factory.put())))
+        return false;
+
+    D2D1_FACTORY_OPTIONS options{};
+    if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED,
+                                 __uuidof(ID2D1Factory), &options,
+                                 (void**)d2d_factory_.put())))
+        return false;
+    ComPtr<ID2D1Factory1> factory1;
+    if (FAILED(d2d_factory_->QueryInterface(__uuidof(ID2D1Factory1), (void**)factory1.put())))
+        return false;
+    if (FAILED(factory1->CreateDevice(dxgi_device.get(), d2d_device_.put())))
+        return false;
+    if (FAILED(d2d_device_->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE,
+                                                d2d_context_.put())))
+        return false;
+    d2d_context_->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+
+    if (FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
+                                   (IUnknown**)dwrite_.put())))
+        return false;
+    if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
+                                __uuidof(IWICImagingFactory), (void**)wic_.put())))
+        return false;
+
+    DXGI_SWAP_CHAIN_DESC1 desc{};
+    desc.Width = width_;
+    desc.Height = height_;
+    desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    desc.SampleDesc.Count = 1;
+    desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    desc.BufferCount = 2;
+    desc.Scaling = DXGI_SCALING_STRETCH;
+    desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+    desc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
+    if (FAILED(factory->CreateSwapChainForHwnd(d3d_device_.get(), hwnd, &desc, nullptr,
+                                               nullptr, swap_chain_.put())))
+        return false;
+    return create_target();
+}
+
+void Renderer::resize(UINT width, UINT height) {
+    width = std::max<UINT>(1, width);
+    height = std::max<UINT>(1, height);
+    if (!swap_chain_ || (width == width_ && height == height_)) return;
+    width_ = width;
+    height_ = height;
+    render_target_.reset();
+    d2d_context_->SetTarget(nullptr);
+    if (FAILED(swap_chain_->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, 0))) return;
+    create_target();
+}
+
+bool Renderer::create_target() {
+    if (!swap_chain_ || !d2d_context_) return false;
+    ComPtr<IDXGISurface> surface;
+    if (FAILED(swap_chain_->GetBuffer(0, __uuidof(IDXGISurface), (void**)surface.put())))
+        return false;
+    D2D1_BITMAP_PROPERTIES1 props = D2D1::BitmapProperties1(
+        D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE),
+        96.0f, 96.0f);
+    if (FAILED(d2d_context_->CreateBitmapFromDxgiSurface(surface.get(), &props,
+                                                         render_target_.put())))
+        return false;
+    d2d_context_->SetTarget(render_target_.get());
+    return true;
+}
+
+void Renderer::begin(Color clear) {
+    if (!d2d_context_ || !render_target_) return;
+    if (hwnd_) {
+        UINT dpi = GetDpiForWindow(hwnd_);
+        if (dpi > 0) scale_ = dpi / 96.0f;
+    }
+    d2d_context_->BeginDraw();
+    base_transform_ = D2D1::Matrix3x2F::Scale(scale_, scale_);
+    d2d_context_->SetTransform(base_transform_);
+    d2d_context_->Clear(to_d2d(clear));
+}
+
+void Renderer::end() {
+    if (!d2d_context_ || !swap_chain_) return;
+    HRESULT hr = d2d_context_->EndDraw();
+    if (hr == D2DERR_RECREATE_TARGET) {
+        render_target_.reset();
+        d2d_context_->SetTarget(nullptr);
+        create_target();
+        return;
+    }
+    swap_chain_->Present(1, 0);
+}
+
+IDWriteTextFormat* Renderer::format(float size, int weight, bool mono, TextAlign align,
+                                    bool wrap) {
+    wchar_t key[96];
+    swprintf(key, 96, L"%ls|%.1f|%d|%d|%d", mono ? L"M" : L"S", size, weight, int(align),
+             wrap ? 1 : 0);
+    auto it = formats_.find(key);
+    if (it != formats_.end()) return it->second.fmt.get();
+
+    ComPtr<IDWriteTextFormat> fmt;
+    const wchar_t* family = mono ? L"Consolas" : L"Segoe UI";
+    if (FAILED(dwrite_->CreateTextFormat(family, nullptr, dw_weight(weight),
+                                         DWRITE_FONT_STYLE_NORMAL,
+                                         DWRITE_FONT_STRETCH_NORMAL, size, L"", fmt.put()))) {
+        dwrite_->CreateTextFormat(L"Arial", nullptr, dw_weight(weight),
+                                  DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+                                  size, L"", fmt.put());
+    }
+    fmt->SetWordWrapping(wrap ? DWRITE_WORD_WRAPPING_WRAP : DWRITE_WORD_WRAPPING_NO_WRAP);
+    fmt->SetTextAlignment(dw_align(align));
+    ComPtr<IDWriteInlineObject> sign;
+    if (SUCCEEDED(dwrite_->CreateEllipsisTrimmingSign(fmt.get(), sign.put()))) {
+        DWRITE_TRIMMING trimming{ DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0 };
+        fmt->SetTrimming(&trimming, sign.get());
+    }
+    FormatCache cache;
+    cache.fmt = std::move(fmt);
+    cache.sign = std::move(sign);
+    formats_[key] = std::move(cache);
+    return formats_[key].fmt.get();
+}
+
+IDWriteTextLayout* Renderer::layout(const std::wstring& text, float size, int weight,
+                                    bool mono, float max_width, float max_height,
+                                    TextAlign align, SizeF* metrics, bool wrap) {
+    if (max_width <= 0.0f) max_width = 1.0f;
+    if (max_height <= 0.0f) max_height = 1e6f;
+    IDWriteTextLayout* tl = nullptr;
+    if (FAILED(dwrite_->CreateTextLayout(text.c_str(), UINT(text.size()),
+                                         format(size, weight, mono, align, wrap), max_width,
+                                         max_height, &tl)))
+        return nullptr;
+    if (metrics) {
+        DWRITE_TEXT_METRICS m{};
+        tl->GetMetrics(&m);
+        metrics->w = m.width;
+        metrics->h = m.height;
+    }
+    return tl;
+}
+
+SizeF Renderer::measure_text(const std::wstring& text, float size, int weight, bool mono,
+                             float max_width, float max_height, bool wrap) {
+    SizeF metrics{};
+    if (text.empty()) return metrics;
+    IDWriteTextLayout* tl = layout(text, size, weight, mono, max_width, max_height,
+                                   TextAlign::Left, &metrics, wrap);
+    if (tl) tl->Release();
+    return metrics;
+}
+
+void Renderer::draw_text(const std::wstring& text, D2D1_RECT_F rect, float size, int weight,
+                         bool mono, TextAlign align, Color color, float opacity, bool wrap) {
+    if (text.empty() || !color.visible() || opacity <= 0.001f) return;
+    SizeF metrics{};
+    IDWriteTextLayout* tl = layout(text, size, weight, mono, rect.right - rect.left,
+                                   rect.bottom - rect.top, align, &metrics, wrap);
+    if (!tl) return;
+    tl->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    float y = rect.top;
+    ComPtr<ID2D1SolidColorBrush> brush;
+    d2d_context_->CreateSolidColorBrush(to_d2d(color), brush.put());
+    if (brush) {
+        brush->SetOpacity(std::clamp(opacity, 0.0f, 1.0f));
+        d2d_context_->PushAxisAlignedClip(rect, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+        d2d_context_->DrawTextLayout(D2D1::Point2F(rect.left, y), tl, brush.get());
+        d2d_context_->PopAxisAlignedClip();
+    }
+    tl->Release();
+}
+
+void Renderer::fill_rect(D2D1_RECT_F rect, float radius, Color color, float opacity) {
+    if (!color.visible() || opacity <= 0.001f) return;
+    ComPtr<ID2D1SolidColorBrush> brush;
+    d2d_context_->CreateSolidColorBrush(to_d2d(color), brush.put());
+    if (!brush) return;
+    brush->SetOpacity(std::clamp(opacity, 0.0f, 1.0f));
+    float r = std::max(0.0f, radius);
+    if (r > 0.5f)
+        d2d_context_->FillRoundedRectangle(D2D1::RoundedRect(rect, r, r), brush.get());
+    else
+        d2d_context_->FillRectangle(rect, brush.get());
+}
+
+void Renderer::stroke_rect(D2D1_RECT_F rect, float radius, Color color, float width,
+                           float opacity) {
+    if (!color.visible() || opacity <= 0.001f || width <= 0.0f) return;
+    ComPtr<ID2D1SolidColorBrush> brush;
+    d2d_context_->CreateSolidColorBrush(to_d2d(color), brush.put());
+    if (!brush) return;
+    brush->SetOpacity(std::clamp(opacity, 0.0f, 1.0f));
+    float r = std::max(0.0f, radius);
+    if (r > 0.5f)
+        d2d_context_->DrawRoundedRectangle(D2D1::RoundedRect(rect, r, r), brush.get(), width);
+    else
+        d2d_context_->DrawRectangle(rect, brush.get(), width);
+}
+
+void Renderer::draw_image(ID2D1Bitmap* bitmap, D2D1_RECT_F rect, float radius,
+                          float opacity) {
+    if (!bitmap || opacity <= 0.001f) return;
+    D2D1_SIZE_F size = bitmap->GetSize();
+    if (size.width <= 0.0f || size.height <= 0.0f) return;
+    float dw = rect.right - rect.left;
+    float dh = rect.bottom - rect.top;
+    float scale = std::max(dw / size.width, dh / size.height);
+    float sw = dw / scale;
+    float sh = dh / scale;
+    D2D1_RECT_F src = D2D1::RectF((size.width - sw) * 0.5f, (size.height - sh) * 0.5f,
+                                  (size.width + sw) * 0.5f, (size.height + sh) * 0.5f);
+
+    if (radius > 0.5f) {
+        ComPtr<ID2D1RoundedRectangleGeometry> geometry;
+        d2d_factory_->CreateRoundedRectangleGeometry(
+            D2D1::RoundedRect(rect, radius, radius), geometry.put());
+        ComPtr<ID2D1Layer> layer;
+        d2d_context_->CreateLayer(nullptr, layer.put());
+        if (geometry && layer) {
+            D2D1_LAYER_PARAMETERS params = D2D1::LayerParameters(
+                D2D1::InfiniteRect(), geometry.get(), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+                D2D1::IdentityMatrix(), std::clamp(opacity, 0.0f, 1.0f));
+            d2d_context_->PushLayer(&params, layer.get());
+            d2d_context_->DrawBitmap(bitmap, rect, 1.0f,
+                                     D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, src);
+            d2d_context_->PopLayer();
+            return;
+        }
+    }
+    d2d_context_->DrawBitmap(bitmap, rect, std::clamp(opacity, 0.0f, 1.0f),
+                             D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, src);
+}
+
+ID2D1Bitmap* Renderer::image(const std::wstring& path) {
+    auto it = images_.find(path);
+    if (it != images_.end()) return it->second.get();
+    if (!wic_) return nullptr;
+    std::wstring full = path;
+    for (auto& ch : full) if (ch == L'/') ch = L'\\';
+    wchar_t resolved[1024];
+    DWORD n = GetFullPathNameW(full.c_str(), 1024, resolved, nullptr);
+    std::wstring decodePath = (n > 0 && n < 1024) ? std::wstring(resolved, n) : full;
+    ComPtr<IWICBitmapDecoder> decoder;
+    if (FAILED(wic_->CreateDecoderFromFilename(decodePath.c_str(), nullptr, GENERIC_READ,
+                                               WICDecodeMetadataCacheOnDemand,
+                                               decoder.put())))
+        return nullptr;
+    ComPtr<IWICBitmapFrameDecode> frame;
+    if (FAILED(decoder->GetFrame(0, frame.put()))) return nullptr;
+    ComPtr<IWICFormatConverter> converter;
+    if (FAILED(wic_->CreateFormatConverter(converter.put()))) return nullptr;
+    if (FAILED(converter->Initialize(frame.get(), GUID_WICPixelFormat32bppPBGRA,
+                                     WICBitmapDitherTypeNone, nullptr, 0.0,
+                                     WICBitmapPaletteTypeCustom)))
+        return nullptr;
+    ComPtr<ID2D1Bitmap> bitmap;
+    if (FAILED(d2d_context_->CreateBitmapFromWicBitmap(converter.get(), nullptr,
+                                                       bitmap.put())))
+        return nullptr;
+    images_.emplace(path, std::move(bitmap));
+    return images_[path].get();
+}
+
+void Renderer::unload(const std::wstring& path) { images_.erase(path); }
+
+void Renderer::draw_image_path(const std::wstring& path, D2D1_RECT_F rect, float radius,
+                               float opacity) {
+    draw_image(image(path), rect, radius, opacity);
+}
+
+void Renderer::clip_push(D2D1_RECT_F rect) {
+    d2d_context_->PushAxisAlignedClip(rect, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+}
+
+void Renderer::clip_pop() { d2d_context_->PopAxisAlignedClip(); }
+
+void Renderer::opacity_push(float value) {
+    if (!d2d_context_) return;
+    ComPtr<ID2D1Layer> layer;
+    if (FAILED(d2d_context_->CreateLayer(nullptr, layer.put())) || !layer) return;
+    D2D1_LAYER_PARAMETERS params = D2D1::LayerParameters(
+        D2D1::InfiniteRect(), nullptr, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+        D2D1::IdentityMatrix(), std::clamp(value, 0.0f, 1.0f), nullptr,
+        D2D1_LAYER_OPTIONS_NONE);
+    d2d_context_->PushLayer(params, layer.get());
+    layers_.push_back(std::move(layer));
+}
+
+void Renderer::opacity_pop() {
+    if (!d2d_context_ || layers_.empty()) return;
+    d2d_context_->PopLayer();
+    layers_.pop_back();
+}
+
+namespace {
+
+std::string read_binary(const std::wstring& path) {
+    std::string out;
+    FILE* file = _wfopen(path.c_str(), L"rb");
+    if (!file) return out;
+    fseek(file, 0, SEEK_END);
+    long size = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    if (size > 0) {
+        out.resize(size_t(size));
+        fread(out.data(), 1, size_t(size), file);
+    }
+    fclose(file);
+    return out;
+}
+
+bool tag_attr(const std::string& tag, const char* name, std::string& out) {
+    std::string key = std::string(name) + "=";
+    size_t pos = tag.find(key);
+    if (pos == std::string::npos) return false;
+    pos += key.size();
+    if (pos >= tag.size()) return false;
+    char quote = tag[pos];
+    if (quote == '"' || quote == '\'') {
+        ++pos;
+        size_t end = tag.find(quote, pos);
+        if (end == std::string::npos) return false;
+        out = tag.substr(pos, end - pos);
+        return true;
+    }
+    size_t end = pos;
+    while (end < tag.size() && !std::isspace((unsigned char)tag[end]) && tag[end] != '>')
+        ++end;
+    out = tag.substr(pos, end - pos);
+    return true;
+}
+
+struct SvgPathParser {
+    ID2D1GeometrySink* sink = nullptr;
+    const char* p = nullptr;
+    const char* end = nullptr;
+    bool figure = false;
+    float cx = 0, cy = 0, sx = 0, sy = 0;
+    float lcx = 0, lcy = 0;
+    float lqx = 0, lqy = 0;
+    char last = 0;
+
+    void skip() {
+        while (p < end && (std::isspace((unsigned char)*p) || *p == ',')) ++p;
+    }
+    bool number(float& value) {
+        skip();
+        char* stop = nullptr;
+        value = std::strtof(p, &stop);
+        if (stop == p) return false;
+        p = stop;
+        return true;
+    }
+    void begin(float x, float y) {
+        if (figure) sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+        cx = sx = x;
+        cy = sy = y;
+        sink->BeginFigure(D2D1::Point2F(x, y), D2D1_FIGURE_BEGIN_FILLED);
+        figure = true;
+        last = 0;
+    }
+    void line(float x, float y) {
+        if (!figure) begin(cx, cy);
+        sink->AddLine(D2D1::Point2F(x, y));
+        cx = x;
+        cy = y;
+    }
+    void cubic(float x1, float y1, float x2, float y2, float x, float y) {
+        if (!figure) begin(cx, cy);
+        sink->AddBezier(D2D1::BezierSegment(D2D1::Point2F(x1, y1), D2D1::Point2F(x2, y2),
+                                             D2D1::Point2F(x, y)));
+        lcx = x2;
+        lcy = y2;
+        cx = x;
+        cy = y;
+    }
+    void quad(float x1, float y1, float x, float y) {
+        if (!figure) begin(cx, cy);
+        sink->AddQuadraticBezier(D2D1::QuadraticBezierSegment(D2D1::Point2F(x1, y1),
+                                                               D2D1::Point2F(x, y)));
+        lqx = x1;
+        lqy = y1;
+        cx = x;
+        cy = y;
+    }
+    void run() {
+        char cmd = 0;
+        while (true) {
+            skip();
+            if (p >= end) break;
+            char c = *p;
+            if (std::isalpha((unsigned char)c)) {
+                cmd = c;
+                ++p;
+            } else if (cmd == 0) {
+                ++p;
+                continue;
+            } else if (cmd == 'M') {
+                cmd = 'L';
+            } else if (cmd == 'm') {
+                cmd = 'l';
+            }
+            float x = 0, y = 0, x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+            float rx = 0, ry = 0, rot = 0, large = 0, sweep = 0;
+            switch (cmd) {
+                case 'M':
+                case 'm':
+                    if (!number(x) || !number(y)) return;
+                    if (cmd == 'm') { x += cx; y += cy; }
+                    begin(x, y);
+                    break;
+                case 'L':
+                case 'l':
+                    if (!number(x) || !number(y)) return;
+                    if (cmd == 'l') { x += cx; y += cy; }
+                    line(x, y);
+                    last = 'l';
+                    break;
+                case 'H':
+                case 'h':
+                    if (!number(x)) return;
+                    if (cmd == 'h') x += cx;
+                    line(x, cy);
+                    last = 'h';
+                    break;
+                case 'V':
+                case 'v':
+                    if (!number(y)) return;
+                    if (cmd == 'v') y += cy;
+                    line(cx, y);
+                    last = 'v';
+                    break;
+                case 'C':
+                case 'c':
+                    if (!number(x1) || !number(y1) || !number(x2) || !number(y2) ||
+                        !number(x) || !number(y))
+                        return;
+                    if (cmd == 'c') {
+                        x1 += cx; y1 += cy; x2 += cx; y2 += cy; x += cx; y += cy;
+                    }
+                    cubic(x1, y1, x2, y2, x, y);
+                    last = 'c';
+                    break;
+                case 'S':
+                case 's': {
+                    float px = last == 'c' || last == 's' ? 2 * cx - lcx : cx;
+                    float py = last == 'c' || last == 's' ? 2 * cy - lcy : cy;
+                    if (!number(x2) || !number(y2) || !number(x) || !number(y)) return;
+                    if (cmd == 's') { x2 += cx; y2 += cy; x += cx; y += cy; }
+                    cubic(px, py, x2, y2, x, y);
+                    last = 's';
+                    break;
+                }
+                case 'Q':
+                case 'q':
+                    if (!number(x1) || !number(y1) || !number(x) || !number(y)) return;
+                    if (cmd == 'q') { x1 += cx; y1 += cy; x += cx; y += cy; }
+                    quad(x1, y1, x, y);
+                    last = 'q';
+                    break;
+                case 'T':
+                case 't': {
+                    float px = last == 'q' || last == 't' ? 2 * cx - lqx : cx;
+                    float py = last == 'q' || last == 't' ? 2 * cy - lqy : cy;
+                    if (!number(x) || !number(y)) return;
+                    if (cmd == 't') { x += cx; y += cy; }
+                    quad(px, py, x, y);
+                    last = 't';
+                    break;
+                }
+                case 'A':
+                case 'a':
+                    if (!number(rx) || !number(ry) || !number(rot) || !number(large) ||
+                        !number(sweep) || !number(x) || !number(y))
+                        return;
+                    if (cmd == 'a') { x += cx; y += cy; }
+                    if (!figure) begin(cx, cy);
+                    {
+                        D2D1_ARC_SEGMENT arc = D2D1::ArcSegment(
+                            D2D1::Point2F(x, y), D2D1::SizeF(std::fabs(rx), std::fabs(ry)),
+                            rot, sweep != 0.0f ? D2D1_SWEEP_DIRECTION_CLOCKWISE
+                                               : D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE,
+                            large != 0.0f ? D2D1_ARC_SIZE_LARGE : D2D1_ARC_SIZE_SMALL);
+                        sink->AddArc(&arc);
+                    }
+                    cx = x;
+                    cy = y;
+                    last = 'a';
+                    break;
+                case 'Z':
+                case 'z':
+                    if (figure) {
+                        sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+                        figure = false;
+                        cx = sx;
+                        cy = sy;
+                    }
+                    last = 'z';
+                    break;
+                default:
+                    return;
+            }
+        }
+        if (figure) sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+    }
+};
+
+}  // namespace
+
+Renderer::SvgDef* Renderer::ensure_svg(const std::wstring& path) {
+    auto it = svgs_.find(path);
+    if (it != svgs_.end()) return &it->second;
+    SvgDef def;
+    std::string data = read_binary(path);
+    if (data.empty()) {
+        svgs_[path] = std::move(def);
+        return &svgs_[path];
+    }
+    std::string view = "";
+    size_t svg_tag = data.find("<svg");
+    if (svg_tag != std::string::npos) {
+        std::string tag = data.substr(svg_tag, data.find('>', svg_tag) - svg_tag);
+        if (tag_attr(tag, "viewBox", view)) {
+            float a = 0, b = 0, w = 256, h = 256;
+            sscanf(view.c_str(), "%f %f %f %f", &a, &b, &w, &h);
+            if (w > 0) def.vb_w = w;
+            if (h > 0) def.vb_h = h;
+        }
+    }
+    size_t pos = 0;
+    while ((pos = data.find("<path", pos)) != std::string::npos) {
+        size_t close = data.find('>', pos);
+        if (close == std::string::npos) break;
+        std::string tag = data.substr(pos, close - pos);
+        pos = close + 1;
+        std::string d;
+        if (!tag_attr(tag, "d", d) || d.empty()) continue;
+        std::string rule;
+        bool evenodd = tag_attr(tag, "fill-rule", rule) && rule == "evenodd";
+        float opacity = 1.0f;
+        std::string op;
+        if (tag_attr(tag, "opacity", op)) opacity = float(atof(op.c_str()));
+        std::string fop;
+        if (tag_attr(tag, "fill-opacity", fop)) opacity *= float(atof(fop.c_str()));
+
+        ComPtr<ID2D1PathGeometry> geometry;
+        if (FAILED(d2d_factory_->CreatePathGeometry(geometry.put()))) continue;
+        ComPtr<ID2D1GeometrySink> sink;
+        if (FAILED(geometry->Open(sink.put()))) continue;
+        sink->SetFillMode(evenodd ? D2D1_FILL_MODE_ALTERNATE : D2D1_FILL_MODE_WINDING);
+        SvgPathParser parser;
+        parser.sink = sink.get();
+        parser.p = d.c_str();
+        parser.end = d.c_str() + d.size();
+        parser.run();
+        sink->Close();
+        SvgPart part;
+        part.geometry = std::move(geometry);
+        part.opacity = opacity;
+        def.parts.push_back(std::move(part));
+    }
+    svgs_[path] = std::move(def);
+    return &svgs_[path];
+}
+
+void Renderer::draw_svg(const std::wstring& path, D2D1_RECT_F rect, Color color,
+                        float opacity, float rotation) {
+    SvgDef* def = ensure_svg(path);
+    if (!def || def->parts.empty() || !color.visible() || opacity <= 0.001f) return;
+    float w = rect.right - rect.left;
+    float h = rect.bottom - rect.top;
+    if (w <= 0.0f || h <= 0.0f) return;
+    D2D1_MATRIX_3X2_F icon = {
+        (w / def->vb_w) * scale_, 0.0f,
+        0.0f, (h / def->vb_h) * scale_,
+        rect.left * scale_, rect.top * scale_,
+    };
+    if (rotation != 0.0f) {
+        D2D1_POINT_2F center = D2D1::Point2F((rect.left + w * 0.5f) * scale_,
+                                             (rect.top + h * 0.5f) * scale_);
+        icon = icon * D2D1::Matrix3x2F::Rotation(rotation, center);
+    }
+    d2d_context_->SetTransform(base_transform_);
+    d2d_context_->PushAxisAlignedClip(D2D1::RectF(rect.left, rect.top, rect.right, rect.bottom),
+                                     D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+    d2d_context_->SetTransform(icon);
+    for (const auto& part : def->parts) {
+        ComPtr<ID2D1SolidColorBrush> brush;
+        d2d_context_->CreateSolidColorBrush(to_d2d(color), brush.put());
+        if (!brush) continue;
+        brush->SetOpacity(std::clamp(opacity * part.opacity, 0.0f, 1.0f));
+        d2d_context_->FillGeometry(part.geometry.get(), brush.get());
+    }
+    d2d_context_->PopAxisAlignedClip();
+    d2d_context_->SetTransform(base_transform_);
+}
+
+void Renderer::draw_rgba(const std::vector<unsigned char>& pixels, int width, int height,
+                         D2D1_RECT_F rect, float opacity) {
+    if (pixels.empty() || width <= 0 || height <= 0 || opacity <= 0.001f) return;
+    ComPtr<ID2D1Bitmap> bitmap;
+    D2D1_BITMAP_PROPERTIES props = D2D1::BitmapProperties(
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED),
+        96.0f, 96.0f);
+    if (FAILED(d2d_context_->CreateBitmap(D2D1::SizeU(UINT(width), UINT(height)),
+                                          pixels.data(), UINT(width * 4), &props,
+                                          bitmap.put())))
+        return;
+    d2d_context_->DrawBitmap(bitmap.get(), rect, std::clamp(opacity, 0.0f, 1.0f),
+                             D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, nullptr);
+}
+
+bool Renderer::load_pixels(const std::wstring& path, std::vector<unsigned char>& pixels,
+                           unsigned& width, unsigned& height) {
+    if (!wic_) return false;
+    std::wstring full = path;
+    for (auto& ch : full) if (ch == L'/') ch = L'\\';
+    wchar_t resolved[1024];
+    DWORD n = GetFullPathNameW(full.c_str(), 1024, resolved, nullptr);
+    std::wstring decodePath = (n > 0 && n < 1024) ? std::wstring(resolved, n) : full;
+    ComPtr<IWICBitmapDecoder> decoder;
+    if (FAILED(wic_->CreateDecoderFromFilename(decodePath.c_str(), nullptr, GENERIC_READ,
+                                               WICDecodeMetadataCacheOnDemand,
+                                               decoder.put())))
+        return false;
+    ComPtr<IWICBitmapFrameDecode> frame;
+    if (FAILED(decoder->GetFrame(0, frame.put()))) return false;
+    ComPtr<IWICFormatConverter> converter;
+    if (FAILED(wic_->CreateFormatConverter(converter.put()))) return false;
+    if (FAILED(converter->Initialize(frame.get(), GUID_WICPixelFormat32bppPBGRA,
+                                     WICBitmapDitherTypeNone, nullptr, 0.0,
+                                     WICBitmapPaletteTypeCustom)))
+        return false;
+    UINT w = 0, h = 0;
+    converter->GetSize(&w, &h);
+    if (w == 0 || h == 0) return false;
+    pixels.resize(size_t(w) * h * 4);
+    if (FAILED(converter->CopyPixels(nullptr, w * 4, UINT(pixels.size()), pixels.data())))
+        return false;
+    width = w;
+    height = h;
+    return true;
+}

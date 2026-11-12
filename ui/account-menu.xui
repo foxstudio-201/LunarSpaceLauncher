@@ -1,0 +1,43 @@
+column id=account-menu growx=1 growy=1 padding=4 gap=2 radius=18 bg=$surface border=1 bordercolor=$border {
+  row height=24 paddingx=10 {
+    text value="TÀI KHOẢN" size=10.5 weight=700 color=$faint
+  }
+
+  row height=46 paddingx=6 gap=8 radius=12 action=account:sharks hoverbg=$hover {
+    image src=assets/img/head.png width=30 height=30 radius=15
+    column growx=1 justify=center {
+      text value="Sharks909" size=13 weight=600 color=$text
+      text value="Offline" size=10.5 color=$label
+    }
+    image id=menu-check-sharks src=assets/icons/check.svg width=16 height=16 color=$accent
+  }
+  row height=46 paddingx=6 gap=8 radius=12 action=account:hung hoverbg=$hover {
+    image src=assets/img/head-hung.png width=30 height=30 radius=15
+    column growx=1 justify=center {
+      text value="hung" size=13 weight=600 color=$text
+      text value="Offline" size=10.5 color=$label
+    }
+    image id=menu-check-hung src=assets/icons/check.svg width=16 height=16 color=$accent hidden=1
+  }
+
+  spacer height=8
+  spacer height=1 bg=$borderSoft
+  spacer height=8
+
+  row height=46 paddingx=6 gap=8 radius=12 action=nav:accounts hoverbg=$hover {
+    row width=30 height=30 {
+      spacer growx=1
+      image src=assets/icons/user.svg width=17 height=17 color=$label
+      spacer growx=1
+    }
+    text value="Quản lý tài khoản" size=13 weight=500 color=$text
+  }
+  row height=46 paddingx=6 gap=8 radius=12 action=nav:settings hoverbg=$hover {
+    row width=30 height=30 {
+      spacer growx=1
+      image src=assets/icons/gear-six.svg width=17 height=17 color=$label
+      spacer growx=1
+    }
+    text value="Cài đặt hệ thống" size=13 weight=500 color=$text
+  }
+}
