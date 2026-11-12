@@ -1,15 +1,7 @@
 #include "render.h"
 #include <d2d1helper.h>
 #include <d2d1_1helper.h>
-#include <d2d1effects.h>
-#ifndef D2D1_3DPERSPECTIVETRANSFORM_PROP_CORNERS
-#define D2D1_3DPERSPECTIVETRANSFORM_PROP_INTERPOLATION_MODE 0
-#define D2D1_3DPERSPECTIVETRANSFORM_PROP_DEPTH 2
-#define D2D1_3DPERSPECTIVETRANSFORM_PROP_PERSPECTIVE_ORIGIN 3
-#define D2D1_3DPERSPECTIVETRANSFORM_PROP_ROTATION_ORIGIN 6
-#define D2D1_3DPERSPECTIVETRANSFORM_PROP_ROTATION 7
-#define D2D1_3DPERSPECTIVETRANSFORM_INTERPOLATION_MODE_LINEAR 1
-#endif
+#include <d3dcompiler.h>
 #include <wincodec.h>
 #include <dxgi1_3.h>
 #include <cstring>
@@ -115,6 +107,7 @@ void Renderer::resize(UINT width, UINT height) {
     width_ = width;
     height_ = height;
     render_target_.reset();
+    backbuffer_rtv_.reset();
     d2d_context_->SetTarget(nullptr);
     if (FAILED(swap_chain_->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, 0))) return;
     create_target();
@@ -122,8 +115,14 @@ void Renderer::resize(UINT width, UINT height) {
 
 bool Renderer::create_target() {
     if (!swap_chain_ || !d2d_context_) return false;
+    ComPtr<ID3D11Texture2D> buffer;
+    if (FAILED(swap_chain_->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)buffer.put())))
+        return false;
+    if (FAILED(d3d_device_->CreateRenderTargetView(buffer.get(), nullptr,
+                                                   backbuffer_rtv_.put())))
+        return false;
     ComPtr<IDXGISurface> surface;
-    if (FAILED(swap_chain_->GetBuffer(0, __uuidof(IDXGISurface), (void**)surface.put())))
+    if (FAILED(buffer->QueryInterface(__uuidof(IDXGISurface), (void**)surface.put())))
         return false;
     D2D1_BITMAP_PROPERTIES1 props = D2D1::BitmapProperties1(
         D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
@@ -155,11 +154,34 @@ void Renderer::end() {
     HRESULT hr = target_->EndDraw();
     if (hr == D2DERR_RECREATE_TARGET) {
         render_target_.reset();
+        backbuffer_rtv_.reset();
         d2d_context_->SetTarget(nullptr);
         create_target();
         return;
     }
     swap_chain_->Present(1, 0);
+}
+
+bool Renderer::end_main() {
+    if (!d2d_context_) return false;
+    target_ = d2d_context_;
+    HRESULT hr = target_->EndDraw();
+    if (hr == D2DERR_RECREATE_TARGET) {
+        render_target_.reset();
+        backbuffer_rtv_.reset();
+        d2d_context_->SetTarget(nullptr);
+        create_target();
+        return false;
+    }
+    return SUCCEEDED(hr);
+}
+
+void Renderer::begin_overlay() {
+    if (!d2d_context_ || !render_target_) return;
+    target_ = d2d_context_;
+    target_->BeginDraw();
+    base_transform_ = D2D1::Matrix3x2F::Scale(scale_, scale_);
+    target_->SetTransform(base_transform_);
 }
 
 IDWriteTextFormat* Renderer::format(float size, int weight, bool mono, TextAlign align,
@@ -365,68 +387,251 @@ void Renderer::opacity_pop() {
 }
 
 
+bool Renderer::ensure_sidebar_surface(float width, float height) {
+    if (!d3d_device_ || !main_context_) return false;
+    UINT pw = std::max<UINT>(1, UINT(width * scale_ + 0.5f));
+    UINT ph = std::max<UINT>(1, UINT(height * scale_ + 0.5f));
+    if (sidebar_bitmap_ && sidebar_px_w_ == pw && sidebar_px_h_ == ph) return true;
+
+    sidebar_bitmap_.reset();
+    sidebar_srv_.reset();
+    sidebar_tex_.reset();
+
+    D3D11_TEXTURE2D_DESC desc{};
+    desc.Width = pw;
+    desc.Height = ph;
+    desc.MipLevels = 1;
+    desc.ArraySize = 1;
+    desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    desc.SampleDesc.Count = 1;
+    desc.Usage = D3D11_USAGE_DEFAULT;
+    desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+    if (FAILED(d3d_device_->CreateTexture2D(&desc, nullptr, sidebar_tex_.put())))
+        return false;
+    if (FAILED(d3d_device_->CreateShaderResourceView(sidebar_tex_.get(), nullptr,
+                                                     sidebar_srv_.put())))
+        return false;
+    ComPtr<IDXGISurface> surface;
+    if (FAILED(sidebar_tex_->QueryInterface(__uuidof(IDXGISurface), (void**)surface.put())))
+        return false;
+    D2D1_BITMAP_PROPERTIES1 props = D2D1::BitmapProperties1(
+        D2D1_BITMAP_OPTIONS_TARGET,
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED),
+        96.0f * scale_, 96.0f * scale_);
+    if (FAILED(main_context_->CreateBitmapFromDxgiSurface(surface.get(), &props,
+                                                          sidebar_bitmap_.put())))
+        return false;
+    sidebar_px_w_ = pw;
+    sidebar_px_h_ = ph;
+    return true;
+}
+
 bool Renderer::capture_begin(float width, float height, float translate_x, float translate_y) {
-    if (!main_context_) return false;
-    if (!cap_rt_ || capture_width_ != UINT(width) || capture_height_ != UINT(height)) {
-        cap_rt_.reset();
-        capture_.reset();
-        D2D1_SIZE_F size = D2D1::SizeF(width, height);
-        D2D1_SIZE_U pixel_size = D2D1::SizeU(std::max<UINT>(1, UINT(width * scale_)),
-                                             std::max<UINT>(1, UINT(height * scale_)));
-        D2D1_PIXEL_FORMAT fmt = D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,
-                                                  D2D1_ALPHA_MODE_PREMULTIPLIED);
-        if (FAILED(main_context_->CreateCompatibleRenderTarget(
-                &size, &pixel_size, &fmt,
-                D2D1_COMPATIBLE_RENDER_TARGET_OPTIONS_NONE, cap_rt_.put())))
-            return false;
-        if (FAILED(cap_rt_->GetBitmap(capture_.put()))) return false;
-        capture_width_ = UINT(width);
-        capture_height_ = UINT(height);
+    if (!main_context_ || !render_target_) return false;
+    if (hwnd_) {
+        UINT dpi = GetDpiForWindow(hwnd_);
+        if (dpi > 0) scale_ = dpi / 96.0f;
     }
-    cap_rt_->BeginDraw();
-    cap_rt_->Clear(D2D1::ColorF(0, 0.0f));
+    if (!ensure_sidebar_surface(width, height)) return false;
+    main_context_->SetTarget(sidebar_bitmap_.get());
+    main_context_->BeginDraw();
+    main_context_->Clear(D2D1::ColorF(0, 0.0f));
     base_transform_ = D2D1::Matrix3x2F::Translation(-translate_x, -translate_y);
-    target_ = cap_rt_.get();
+    target_ = main_context_.get();
     target_->SetTransform(base_transform_);
     return true;
 }
 
 void Renderer::capture_end() {
-    if (!cap_rt_) return;
-    cap_rt_->EndDraw();
+    if (!main_context_) return;
+    HRESULT hr = main_context_->EndDraw();
+    if (FAILED(hr) && hr != D2DERR_RECREATE_TARGET) {
+        sidebar_bitmap_.reset();
+        sidebar_srv_.reset();
+        sidebar_tex_.reset();
+    }
+    main_context_->SetTarget(render_target_.get());
     target_ = d2d_context_;
     base_transform_ = D2D1::Matrix3x2F::Scale(scale_, scale_);
     if (target_) target_->SetTransform(base_transform_);
 }
 
-bool Renderer::draw_capture_3d(const D2D1_RECT_F& rect, float angle_degrees) {
-    if (!d2d_context_ || !capture_) return false;
-    if (!perspective_) {
-        HRESULT hr = d2d_context_->CreateEffect(CLSID_D2D13DPerspectiveTransform,
-                                               perspective_.put());
-        if (FAILED(hr)) return false;
-    }
-    perspective_->SetInput(0, capture_.get());
+bool Renderer::ensure_quad_pipeline() {
+    if (quad_ok_) return true;
+    if (!d3d_device_) return false;
+
+    static const char* vs_src =
+        "cbuffer QuadCB : register(b0) { float2 half_dip; float2 pad; };\n"
+        "struct VSIn { float2 pos : POSITION; float2 uv : TEXCOORD0; float w : TEXCOORD1; };\n"
+        "struct VSOut { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; };\n"
+        "VSOut VSMain(VSIn i) {\n"
+        "  float2 ndc = float2(i.pos.x / half_dip.x - 1.0f, 1.0f - i.pos.y / half_dip.y);\n"
+        "  VSOut o;\n"
+        "  o.pos = float4(ndc * i.w, 0.0f, i.w);\n"
+        "  o.uv = i.uv;\n"
+        "  return o;\n"
+        "}\n";
+    static const char* ps_src =
+        "Texture2D sideTex : register(t0);\n"
+        "SamplerState sideSamp : register(s0);\n"
+        "float4 PSMain(float4 pos : SV_POSITION, float2 uv : TEXCOORD0) : SV_Target {\n"
+        "  return sideTex.Sample(sideSamp, uv);\n"
+        "}\n";
+
+    ComPtr<ID3DBlob> vs_blob, ps_blob, errors;
+    if (FAILED(D3DCompile(vs_src, strlen(vs_src), nullptr, nullptr, nullptr, "VSMain",
+                          "vs_4_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, vs_blob.put(),
+                          errors.put())))
+        return false;
+    errors.reset();
+    if (FAILED(D3DCompile(ps_src, strlen(ps_src), nullptr, nullptr, nullptr, "PSMain",
+                          "ps_4_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, ps_blob.put(),
+                          errors.put())))
+        return false;
+    if (FAILED(d3d_device_->CreateVertexShader(vs_blob->GetBufferPointer(),
+                                               vs_blob->GetBufferSize(), nullptr,
+                                               quad_vs_.put())))
+        return false;
+    if (FAILED(d3d_device_->CreatePixelShader(ps_blob->GetBufferPointer(),
+                                              ps_blob->GetBufferSize(), nullptr,
+                                              quad_ps_.put())))
+        return false;
+
+    D3D11_INPUT_ELEMENT_DESC layout[] = {
+        { "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+        { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 8, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+        { "TEXCOORD", 1, DXGI_FORMAT_R32_FLOAT, 0, 16, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+    };
+    if (FAILED(d3d_device_->CreateInputLayout(layout, UINT(std::size(layout)),
+                                              vs_blob->GetBufferPointer(),
+                                              vs_blob->GetBufferSize(),
+                                              quad_layout_.put())))
+        return false;
+
+    D3D11_BUFFER_DESC vb_desc{};
+    vb_desc.ByteWidth = sizeof(float) * 5 * 4;
+    vb_desc.Usage = D3D11_USAGE_DYNAMIC;
+    vb_desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+    vb_desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+    if (FAILED(d3d_device_->CreateBuffer(&vb_desc, nullptr, quad_vb_.put()))) return false;
+
+    const unsigned short indices[6] = { 0, 1, 2, 0, 2, 3 };
+    D3D11_BUFFER_DESC ib_desc{};
+    ib_desc.ByteWidth = sizeof(indices);
+    ib_desc.Usage = D3D11_USAGE_IMMUTABLE;
+    ib_desc.BindFlags = D3D11_BIND_INDEX_BUFFER;
+    D3D11_SUBRESOURCE_DATA ib_data{};
+    ib_data.pSysMem = indices;
+    if (FAILED(d3d_device_->CreateBuffer(&ib_desc, &ib_data, quad_ib_.put()))) return false;
+
+    D3D11_BUFFER_DESC cb_desc{};
+    cb_desc.ByteWidth = 16;
+    cb_desc.Usage = D3D11_USAGE_DYNAMIC;
+    cb_desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    cb_desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+    if (FAILED(d3d_device_->CreateBuffer(&cb_desc, nullptr, quad_cb_.put()))) return false;
+
+    D3D11_SAMPLER_DESC samp{};
+    samp.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    samp.AddressU = samp.AddressV = samp.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+    samp.ComparisonFunc = D3D11_COMPARISON_NEVER;
+    samp.MaxLOD = D3D11_FLOAT32_MAX;
+    if (FAILED(d3d_device_->CreateSamplerState(&samp, quad_sampler_.put()))) return false;
+
+    D3D11_BLEND_DESC blend{};
+    blend.RenderTarget[0].BlendEnable = TRUE;
+    blend.RenderTarget[0].SrcBlend = D3D11_BLEND_ONE;
+    blend.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
+    blend.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+    blend.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
+    blend.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
+    blend.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
+    blend.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+    if (FAILED(d3d_device_->CreateBlendState(&blend, quad_blend_.put()))) return false;
+
+    D3D11_RASTERIZER_DESC raster{};
+    raster.FillMode = D3D11_FILL_SOLID;
+    raster.CullMode = D3D11_CULL_NONE;
+    raster.DepthClipEnable = TRUE;
+    if (FAILED(d3d_device_->CreateRasterizerState(&raster, quad_raster_.put()))) return false;
+
+    quad_ok_ = true;
+    return true;
+}
+
+bool Renderer::sidebar_3d_ready() {
+    return ensure_quad_pipeline() && sidebar_srv_ && backbuffer_rtv_;
+}
+
+bool Renderer::draw_sidebar_3d(const D2D1_RECT_F& rect, float angle_degrees) {
+    if (!sidebar_3d_ready() || !d3d_context_ || !sidebar_bitmap_) return false;
     float w = rect.right - rect.left;
     float h = rect.bottom - rect.top;
-    // Rotation origin/depth must stay in sync with App::sidebar_quad, which
-    // mirrors this geometry for hit testing and menu anchoring.
-    FLOAT depth = 900.0f;
-    INT32 mode = D2D1_3DPERSPECTIVETRANSFORM_INTERPOLATION_MODE_LINEAR;
-    perspective_->SetValue(D2D1_3DPERSPECTIVETRANSFORM_PROP_INTERPOLATION_MODE,
-                           reinterpret_cast<const BYTE*>(&mode), UINT32(sizeof(mode)));
-    perspective_->SetValue(D2D1_3DPERSPECTIVETRANSFORM_PROP_DEPTH,
-                           reinterpret_cast<const BYTE*>(&depth), UINT32(sizeof(depth)));
-    D2D1_VECTOR_2F viewer{ w * 0.5f, h * 0.5f };
-    perspective_->SetValue(D2D1_3DPERSPECTIVETRANSFORM_PROP_PERSPECTIVE_ORIGIN,
-                           reinterpret_cast<const BYTE*>(&viewer), UINT32(sizeof(viewer)));
-    D2D1_VECTOR_3F origin{ 0.0f, h * 0.5f, 0.0f };
-    perspective_->SetValue(D2D1_3DPERSPECTIVETRANSFORM_PROP_ROTATION_ORIGIN,
-                           reinterpret_cast<const BYTE*>(&origin), UINT32(sizeof(origin)));
-    D2D1_VECTOR_3F rotation{ 0.0f, angle_degrees, 0.0f };
-    perspective_->SetValue(D2D1_3DPERSPECTIVETRANSFORM_PROP_ROTATION,
-                           reinterpret_cast<const BYTE*>(&rotation), UINT32(sizeof(rotation)));
-    d2d_context_->DrawImage(perspective_.get(), D2D1::Point2F(rect.left, rect.top));
+    if (w <= 0.0f || h <= 0.0f) return false;
+
+    const float depth = 900.0f;
+    float radians = std::fabs(angle_degrees) * 3.14159265358979f / 180.0f;
+    float cs = std::cos(radians);
+    float sn = std::fabs(std::sin(radians));
+    float pivot_y = rect.top + h * 0.5f;
+
+    float verts[4 * 5];
+    const float local[4][2] = {
+        { 0.0f, 0.0f }, { w, 0.0f }, { w, h }, { 0.0f, h },
+    };
+    const float uv[4][2] = {
+        { 0.0f, 0.0f }, { 1.0f, 0.0f }, { 1.0f, 1.0f }, { 0.0f, 1.0f },
+    };
+    for (int i = 0; i < 4; ++i) {
+        float x = local[i][0];
+        float y = local[i][1];
+        float z = x * sn;
+        float s = depth / (depth + z);
+        float* v = verts + i * 5;
+        v[0] = rect.left + x * cs * s;
+        v[1] = pivot_y + (y - h * 0.5f) * s;
+        v[2] = uv[i][0];
+        v[3] = uv[i][1];
+        v[4] = 1.0f / s;
+    }
+
+    D3D11_MAPPED_SUBRESOURCE mapped{};
+    if (FAILED(d3d_context_->Map(quad_vb_.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
+        return false;
+    memcpy(mapped.pData, verts, sizeof(verts));
+    d3d_context_->Unmap(quad_vb_.get(), 0);
+
+    float cb[4] = { float(width_) / scale_ * 0.5f, float(height_) / scale_ * 0.5f, 0.0f,
+                    0.0f };
+    if (FAILED(d3d_context_->Map(quad_cb_.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
+        return false;
+    memcpy(mapped.pData, cb, sizeof(cb));
+    d3d_context_->Unmap(quad_cb_.get(), 0);
+
+    ID3D11RenderTargetView* rtv = backbuffer_rtv_.get();
+    d3d_context_->OMSetRenderTargets(1, &rtv, nullptr);
+    D3D11_VIEWPORT viewport{ 0.0f, 0.0f, float(width_), float(height_), 0.0f, 1.0f };
+    d3d_context_->RSSetViewports(1, &viewport);
+    d3d_context_->IASetInputLayout(quad_layout_.get());
+    d3d_context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    UINT stride = sizeof(float) * 5, offset = 0;
+    ID3D11Buffer* vb = quad_vb_.get();
+    d3d_context_->IASetVertexBuffers(0, 1, &vb, &stride, &offset);
+    d3d_context_->IASetIndexBuffer(quad_ib_.get(), DXGI_FORMAT_R16_UINT, 0);
+    d3d_context_->VSSetShader(quad_vs_.get(), nullptr, 0);
+    ID3D11Buffer* cb_buf = quad_cb_.get();
+    d3d_context_->VSSetConstantBuffers(0, 1, &cb_buf);
+    d3d_context_->PSSetShader(quad_ps_.get(), nullptr, 0);
+    ID3D11ShaderResourceView* srv = sidebar_srv_.get();
+    d3d_context_->PSSetShaderResources(0, 1, &srv);
+    ID3D11SamplerState* sampler = quad_sampler_.get();
+    d3d_context_->PSSetSamplers(0, 1, &sampler);
+    d3d_context_->OMSetBlendState(quad_blend_.get(), nullptr, 0xFFFFFFFF);
+    d3d_context_->RSSetState(quad_raster_.get());
+    d3d_context_->DrawIndexed(6, 0, 0);
+
+    ID3D11ShaderResourceView* null_srv = nullptr;
+    d3d_context_->PSSetShaderResources(0, 1, &null_srv);
     return true;
 }
 

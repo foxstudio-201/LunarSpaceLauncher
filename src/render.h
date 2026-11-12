@@ -26,6 +26,11 @@ public:
     void end();
     bool ready() const { return !!render_target_; }
 
+    // Splits the frame so a D3D11 pass can run between the UI body and the
+    // floating overlays (menu, toasts, modal, splash) on the same backbuffer.
+    bool end_main();
+    void begin_overlay();
+
     ID2D1Bitmap* image(const std::wstring& path);
     void unload(const std::wstring& path);
 
@@ -50,12 +55,17 @@ public:
     void clip_pop();
     void opacity_push(float value);
     void opacity_pop();
+
+    // Sidebar offscreen capture + D3D11 perspective quad.
     bool capture_begin(float width, float height, float translate_x, float translate_y);
     void capture_end();
-    bool draw_capture_3d(const D2D1_RECT_F& rect, float angle_degrees);
+    bool sidebar_3d_ready();
+    bool draw_sidebar_3d(const D2D1_RECT_F& rect, float angle_degrees);
 
 private:
     bool create_target();
+    bool ensure_quad_pipeline();
+    bool ensure_sidebar_surface(float width, float height);
     IDWriteTextFormat* format(float size, int weight, bool mono, TextAlign align, bool wrap);
     IDWriteTextLayout* layout(const std::wstring& text, float size, int weight, bool mono,
                               float max_width, float max_height, TextAlign align,
@@ -95,11 +105,24 @@ private:
     std::unordered_map<std::wstring, FormatCache> formats_;
     std::unordered_map<std::wstring, SvgDef> svgs_;
     std::vector<ComPtr<ID2D1Layer>> layers_;
-    ComPtr<ID2D1Bitmap> capture_;
-    ComPtr<ID2D1BitmapRenderTarget> cap_rt_;
+
     ID2D1RenderTarget* target_ = nullptr;
-    ComPtr<ID2D1Effect> perspective_;
-    UINT capture_width_ = 0;
-    UINT capture_height_ = 0;
     D2D1_MATRIX_3X2_F base_transform_ = D2D1::IdentityMatrix();
+
+    ComPtr<ID3D11RenderTargetView> backbuffer_rtv_;
+    ComPtr<ID3D11Texture2D> sidebar_tex_;
+    ComPtr<ID3D11ShaderResourceView> sidebar_srv_;
+    ComPtr<ID2D1Bitmap1> sidebar_bitmap_;
+    ComPtr<ID3D11VertexShader> quad_vs_;
+    ComPtr<ID3D11PixelShader> quad_ps_;
+    ComPtr<ID3D11InputLayout> quad_layout_;
+    ComPtr<ID3D11Buffer> quad_vb_;
+    ComPtr<ID3D11Buffer> quad_ib_;
+    ComPtr<ID3D11Buffer> quad_cb_;
+    ComPtr<ID3D11SamplerState> quad_sampler_;
+    ComPtr<ID3D11BlendState> quad_blend_;
+    ComPtr<ID3D11RasterizerState> quad_raster_;
+    bool quad_ok_ = false;
+    UINT sidebar_px_w_ = 0;
+    UINT sidebar_px_h_ = 0;
 };

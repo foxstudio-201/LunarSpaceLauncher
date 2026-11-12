@@ -5,6 +5,7 @@
 #include "net.h"
 #include "auth.h"
 #include "discord.h"
+#include "anim.h"
 #include <d2d1helper.h>
 #include <windowsx.h>
 #include <shellapi.h>
@@ -58,7 +59,6 @@ float bezier_y(float x, float x1, float y1, float x2, float y2) {
 
 float spring_ease(float x) { return bezier_y(x, 0.34f, 1.45f, 0.64f, 1.0f); }
 
-float menu_ease(float x) { return bezier_y(x, 0.16f, 1.0f, 0.3f, 1.0f); }
 
 float ease_split(float x) {    x = std::clamp(x, 0.0f, 1.0f);
     auto axis = [](float t, float p1, float p2) {
@@ -349,6 +349,7 @@ public:
     void paint();
     void on_resize();
     void on_mouse_move(int px, int py);
+    void on_mouse_leave();
     void on_mouse_down(int px, int py);
     void on_mouse_up(int px, int py);
     void on_double_click(int px, int py);
@@ -451,20 +452,14 @@ private:
     bool tray_added_ = false;
     bool dark_ = true;
     bool theme_animating_ = false;
-    bool pill_animating_ = false;
+    AnimEngine anims_;
     bool pill_pending_ = true;
-    bool pill_show_ = false;
     bool laid_out_ = false;
-    float pill_cur_ = 0.0f, pill_from_ = 0.0f, pill_to_ = 0.0f;
-    ULONGLONG pill_start_ = 0;
+    float pill_cur_ = 0.0f;
     std::unique_ptr<Node> menu_;
     bool menu_open_ = false;
-    bool menu_animating_ = false;
     float menu_t_ = 0.0f;
-    ULONGLONG menu_start_ = 0;
-    bool caret_animating_ = false;
     float caret_cur_ = 0.0f, caret_from_ = 0.0f, caret_to_ = 0.0f;
-    ULONGLONG caret_start_ = 0;
     std::vector<Account> accounts_;
     std::wstring active_id_;
     std::vector<InstanceInfo> instances_;
@@ -488,12 +483,7 @@ private:
     std::wstring shared_dir_;
     bool sidebar_entered_ = false;
     bool sidebar_hover_ = false;
-    bool sidebar_depth_animating_ = false;
     float sidebar_depth_ = 0.0f;
-    float sidebar_from_ = 0.0f;
-    float sidebar_to_ = 0.0f;
-    ULONGLONG sidebar_start_ = 0;
-    unsigned sidebar_duration_ = 700;
     D2D1_RECT_F sidebar_rect_ = D2D1::RectF();
     bool sidebar3d_active_ = false;
     int discord_phase_ = 0;
@@ -529,6 +519,7 @@ private:
     int toast_seq_ = 0;
     float mouse_x_ = 0.0f;
     float mouse_y_ = 0.0f;
+    bool mouse_tracking_ = false;
     bool toast_open_ = false;
     bool toast_close_hover_ = false;
     ULONGLONG toast_last_ = 0;
@@ -3267,11 +3258,11 @@ void App::rebuild_home() {
 }
 
 void App::start_sidebar_depth_anim(float to, unsigned duration) {
-    sidebar_from_ = sidebar_depth_;
-    sidebar_to_ = std::clamp(to, 0.0f, 0.3f);
-    sidebar_start_ = now_ms();
-    sidebar_duration_ = duration ? duration : 1;
-    sidebar_depth_animating_ = true;
+    float target = std::clamp(to, 0.0f, 0.3f);
+    anims_.run(L"sidebar.depth", sidebar_depth_, target, duration ? duration : 1,
+               anim_ease::Spring, [this](float v) {
+                   sidebar_depth_ = std::clamp(v, 0.0f, 0.3f);
+               });
     SetTimer(hwnd_, 2, 16, nullptr);
 }
 
@@ -3389,35 +3380,10 @@ void App::tick() {
         if (ui_theme_animating()) busy = true;
         else theme_animating_ = false;
     }
-    if (pill_animating_) {
-        float t = std::min(1.0f, float(now - pill_start_) / 500.0f);
-        pill_cur_ = pill_from_ + (pill_to_ - pill_from_) * spring_ease(t);
-        ui_set_sidebar_pill(pill_cur_, true);
-        if (t >= 1.0f) pill_animating_ = false; else busy = true;
-    }
-    if (menu_animating_) {
-        float t = std::min(1.0f, float(now - menu_start_) / 200.0f);
-        menu_t_ = menu_ease(t);
-        if (t >= 1.0f) { menu_animating_ = false; menu_t_ = 1.0f; } else busy = true;
-    }
-    if (caret_animating_) {
-        float t = std::min(1.0f, float(now - caret_start_) / 220.0f);
-        caret_cur_ = caret_from_ + (caret_to_ - caret_from_) * spring_ease(t);
-        ui_set_caret_angle(caret_cur_);
-        if (t >= 1.0f) { caret_animating_ = false; caret_cur_ = caret_to_; } else busy = true;
-    }
+    if (anims_.tick(now)) busy = true;
     if (!splash_active() && !sidebar_entered_) {
         sidebar_entered_ = true;
         start_sidebar_depth_anim(0.12f, 700);
-    }
-    if (sidebar_depth_animating_) {
-        float t = std::min(1.0f, float(now - sidebar_start_) / float(sidebar_duration_));
-        sidebar_depth_ = sidebar_from_ + (sidebar_to_ - sidebar_from_) * spring_ease(t);
-        sidebar_depth_ = std::clamp(sidebar_depth_, 0.0f, 0.3f);
-        if (t >= 1.0f) {
-            sidebar_depth_animating_ = false;
-            sidebar_depth_ = sidebar_to_;
-        } else busy = true;
     }
     update_toasts(now);
     if (!toasts_.empty() || (modal_open_ && modal_busy_)) busy = true;
@@ -3632,7 +3598,6 @@ void App::paint() {
         dirty_ = false;
         start_pill_slide();
     }
-    renderer_.begin(ui_color(L"bg"));
     Node* sidebar_node = ui_find(ui_.get(), L"sidebar");
     bool captured = false;
     if (sidebar_node) {
@@ -3646,20 +3611,22 @@ void App::paint() {
             captured = true;
         }
     }
-    ui_set_skip_id(captured ? L"sidebar" : L"");
+    bool use3d = captured && renderer_.sidebar_3d_ready();
+    renderer_.begin(ui_color(L"bg"));
+    ui_set_skip_id(use3d ? L"sidebar" : L"");
     ui_draw(ui_.get(), renderer_, hovered_);
     ui_set_skip_id(L"");
-    sidebar3d_active_ = false;
-    if (captured) {
-        sidebar3d_active_ = renderer_.draw_capture_3d(sidebar_rect_, sidebar_depth_ * 180.0f);
-        if (!sidebar3d_active_) ui_draw(sidebar_node, renderer_, hovered_);
-    }
     if (page_ == L"home" && home_) {
         layout_home();
         renderer_.clip_push(home_slot_rect_);
         ui_draw(home_.get(), renderer_, hovered_);
         renderer_.clip_pop();
     }
+    bool main_ok = renderer_.end_main();
+    sidebar3d_active_ = false;
+    if (use3d && main_ok)
+        sidebar3d_active_ = renderer_.draw_sidebar_3d(sidebar_rect_, sidebar_depth_ * 180.0f);
+    renderer_.begin_overlay();
     draw_account_menu();
     draw_toasts();
     draw_account_modal();
@@ -3681,6 +3648,13 @@ void App::on_dpi_changed() {
 }
 
 void App::on_mouse_move(int px, int py) {
+    if (!mouse_tracking_) {
+        TRACKMOUSEEVENT track{};
+        track.cbSize = sizeof(track);
+        track.dwFlags = TME_LEAVE;
+        track.hwndTrack = hwnd_;
+        mouse_tracking_ = TrackMouseEvent(&track) != FALSE;
+    }
     mouse_x_ = float(px) / renderer_.scale();
     mouse_y_ = float(py) / renderer_.scale();
     if (splash_active()) return;
@@ -3719,6 +3693,17 @@ void App::on_mouse_move(int px, int py) {
     SetCursor(LoadCursorW(nullptr, hit && !hit->action.empty() ? IDC_HAND : IDC_ARROW));
 }
 
+void App::on_mouse_leave() {
+    mouse_tracking_ = false;
+    bool need_paint = hovered_ != nullptr || sidebar_hover_;
+    hovered_ = nullptr;
+    if (sidebar_hover_) {
+        sidebar_hover_ = false;
+        if (sidebar_entered_) start_sidebar_depth_anim(0.12f, 320);
+    }
+    if (need_paint) InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
 std::wstring App::settings_path() const {
     wchar_t dir[MAX_PATH]{};
     DWORD len = GetEnvironmentVariableW(L"APPDATA", dir, MAX_PATH);
@@ -3747,26 +3732,26 @@ void App::start_pill_slide() {
     Node* nav = id.empty() ? nullptr : ui_find(ui_.get(), id);
     if (!nav) {
         ui_set_sidebar_pill(0.0f, false);
-        pill_show_ = false;
-        pill_animating_ = false;
+        anims_.cancel(L"sidebar.pill");
         return;
     }
     float target = nav->rect.top;
-    pill_show_ = true;
     if (pill_pending_) {
-        pill_cur_ = pill_from_ = pill_to_ = target;
+        pill_cur_ = target;
         pill_pending_ = false;
         ui_set_sidebar_pill(target, true);
         return;
     }
     if (std::fabs(target - pill_cur_) < 0.5f) {
+        anims_.cancel(L"sidebar.pill");
         ui_set_sidebar_pill(pill_cur_, true);
         return;
     }
-    pill_from_ = pill_cur_;
-    pill_to_ = target;
-    pill_start_ = now_ms();
-    pill_animating_ = true;
+    anims_.run(L"sidebar.pill", pill_cur_, target, 500, anim_ease::Spring,
+               [this](float v) {
+                   pill_cur_ = v;
+                   ui_set_sidebar_pill(v, true);
+               });
     SetTimer(hwnd_, 2, 16, nullptr);
 }
 
@@ -3776,13 +3761,16 @@ void App::toggle_account_menu() {
         return;
     }
     menu_open_ = true;
-    menu_animating_ = true;
     menu_t_ = 0.0f;
-    menu_start_ = now_ms();
     caret_from_ = caret_cur_;
     caret_to_ = 180.0f;
-    caret_start_ = now_ms();
-    caret_animating_ = true;
+    anims_.run(L"menu.open", 0.0f, 1.0f, 200, anim_ease::Menu,
+               [this](float v) { menu_t_ = v; });
+    anims_.run(L"menu.caret", caret_from_, caret_to_, 220, anim_ease::Spring,
+               [this](float v) {
+                   caret_cur_ = v;
+                   ui_set_caret_angle(v);
+               });
     if (Node* acct = ui_find(ui_.get(), L"acct-btn"))
         acct->style.bg = ui_token(L"surfaceActive");
     SetTimer(hwnd_, 2, 16, nullptr);
@@ -3792,13 +3780,16 @@ void App::toggle_account_menu() {
 void App::close_account_menu() {
     if (!menu_open_) return;
     menu_open_ = false;
-    menu_animating_ = false;
+    anims_.cancel(L"menu.open");
     menu_t_ = 1.0f;
     hovered_ = nullptr;
     caret_from_ = caret_cur_;
     caret_to_ = 0.0f;
-    caret_start_ = now_ms();
-    caret_animating_ = true;
+    anims_.run(L"menu.caret", caret_from_, caret_to_, 220, anim_ease::Spring,
+               [this](float v) {
+                   caret_cur_ = v;
+                   ui_set_caret_angle(v);
+               });
     if (Node* acct = ui_find(ui_.get(), L"acct-btn"))
         acct->style.bg = ui_token(page_ == L"accounts" ? L"surfaceActive" : L"hover");
     SetTimer(hwnd_, 2, 16, nullptr);
@@ -4289,6 +4280,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         case WM_MOUSEMOVE:
             if (app) app->on_mouse_move(GET_X_LPARAM(lp), GET_Y_LPARAM(lp));
+            return 0;
+        case WM_MOUSELEAVE:
+            if (app) app->on_mouse_leave();
             return 0;
         case WM_LBUTTONDOWN:
             if (app) app->on_mouse_down(GET_X_LPARAM(lp), GET_Y_LPARAM(lp));
