@@ -5321,6 +5321,8 @@ void App::draw_account_menu() {
     if (y < 8.0f) y = 8.0f;
     if (x + menu_w > w - 8.0f) x = w - 8.0f - menu_w;
     (void)h;
+    // Popup needs an opaque card; the wallpaper palette's surface is translucent.
+    menu_->style.bg = theme_locked_ ? Color::rgb(0x13171F) : ui_token(L"surface");
     ui_layout(menu_.get(), menu_w, menu_h, renderer_);
     ui_move(menu_.get(), x, y + 6.0f * (1.0f - menu_t_));
     renderer_.opacity_push(menu_t_);
