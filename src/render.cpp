@@ -745,6 +745,183 @@ bool Renderer::draw_sidebar_item_3d(const D2D1_RECT_F& rect, const D2D1_RECT_F& 
     return true;
 }
 
+bool Renderer::ensure_glass_bitmap(const std::wstring& image_path, float width, float height,
+                                   float stddev) {
+    if (!main_context_ || image_path.empty() || width < 4.0f || height < 4.0f) return false;
+    UINT pw = std::max<UINT>(1, UINT(width * scale_ + 0.5f));
+    UINT ph = std::max<UINT>(1, UINT(height * scale_ + 0.5f));
+    wchar_t key[512];
+    swprintf(key, 512, L"%ls|%u|%u|%.1f", image_path.c_str(), pw, ph, stddev);
+    if (glass_bitmap_ && glass_key_ == key) return true;
+    glass_bitmap_.reset();
+    glass_key_.clear();
+    glass_width_ = width;
+    glass_height_ = height;
+
+    ID2D1Bitmap* source_image = image(image_path);
+    if (!source_image) return false;
+
+    // Cheap backdrop blur: squash the covered wallpaper into a tiny bitmap and
+    // let the GPU interpolate it back up to full screen under the glass tint.
+    float small_w = std::max(48.0f, width / 12.0f);
+    float small_h = std::max(32.0f, height / 12.0f);
+    D2D1_SIZE_F size = D2D1::SizeF(small_w, small_h);
+    D2D1_SIZE_U pixel_size = D2D1::SizeU(std::max<UINT>(1, UINT(small_w * scale_ + 0.5f)),
+                                         std::max<UINT>(1, UINT(small_h * scale_ + 0.5f)));
+    D2D1_PIXEL_FORMAT fmt =
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED);
+    ComPtr<ID2D1BitmapRenderTarget> cover;
+    if (FAILED(main_context_->CreateCompatibleRenderTarget(
+            &size, &pixel_size, &fmt, D2D1_COMPATIBLE_RENDER_TARGET_OPTIONS_NONE, cover.put())))
+        return false;
+    cover->BeginDraw();
+    cover->Clear(D2D1::ColorF(0, 0.0f));
+    D2D1_SIZE_F isize = source_image->GetSize();
+    float cover_scale = std::max(width / std::max(isize.width, 1.0f),
+                                 height / std::max(isize.height, 1.0f));
+    float sw = width / cover_scale;
+    float sh = height / cover_scale;
+    D2D1_RECT_F src = D2D1::RectF((isize.width - sw) * 0.5f, (isize.height - sh) * 0.5f,
+                                  (isize.width + sw) * 0.5f, (isize.height + sh) * 0.5f);
+    cover->DrawBitmap(source_image, D2D1::RectF(0.0f, 0.0f, small_w, small_h), 1.0f,
+                      D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, &src);
+    if (FAILED(cover->EndDraw())) return false;
+    if (FAILED(cover->GetBitmap(glass_bitmap_.put()))) return false;
+    glass_key_ = key;
+    return true;
+}
+
+void Renderer::draw_bitmap_at(ID2D1Bitmap* bitmap, float x, float y, float opacity) {
+    if (!bitmap || opacity <= 0.001f) return;
+    D2D1_SIZE_F size = bitmap->GetSize();
+    target_->DrawBitmap(bitmap, D2D1::RectF(x, y, x + size.width, y + size.height), opacity,
+                        D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+}
+
+void Renderer::draw_glass_backdrop(D2D1_RECT_F rect, float radius, ID2D1Bitmap* bitmap) {
+    if (!bitmap || !d2d_factory_) return;
+    float r = std::max(0.0f, radius);
+    ComPtr<ID2D1RoundedRectangleGeometry> geometry;
+    d2d_factory_->CreateRoundedRectangleGeometry(D2D1::RoundedRect(rect, r, r), geometry.put());
+    if (!geometry) return;
+    ComPtr<ID2D1Layer> layer;
+    if (FAILED(target_->CreateLayer(nullptr, layer.put())) || !layer) return;
+    D2D1_LAYER_PARAMETERS params = D2D1::LayerParameters(
+        D2D1::InfiniteRect(), geometry.get(), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+        D2D1::IdentityMatrix(), 1.0f, nullptr, D2D1_LAYER_OPTIONS_NONE);
+    target_->PushLayer(params, layer.get());
+    target_->DrawBitmap(bitmap, D2D1::RectF(0.0f, 0.0f, glass_width_, glass_height_), 1.0f,
+                        D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+    target_->PopLayer();
+}
+
+ID3D11ShaderResourceView* Renderer::wallpaper_srv(const std::wstring& path) {
+    if (path.empty() || !d3d_device_) return nullptr;
+    auto it = wallpapers_.find(path);
+    if (it != wallpapers_.end()) return it->second.get();
+    std::vector<unsigned char> pixels;
+    unsigned w = 0, h = 0;
+    if (!load_pixels(path, pixels, w, h) || w == 0 || h == 0) return nullptr;
+    D3D11_TEXTURE2D_DESC desc{};
+    desc.Width = w;
+    desc.Height = h;
+    desc.MipLevels = 1;
+    desc.ArraySize = 1;
+    desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    desc.SampleDesc.Count = 1;
+    desc.Usage = D3D11_USAGE_IMMUTABLE;
+    desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    D3D11_SUBRESOURCE_DATA data{};
+    data.pSysMem = pixels.data();
+    data.SysMemPitch = w * 4;
+    ComPtr<ID3D11Texture2D> texture;
+    if (FAILED(d3d_device_->CreateTexture2D(&desc, &data, texture.put()))) return nullptr;
+    ComPtr<ID3D11ShaderResourceView> srv;
+    if (FAILED(d3d_device_->CreateShaderResourceView(texture.get(), nullptr, srv.put())))
+        return nullptr;
+    wallpapers_.emplace(path, std::move(srv));
+    return wallpapers_[path].get();
+}
+
+static void wallpaper_cover_uv(ID3D11ShaderResourceView* srv, float width, float height,
+                               float* uv) {
+    if (!srv) {
+        uv[0] = uv[1] = 0.0f;
+        uv[2] = uv[3] = 1.0f;
+        return;
+    }
+    ComPtr<ID3D11Resource> resource;
+    srv->GetResource(resource.put());
+    ComPtr<ID3D11Texture2D> texture;
+    if (resource)
+        resource->QueryInterface(__uuidof(ID3D11Texture2D), (void**)texture.put());
+    if (!texture) {
+        uv[0] = uv[1] = 0.0f;
+        uv[2] = uv[3] = 1.0f;
+        return;
+    }
+    D3D11_TEXTURE2D_DESC desc{};
+    texture->GetDesc(&desc);
+    float iw = float(std::max<UINT>(1, desc.Width));
+    float ih = float(std::max<UINT>(1, desc.Height));
+    float scale = std::max(width / iw, height / ih);
+    float vw = width / scale;
+    float vh = height / scale;
+    uv[0] = (iw - vw) * 0.5f / iw;
+    uv[1] = (ih - vh) * 0.5f / ih;
+    uv[2] = (iw + vw) * 0.5f / iw;
+    uv[3] = (ih + vh) * 0.5f / ih;
+}
+
+void Renderer::draw_wallpaper_flip(const std::wstring& old_path, const std::wstring& new_path,
+                                   float progress) {
+    if (!d3d_context_ || !backbuffer_rtv_ || !ensure_quad_pipeline()) return;
+    progress = std::clamp(progress, 0.0f, 1.0f);
+    float w = float(width_) / scale_;
+    float h = float(height_) / scale_;
+    const float depth = 900.0f;
+
+    auto draw_cover = [&](ID3D11ShaderResourceView* srv, float angle_degrees, float alpha) {
+        if (!srv || alpha <= 0.002f) return;
+        float uv[4];
+        wallpaper_cover_uv(srv, w, h, uv);
+        float radians = angle_degrees * 3.14159265358979f / 180.0f;
+        float cs = std::cos(radians);
+        float sn = std::sin(radians);
+        const float local[4][2] = { { 0.0f, 0.0f }, { w, 0.0f }, { w, h }, { 0.0f, h } };
+        const float tex[4][2] = { { uv[0], uv[1] }, { uv[2], uv[1] },
+                                  { uv[2], uv[3] }, { uv[0], uv[3] } };
+        float verts[4 * 5];
+        for (int i = 0; i < 4; ++i) {
+            float dx = local[i][0] - w * 0.5f;
+            float dy = local[i][1] - h * 0.5f;
+            float z = dx * sn;
+            float s = depth / (depth + z);
+            float* v = verts + i * 5;
+            v[0] = w * 0.5f + dx * cs * s;
+            v[1] = h * 0.5f + dy * s;
+            v[2] = tex[i][0];
+            v[3] = tex[i][1];
+            v[4] = 1.0f / s;
+        }
+        const float tint[4] = { 1.0f, 1.0f, 1.0f, alpha };
+        draw_textured_quad(srv, verts, tint);
+    };
+
+    ID3D11ShaderResourceView* old_srv = wallpaper_srv(old_path);
+    ID3D11ShaderResourceView* new_srv = wallpaper_srv(new_path);
+    if (new_srv) {
+        draw_cover(old_srv, 0.0f, 1.0f);
+        draw_cover(new_srv, -(1.0f - progress) * 82.0f,
+                   std::clamp(progress * 1.8f, 0.0f, 1.0f));
+    } else if (old_srv) {
+        draw_cover(old_srv, progress * 82.0f, std::clamp(1.0f - progress * 1.4f, 0.0f, 1.0f));
+    }
+    ID3D11ShaderResourceView* null_srv = nullptr;
+    d3d_context_->PSSetShaderResources(0, 1, &null_srv);
+}
+
+
 namespace {
 
 std::string read_binary(const std::wstring& path) {

@@ -56,6 +56,14 @@ public:
     void opacity_push(float value);
     void opacity_pop();
 
+    bool ensure_glass_bitmap(const std::wstring& image_path, float width, float height,
+                             float stddev);
+    ID2D1Bitmap* glass_bitmap() const { return glass_bitmap_.get(); }
+    void draw_bitmap_at(ID2D1Bitmap* bitmap, float x, float y, float opacity);
+    void draw_glass_backdrop(D2D1_RECT_F rect, float radius, ID2D1Bitmap* bitmap);
+    void draw_wallpaper_flip(const std::wstring& old_path, const std::wstring& new_path,
+                             float progress);
+
     // Sidebar offscreen capture + D3D11 perspective quad.
     bool capture_begin(float width, float height, float translate_x, float translate_y);
     void capture_end();
@@ -79,6 +87,7 @@ private:
                               float* verts) const;
     void project_item_quad(const D2D1_RECT_F& item, const D2D1_RECT_F& sidebar,
                            float angle_degrees, float lift, float* verts) const;
+    ID3D11ShaderResourceView* wallpaper_srv(const std::wstring& path);
     IDWriteTextFormat* format(float size, int weight, bool mono, TextAlign align, bool wrap);
     IDWriteTextLayout* layout(const std::wstring& text, float size, int weight, bool mono,
                               float max_width, float max_height, TextAlign align,
@@ -143,4 +152,9 @@ private:
     UINT sidebar_px_h_ = 0;
     UINT item_px_w_ = 0;
     UINT item_px_h_ = 0;
+    ComPtr<ID2D1Bitmap> glass_bitmap_;
+    std::wstring glass_key_;
+    float glass_width_ = 0.0f;
+    float glass_height_ = 0.0f;
+    std::unordered_map<std::wstring, ComPtr<ID3D11ShaderResourceView>> wallpapers_;
 };

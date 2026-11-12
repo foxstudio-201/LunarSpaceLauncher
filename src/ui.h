@@ -34,6 +34,7 @@ struct Style {
     Color hover_bg;
     Color hover_color;
     float hover_opacity = -1.0f;
+    bool glass = false;
 };
 
 struct Node {
@@ -68,3 +69,4 @@ void ui_set_caret_angle(float degrees);
 void ui_set_visible(Node* node, bool visible);
 void ui_set_skip_id(const wchar_t* id);
 void ui_set_skip_node(Node* node);
+void ui_set_glass(bool enabled, ID2D1Bitmap* bitmap);

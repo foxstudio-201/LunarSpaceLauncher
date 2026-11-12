@@ -23,6 +23,8 @@ bool g_pill_show = false;
 float g_caret_angle = 0.0f;
 std::wstring g_skip_id;
 Node* g_skip_node = nullptr;
+bool g_glass = false;
+ID2D1Bitmap* g_glass_bitmap = nullptr;
 
 Palette make_palette(bool dark) {
     if (dark) {
@@ -565,6 +567,11 @@ void ui_set_skip_id(const wchar_t* id) { g_skip_id = id ? id : L""; }
 
 void ui_set_skip_node(Node* node) { g_skip_node = node; }
 
+void ui_set_glass(bool enabled, ID2D1Bitmap* bitmap) {
+    g_glass = enabled;
+    g_glass_bitmap = bitmap;
+}
+
 static Color cv(const Color& color) {
     if (color.r <= kTokenBase + 0.5f) {
         int index = int(kTokenBase - color.r);
@@ -682,8 +689,15 @@ static void draw_node(Node* node, Renderer& renderer, Node* hovered, bool inside
         draw_theme_switch(renderer, r, st.opacity);
         return;
     }
-    if (cv(st.bg).visible())
+    if (cv(st.bg).visible() &&
+        (!g_glass || !st.glass || !g_glass_bitmap))
         renderer.fill_rect(r, st.radius, cv(st.bg), st.opacity);
+    if (g_glass && st.glass && g_glass_bitmap) {
+        renderer.draw_glass_backdrop(r, st.radius, g_glass_bitmap);
+        Color tint = g_dark ? Color::rgb(0x0B0E13, 0.46f)
+                            : Color::rgb(0xFFFFFF, 0.52f);
+        renderer.fill_rect(r, st.radius, tint, st.opacity);
+    }
     if (!st.bg_image.empty()) {
         renderer.draw_image_path(st.bg_image, r, st.radius, st.opacity);
     }

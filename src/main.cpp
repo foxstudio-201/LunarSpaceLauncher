@@ -464,6 +464,7 @@ private:
     void apply_background_result(BgResult* result);
     void start_background_download(const std::wstring& id);
     void apply_background(const std::wstring& id);
+    std::wstring background_file(const std::wstring& id) const;
     void save_user_setting(const std::string& key, Json value);
     void browse_java_exe();
     void remove_java_dir(const std::wstring& dir);
@@ -570,6 +571,10 @@ private:
     std::vector<BgItem> bg_items_;
     std::wstring bg_busy_;
     std::wstring settings_error_;
+    bool bg_flipping_ = false;
+    float bg_flip_t_ = 0.0f;
+    std::wstring bg_flip_from_;
+    std::wstring bg_flip_to_;
     JavaState java_state_;
     bool java_loading_ = false;
     std::wstring zulu_major_ = L"21";
@@ -785,6 +790,12 @@ void App::ui_apply_page() {
         acct->style.bg = ui_token(page_ == L"accounts" ? L"surfaceActive" : L"hover");
         acct->style.accent = false;
     }
+    if (Node* acct_card = ui_find(ui_.get(), L"accounts-card"))
+        acct_card->style.glass = true;
+    if (Node* titlebar = ui_find(ui_.get(), L"titlebar"))
+        titlebar->style.glass = true;
+    if (Node* header = ui_find(ui_.get(), L"content-header"))
+        header->style.glass = true;
     if (page_ == L"settings" && last_page_ != L"settings") settings_scroll_ = 0.0f;
     last_page_ = page_;
     if (page_ == L"settings") {
@@ -835,13 +846,9 @@ void App::load_data() {
     discord_invite_ = utf8_to_wide(root.text("discordInvite", "https://discord.gg/8UQZTkRSGp"));
     load_settings_page_state();
     if (!background_id_.empty() && background_id_ != L"theme") {
-        std::wstring file;
-        for (const auto& item : bg_items_)
-            if (item.id == background_id_ && item.ready) { file = item.file; break; }
-        if (Node* root_node = ui_find(ui_.get(), L"root")) {
+        std::wstring file = background_file(background_id_);
+        if (Node* root_node = ui_find(ui_.get(), L"root"))
             root_node->style.bg_image = file;
-            if (!file.empty()) root_node->style.overlay = Color::rgb(0x06090D, 0.62f);
-        }
     }
 
     Json skin_cache;
@@ -2807,6 +2814,7 @@ void App::rebuild_home() {
         node->style.border = true;
         node->style.border_color = ui_token(L"border");
         node->style.radius = 14.0f;
+        node->style.glass = true;
         return node;
     };
     auto chip = [&](const std::wstring& value, bool dim = false) {
@@ -3498,22 +3506,19 @@ void App::load_settings_page_state() {
     bg_items_.clear();
     std::wstring dir = user_data_dir() + L"\\backgrounds";
     CreateDirectoryW(dir.c_str(), nullptr);
-    struct Def { const wchar_t* id; const wchar_t* name; const wchar_t* ext; bool local; };
+    struct Def { const wchar_t* id; const wchar_t* name; const wchar_t* ext; };
     static const Def defs[] = {
-        { L"1123121", L"Mặc định", L"png", true },
-        { L"984658", L"984658", L"jpg", false },
-        { L"1224149", L"1224149", L"png", false },
-        { L"1265740", L"1265740", L"png", false },
-        { L"1373816", L"1373816", L"png", false },
-        { L"1402908", L"1402908", L"png", false },
+        { L"984658", L"984658", L"jpg" },
+        { L"1224149", L"1224149", L"png" },
+        { L"1265740", L"1265740", L"png" },
+        { L"1373816", L"1373816", L"png" },
+        { L"1402908", L"1402908", L"png" },
     };
     for (const auto& def : defs) {
         BgItem item;
         item.id = def.id;
         item.name = def.name;
         item.ext = def.ext;
-        item.local = def.local;
-        if (def.local) item.file = asset(L"assets\\img\\minecraft-background.png");
         std::wstring downloaded = dir + L"\\" + item.id + L"." + item.ext;
         if (file_exists_w(downloaded)) item.file = downloaded;
         item.ready = !item.file.empty() && file_exists_w(item.file);
@@ -3521,22 +3526,41 @@ void App::load_settings_page_state() {
     }
 }
 
+std::wstring App::background_file(const std::wstring& id) const {
+    if (id.empty() || id == L"theme") return L"";
+    for (const auto& item : bg_items_)
+        if (item.id == id && item.ready) return item.file;
+    return L"";
+}
+
 void App::apply_background(const std::wstring& id) {
-    std::wstring file;
-    if (id != L"theme") {
-        for (const auto& item : bg_items_)
-            if (item.id == id && item.ready) { file = item.file; break; }
-        if (file.empty()) {
-            notify(L"Ảnh nền", L"Ảnh chưa được tải về.", L"error");
-            return;
-        }
+    std::wstring file = background_file(id);
+    if (id != L"theme" && file.empty()) {
+        notify(L"Ảnh nền", L"Ảnh chưa được tải về.", L"error");
+        return;
     }
+    std::wstring old_file = background_file(background_id_);
+    bool changed = id != background_id_;
     background_id_ = id;
-    if (Node* root = ui_find(ui_.get(), L"root")) {
-        root->style.bg_image = id == L"theme" ? L"" : file;
-        root->style.overlay = id == L"theme" ? Color{} : Color::rgb(0x06090D, 0.62f);
-    }
     save_user_setting("background", Json::string(wide_to_utf8(id)));
+    Node* root = ui_find(ui_.get(), L"root");
+    if (root) {
+        root->style.bg_image = L"";
+        root->style.overlay = Color{};
+    }
+    anims_.cancel(L"background.flip");
+    bg_flipping_ = false;
+    if (changed && effects_enabled_ && (old_file != file) && !splash_active()) {
+        bg_flipping_ = true;
+        bg_flip_t_ = 0.0f;
+        bg_flip_from_ = old_file;
+        bg_flip_to_ = file;
+        anims_.run(L"background.flip", 0.0f, 1.0f, 650, anim_ease::OutCubic,
+                   [this](float v) { bg_flip_t_ = v; });
+        SetTimer(hwnd_, 2, 16, nullptr);
+    } else if (root) {
+        root->style.bg_image = file;
+    }
     rebuild_settings();
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
@@ -3879,6 +3903,7 @@ void App::rebuild_settings() {
         node->style.border = true;
         node->style.border_color = ui_token(L"border");
         node->style.radius = 14.0f;
+        node->style.glass = true;
         return node;
     };
     auto sep = [&]() {
@@ -4125,7 +4150,6 @@ void App::rebuild_settings() {
             backgrounds->kids.push_back(std::move(grid));
             backgrounds->kids.push_back(spacer(0, 10));
         };
-        add_grid_row();
         add_grid_row();
         add_grid_row();
     }
@@ -4787,6 +4811,13 @@ void App::tick() {
         else theme_animating_ = false;
     }
     if (anims_.tick(now)) busy = true;
+    if (bg_flipping_ && !anims_.active(L"background.flip")) {
+        bg_flipping_ = false;
+        bg_flip_t_ = 0.0f;
+        if (Node* root = ui_find(ui_.get(), L"root"))
+            root->style.bg_image = background_file(background_id_);
+        InvalidateRect(hwnd_, nullptr, FALSE);
+    }
     update_toasts(now);
     if (!toasts_.empty() || (modal_open_ && modal_busy_)) busy = true;
     if (busy) InvalidateRect(hwnd_, nullptr, FALSE);
@@ -5000,6 +5031,17 @@ void App::paint() {
         dirty_ = false;
         start_pill_slide();
     }
+    std::wstring wallpaper = background_file(background_id_);
+    if (!wallpaper.empty()) {
+        float wdip = float(rc.right - rc.left) / renderer_.scale();
+        float hdip = float(rc.bottom - rc.top) / renderer_.scale();
+        if (renderer_.ensure_glass_bitmap(wallpaper, wdip, hdip, 22.0f))
+            ui_set_glass(true, renderer_.glass_bitmap());
+        else
+            ui_set_glass(true, nullptr);
+    } else {
+        ui_set_glass(false, nullptr);
+    }
     Node* sidebar_node = ui_find(ui_.get(), L"sidebar");
     bool captured = false;
     bool item_captured = false;
@@ -5034,6 +5076,11 @@ void App::paint() {
     }
     bool use3d = captured && renderer_.sidebar_3d_ready();
     renderer_.begin(ui_color(L"bg"));
+    if (bg_flipping_ && renderer_.ready()) {
+        renderer_.end_main();
+        renderer_.draw_wallpaper_flip(bg_flip_from_, bg_flip_to_, bg_flip_t_);
+        renderer_.begin_overlay();
+    }
     ui_set_skip_id(use3d ? L"sidebar" : L"");
     ui_draw(ui_.get(), renderer_, hovered_);
     ui_set_skip_id(L"");

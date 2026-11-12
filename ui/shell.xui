@@ -143,7 +143,7 @@ column id=root bg=$bg growx=1 growy=1 {
             image src=assets/icons/user-circle.svg width=14 height=14 color=$accent
             text value="Hỗ trợ 3 loại tài khoản: Ngoại tuyến, Microsoft và ely.by. Phiên đăng nhập được lưu trên máy và tự làm mới khi hết hạn." size=11 color=$label wrap=1
           }
-          column growx=1 radius=12 bg=$surface border=1 bordercolor=$border {
+          column id=accounts-card growx=1 radius=12 bg=$surface border=1 bordercolor=$border {
             column id=accounts-list-rows {
             }
           }
