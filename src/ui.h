@@ -33,6 +33,7 @@ struct Style {
     bool accent = false;
     Color hover_bg;
     Color hover_color;
+    float hover_opacity = -1.0f;
 };
 
 struct Node {

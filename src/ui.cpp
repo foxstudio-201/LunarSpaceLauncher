@@ -341,6 +341,7 @@ void parse_attr(Lexer& lx, Node& node) {
     else if (key == L"hoverbg") node.style.hover_bg = parse_color(val);
     else if (key == L"hovercolor") node.style.hover_color = parse_color(val);
     else if (key == L"nohoverbg") node.style.no_hover_bg = lx.number() != 0.0f;
+    else if (key == L"hoveropacity") node.style.hover_opacity = lx.number(1.0f);
     else if (key == L"justify") node.style.center_main = val == L"center";
     else if (key == L"paddingleft") node.style.pad_l = lx.number();
     else if (key == L"paddingright") node.style.pad_r = lx.number();
@@ -698,16 +699,18 @@ static void draw_node(Node* node, Renderer& renderer, Node* hovered, bool inside
             break;
         }
         case Kind::Image: {
+            float image_opacity = (hover_inside && st.hover_opacity >= 0.0f) ? st.hover_opacity
+                                                                           : st.opacity;
             std::wstring lower = node->src;
             for (auto& ch : lower) ch = wchar_t(towlower(ch));
             if (lower.size() > 4 && lower.substr(lower.size() - 4) == L".svg") {
                 Color tint = (hover_inside && cv(st.hover_color).visible()) ? cv(st.hover_color)
                                                                            : cv(st.color);
-                renderer.draw_svg(node->src, r, tint, st.opacity,
+                renderer.draw_svg(node->src, r, tint, image_opacity,
                                   node->id == L"acct-caret" ? g_caret_angle : 0.0f);
             }
             else
-                renderer.draw_image_path(node->src, r, st.radius, st.opacity);
+                renderer.draw_image_path(node->src, r, st.radius, image_opacity);
             break;
         }
         case Kind::Row:

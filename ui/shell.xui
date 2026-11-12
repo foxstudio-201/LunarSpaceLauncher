@@ -49,41 +49,44 @@ column bg=$bg growx=1 growy=1 {
         image id=icon-modpacks src=assets/icons/stack.svg width=22 height=22 color=$label hovercolor=$text
         text id=label-modpacks value="Modpack" size=14 weight=600 color=$label hovercolor=$text
       }
+      spacer height=8
+      spacer height=1 bg=$borderSoft
+      spacer height=4
+
       row id=nav-versions height=48 paddingleft=16 paddingright=10 gap=14 radius=15 nohoverbg=1 action=nav:versions {
         image id=icon-versions src=assets/icons/plus.svg width=22 height=22 color=$label hovercolor=$text
         text id=label-versions value="Tạo phiên bản mới" size=14 weight=600 color=$label hovercolor=$text
       }
 
-      spacer height=8
-      spacer height=1 bg=$borderSoft
-      spacer height=4
-
       row height=48 paddingleft=14 paddingright=10 gap=10 radius=15 nohoverbg=1 action=nav:versions {
-        image src=assets/img/loader-icon/vanilla.png width=26 height=26 radius=6
+        image src=assets/img/loader-icon/vanilla.png width=26 height=26 radius=6 opacity=0.62 hoveropacity=1
         text value="Vanilla 26.2" size=13.5 weight=600 color=$label hovercolor=$text
         spacer growx=1
         text value="●" size=8 color=$faint
       }
-      row height=48 paddingleft=14 paddingright=10 gap=10 radius=15 action=nav:versions {
-        image src=assets/img/loader-icon/fabric.png width=26 height=26 radius=6
+      row height=48 paddingleft=14 paddingright=10 gap=10 radius=15 nohoverbg=1 action=nav:versions {
+        image src=assets/img/loader-icon/fabric.png width=26 height=26 radius=6 opacity=0.62 hoveropacity=1
         text value="BerryRPG" size=13.5 weight=600 color=$label hovercolor=$text
         spacer growx=1
         text value="●" size=8 color=$faint
       }
-      row height=48 paddingleft=14 paddingright=10 gap=10 radius=15 action=nav:versions {
-        image src=assets/img/loader-icon/forge.png width=26 height=26 radius=6
+      row height=48 paddingleft=14 paddingright=10 gap=10 radius=15 nohoverbg=1 action=nav:versions {
+        image src=assets/img/loader-icon/forge.png width=26 height=26 radius=6 opacity=0.62 hoveropacity=1
         text value="XyoCraft" size=13.5 weight=600 color=$label hovercolor=$text
         spacer growx=1
         text value="●" size=8 color=$faint
       }
-      row height=48 paddingleft=14 paddingright=10 gap=10 radius=15 action=nav:versions {
-        image src=assets/img/loader-icon/lunar.png width=26 height=26 radius=6
+      row height=48 paddingleft=14 paddingright=10 gap=10 radius=15 nohoverbg=1 action=nav:versions {
+        image src=assets/img/loader-icon/lunar.png width=26 height=26 radius=6 opacity=0.62 hoveropacity=1
         text value="LunarLoader" size=13.5 weight=600 color=$label hovercolor=$text
         spacer growx=1
         text value="●" size=8 color=$faint
       }
 
       spacer growy=1
+
+      spacer height=8
+      spacer height=1 bg=$borderSoft
 
       row id=acct-btn height=52 paddingleft=10 paddingright=8 gap=8 radius=16 bg=$hover hoverbg=$surfaceActive action=menu:account {
         image id=acct-head src=assets/img/head.png width=34 height=34 radius=17
