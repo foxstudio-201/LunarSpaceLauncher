@@ -6,13 +6,21 @@
 #include "auth.h"
 #include "discord.h"
 #include "anim.h"
+#include "fs.h"
+#include "mc.h"
+#include "java.h"
+#include "launch.h"
 #include <d2d1helper.h>
 #include <windowsx.h>
 #include <commdlg.h>
 #include <shellapi.h>
+#include <shlobj.h>
 #include <string>
 #include <vector>
+#include <set>
 #include <cmath>
+#include <functional>
+#include <memory>
 #include <cstdio>
 #include <ctime>
 
@@ -151,14 +159,67 @@ struct InstanceInfo {
     std::wstring version;
     std::wstring loader;
     std::wstring loader_version;
+    std::wstring version_id;
+    std::wstring forge_version;
+    std::wstring dir;
     std::wstring status;
     std::wstring icon;
     std::wstring last_played;
     std::wstring created;
+    std::wstring username;
+    std::wstring java_path;
+    std::wstring jvm_args;
+    bool demo = false;
     int memory_mb = 4096;
     double playtime_ms = 0;
     std::vector<RecentWorldInfo> worlds;
     std::vector<RecentServerInfo> servers;
+};
+
+struct LaunchProgressMsg {
+    std::wstring id;
+    std::wstring phase;
+    std::wstring label;
+    uint64_t done = 0;
+    uint64_t total = 0;
+    uint64_t bytes = 0;
+    uint64_t bytes_total = 0;
+};
+
+struct LaunchLogMsg {
+    std::wstring id;
+    std::wstring line;
+};
+
+struct LaunchStateMsg {
+    std::wstring id;
+    std::wstring state;
+};
+
+struct LaunchExitMsg {
+    std::wstring id;
+    std::wstring error;
+    std::wstring title;
+    std::wstring hint;
+    int code = 0;
+    bool crashed = false;
+};
+
+struct LaunchUiState {
+    std::wstring id;
+    std::wstring phase;
+    std::wstring label;
+    uint64_t done = 0;
+    uint64_t total = 0;
+    uint64_t bytes = 0;
+    uint64_t bytes_total = 0;
+    std::vector<std::wstring> lines;
+    bool crashed = false;
+    std::wstring crash_title;
+    std::wstring crash_hint;
+    std::wstring error;
+    std::wstring java_path;
+    int exit_code = 0;
 };
 
 struct AuthResult {
@@ -189,11 +250,41 @@ struct LoaderInfo {
     int games = 0;
 };
 
+struct LoaderBuild {
+    std::wstring version;
+    std::wstring build;
+    bool stable = true;
+    bool latest = false;
+    bool beta = false;
+};
+
+struct LoaderGamesResult {
+    std::wstring kind;
+    bool ok = false;
+    bool all = false;
+    std::set<std::wstring> games;
+};
+
+struct LoaderBuildsResult {
+    std::wstring kind;
+    std::wstring game;
+    bool ok = false;
+    std::vector<LoaderBuild> rows;
+};
+
+struct CreatedInstance {
+    bool ok = false;
+    std::wstring error;
+    std::wstring id;
+    std::wstring name;
+};
+
 struct HomeData {
     bool ok = false;
     std::wstring latest;
     std::wstring latest_snapshot;
     std::vector<VersionInfo> releases;
+    std::vector<VersionInfo> all;
     int total = 0;
     std::vector<LoaderInfo> loaders;
 };
@@ -415,8 +506,7 @@ public:
     bool sidebar_unproject(float x, float y, float& u, float& v) const;
     Node* hit_test(float x, float y);
     void handle_auth_result(LPARAM lp) { apply_auth_result(reinterpret_cast<AuthResult*>(lp)); }
-    void handle_discord_links_msg(LPARAM lp) { auto* body = reinterpret_cast<std::string*>(lp); if (body) { apply_discord_links_body(*body); delete body; } }
-    void handle_java_removed() {
+    void handle_discord_links_msg(LPARAM lp) { auto* body = reinterpret_cast<std::string*>(lp); if (body) { apply_discord_links_body(*body); delete body; } }    void handle_java_removed() {
         java_state_ = JavaState{};
         if (page_ == L"settings") load_java_state_async(true);
     }
@@ -428,6 +518,24 @@ public:
     void handle_unlink_msg(LPARAM lp) { auto* payload = reinterpret_cast<std::pair<bool, std::wstring>*>(lp); if (payload) { handle_unlink_result(payload->first, payload->second); delete payload; } }
     void handle_home_data_msg(LPARAM lp) { auto* data = reinterpret_cast<HomeData*>(lp); if (data) { apply_home_data(data); delete data; } }
     void handle_system_msg(LPARAM lp) { auto* info = reinterpret_cast<HomeSystem*>(lp); if (info) { apply_system_info(info); delete info; } }
+    void handle_loader_games_msg(LPARAM lp) { auto* res = reinterpret_cast<LoaderGamesResult*>(lp); if (res) { apply_loader_games(res); delete res; } }
+    void handle_loader_builds_msg(LPARAM lp) { auto* res = reinterpret_cast<LoaderBuildsResult*>(lp); if (res) { apply_loader_builds(res); delete res; } }
+    void handle_launch_progress_msg(LPARAM lp) {
+        auto* msg = reinterpret_cast<LaunchProgressMsg*>(lp);
+        if (msg) { apply_launch_progress(msg); delete msg; }
+    }
+    void handle_launch_log_msg(LPARAM lp) {
+        auto* msg = reinterpret_cast<LaunchLogMsg*>(lp);
+        if (msg) { apply_launch_log(msg); delete msg; }
+    }
+    void handle_launch_state_msg(LPARAM lp) {
+        auto* msg = reinterpret_cast<LaunchStateMsg*>(lp);
+        if (msg) { apply_launch_state(msg); delete msg; }
+    }
+    void handle_launch_exit_msg(LPARAM lp) {
+        auto* msg = reinterpret_cast<LaunchExitMsg*>(lp);
+        if (msg) { apply_launch_exit(msg); delete msg; }
+    }
     void handle_discord_waiting_msg(LPARAM lp) { auto* payload = reinterpret_cast<std::pair<std::wstring, int>*>(lp); if (payload) { if (payload->second == discord_seq_ && modal_open_ && modal_kind_ == 3 && (discord_phase_ == 1 || discord_phase_ == 2)) { discord_authorize_url_ = payload->first; discord_phase_ = 2; modal_busy_ = true; InvalidateRect(hwnd_, nullptr, FALSE); } delete payload; } }
     void on_dpi_changed();
     bool splash_active() const { return splash_.phase != Splash::Phase::None; }
@@ -435,6 +543,19 @@ public:
 private:
     void ui_apply_page();
     void do_action(const std::wstring& action);
+    InstanceInfo* find_instance(const std::wstring& id);
+    void launch_instance(const std::wstring& id, const std::wstring& quick_type = L"",
+                         const std::wstring& quick_value = L"");
+    void stop_instance(const std::wstring& id);
+    void open_console(const std::wstring& id);
+    void rebuild_console();
+    void apply_launch_progress(LaunchProgressMsg* msg);
+    void apply_launch_log(LaunchLogMsg* msg);
+    void apply_launch_state(LaunchStateMsg* msg);
+    void apply_launch_exit(LaunchExitMsg* msg);
+    void persist_instance_fields(const std::wstring& id,
+                                 const std::function<void(Json&)>& mutate);
+    std::string load_account_token(const std::wstring& account_id) const;
     void start_pill_slide();
     void toggle_account_menu();
     void draw_account_menu();
@@ -459,6 +580,22 @@ private:
     void load_settings_page_state();
     void rebuild_settings();
     void layout_settings();
+    void rebuild_versions();
+    void layout_versions();
+    void draw_versions_popup();
+    void load_loader_games_async(const std::wstring& kind);
+    void load_loader_builds_async(const std::wstring& kind, const std::wstring& game);
+    void apply_loader_games(LoaderGamesResult* result);
+    void apply_loader_builds(LoaderBuildsResult* result);
+    void versions_pick_loader(const std::wstring& id);
+    void versions_pick_game(const std::wstring& id);
+    void versions_open_build_menu();
+    void versions_close_build_menu();
+    void versions_create_instance();
+    void versions_memory_from_x(float x);
+    void versions_browse_dir();
+    std::vector<VersionInfo> versions_filtered() const;
+    std::wstring instance_base_dir() const;
     void load_java_state_async(bool refresh);
     void apply_java_state(JavaState* state);
     void apply_background_result(BgResult* result);
@@ -535,6 +672,10 @@ private:
     std::vector<Account> accounts_;
     std::wstring active_id_;
     std::vector<InstanceInfo> instances_;
+    std::unique_ptr<LaunchManager> launcher_;
+    LaunchUiState launch_ui_;
+    ULONGLONG launch_started_ = 0;
+    bool console_dirty_ = false;
     std::vector<DiscordLink> discord_links_;
     std::wstring discord_api_url_;
     std::wstring discord_api_key_;
@@ -563,6 +704,50 @@ private:
     D2D1_RECT_F settings_slot_rect_ = D2D1::RectF();
     float settings_scroll_ = 0.0f;
     float settings_content_h_ = 0.0f;
+    std::unique_ptr<Node> versions_ui_;
+    std::unique_ptr<Node> versions_aside_;
+    std::unique_ptr<Node> versions_footer_;
+    std::unique_ptr<Node> versions_menu_;
+    D2D1_RECT_F versions_slot_rect_ = D2D1::RectF();
+    D2D1_RECT_F versions_list_rect_ = D2D1::RectF();
+    D2D1_RECT_F versions_aside_rect_ = D2D1::RectF();
+    D2D1_RECT_F versions_footer_rect_ = D2D1::RectF();
+    D2D1_RECT_F versions_menu_rect_ = D2D1::RectF();
+    D2D1_RECT_F versions_mem_track_ = D2D1::RectF();
+    D2D1_RECT_F versions_build_rect_ = D2D1::RectF();
+    float versions_scroll_ = 0.0f;
+    float versions_content_h_ = 0.0f;
+    float versions_aside_scroll_ = 0.0f;
+    float versions_aside_content_h_ = 0.0f;
+    float versions_list_width_ = 0.0f;
+    float versions_menu_scroll_ = 0.0f;
+    std::vector<VersionInfo> versions_all_;
+    bool versions_manifest_ready_ = false;
+    bool versions_picker_ = true;
+    std::wstring versions_loader_ = L"vanilla";
+    std::wstring versions_build_;
+    std::wstring versions_picked_;
+    std::wstring versions_query_;
+    std::wstring versions_name_;
+    std::wstring versions_dir_;
+    std::wstring versions_error_;
+    int versions_memory_ = 4096;
+    bool versions_demo_ = false;
+    bool versions_snapshots_ = false;
+    int versions_visible_ = 50;
+    int versions_focus_ = 0;
+    bool versions_mem_drag_ = false;
+    bool versions_menu_open_ = false;
+    std::wstring loader_games_kind_;
+    bool loader_games_loading_ = false;
+    bool loader_games_ready_ = false;
+    bool loader_games_all_ = false;
+    std::set<std::wstring> loader_games_;
+    std::wstring builds_key_;
+    bool builds_loading_ = false;
+    bool builds_ready_ = false;
+    bool builds_failed_ = false;
+    std::vector<LoaderBuild> builds_;
     bool effects_enabled_ = true;
     bool hide_on_launch_ = true;
     bool rich_presence_ = true;
@@ -676,6 +861,7 @@ void App::ui_apply_page() {
         { L"modpacks", L"Modpack", L"nav-modpacks" },
         { L"accounts", L"Tài khoản", L"nav-accounts" },
         { L"settings", L"Cài đặt", nullptr },
+        { L"console", L"Console", nullptr },
     };
     const PageLabel* current = &pages[0];
     for (const auto& page : pages)
@@ -696,24 +882,42 @@ void App::ui_apply_page() {
         else if (page_ == L"modpacks")
             sub->text = L"Quản lý modpack và nội dung tải về";
         else if (page_ == L"versions")
-            sub->text = L"Tạo và quản lý phiên bản";
+            sub->text = L"Chọn loader trước, sau đó chọn phiên bản Minecraft";
         else if (page_ == L"settings")
             sub->text = L"Cấu hình launcher và thông tin máy";
+        else if (page_ == L"console") {
+            InstanceInfo* inst = find_instance(launch_ui_.id);
+            sub->text = inst ? inst->dir : L"Console phiên bản";
+        }
         else
             sub->text = L"Cấu hình launcher và trò chơi";
     }
+    if (page_ == L"versions" && !versions_ui_) rebuild_versions();
+    if (page_ == L"console" && console_dirty_) rebuild_console();
     bool skin_wide = page_ == L"accounts" && accounts_skin_;
     ui_set_visible(ui_find(ui_.get(), L"content-header"), !skin_wide);
     ui_set_visible(ui_find(ui_.get(), L"home-view"), page_ == L"home");
     ui_set_visible(ui_find(ui_.get(), L"accounts-view"), page_ == L"accounts");
     ui_set_visible(ui_find(ui_.get(), L"settings-view"), page_ == L"settings");
+    ui_set_visible(ui_find(ui_.get(), L"versions-view"), page_ == L"versions");
+    ui_set_visible(ui_find(ui_.get(), L"console-view"), page_ == L"console");
     ui_set_visible(ui_find(ui_.get(), L"placeholder"),
-                   page_ != L"home" && page_ != L"accounts" && page_ != L"settings");
+                   page_ != L"home" && page_ != L"accounts" && page_ != L"settings" &&
+                       page_ != L"versions" && page_ != L"console");
     ui_set_visible(ui_find(ui_.get(), L"home-tabs"), page_ == L"home");
     ui_set_visible(ui_find(ui_.get(), L"accounts-tabs"), page_ == L"accounts" && !skin_wide);
     ui_set_visible(ui_find(ui_.get(), L"header-tools-home"), page_ == L"home");
     ui_set_visible(ui_find(ui_.get(), L"header-tools-accounts"), page_ == L"accounts");
     ui_set_visible(ui_find(ui_.get(), L"header-tools-settings"), page_ == L"settings");
+    ui_set_visible(ui_find(ui_.get(), L"header-tools-versions"), page_ == L"versions");
+    if (Node* snap = ui_find(ui_.get(), L"btn-versions-snapshots")) {
+        snap->style.bg = versions_snapshots_ ? Color::rgb(0xE9B872, 0.14f)
+                                             : ui_token(L"input");
+        snap->style.border_color = versions_snapshots_ ? Color::rgb(0xE9B872, 0.42f)
+                                                       : ui_token(L"border");
+    }
+    if (Node* label = ui_find(ui_.get(), L"label-versions-snapshots"))
+        label->style.color = versions_snapshots_ ? ui_token(L"accent") : ui_token(L"label");
     ui_set_visible(ui_find(ui_.get(), L"accounts-list-view"),
                    page_ == L"accounts" && !accounts_skin_);
     ui_set_visible(ui_find(ui_.get(), L"skin-view"), skin_wide);
@@ -872,12 +1076,21 @@ void App::load_data() {
         info.version = utf8_to_wide(item.text("version"));
         info.loader = utf8_to_wide(item.text("loader", "vanilla"));
         info.loader_version = utf8_to_wide(item.text("loaderVersion"));
+        info.version_id = utf8_to_wide(item.text("versionId"));
+        info.forge_version = utf8_to_wide(item.text("forgeVersion"));
         info.status = utf8_to_wide(item.text("status", "ready"));
+        if (info.status == L"running" || info.status == L"starting" || info.status == L"stopping")
+            info.status = L"ready";
         info.last_played = utf8_to_wide(item.text("lastPlayed"));
         info.created = utf8_to_wide(item.text("created"));
+        info.username = utf8_to_wide(item.text("username"));
+        info.java_path = utf8_to_wide(item.text("javaPath"));
+        info.jvm_args = utf8_to_wide(item.text("jvmArgs"));
+        info.demo = item.boolean("demo", false);
         info.memory_mb = int(item.number("memoryMb", 4096));
         info.playtime_ms = item.number("playtimeMs", 0);
         std::wstring dir = utf8_to_wide(item.text("dir"));
+        info.dir = dir;
         std::wstring local_icon = dir + L"\\icon.png";
         if (!dir.empty() && GetFileAttributesW(local_icon.c_str()) != INVALID_FILE_ATTRIBUTES)
             info.icon = local_icon;
@@ -1249,7 +1462,7 @@ void App::rebuild_instance_rows() {
     for (const auto& inst : instances_) {
         auto row = std::make_unique<Node>();
         row->kind = Kind::Row;
-        row->action = L"nav:versions";
+        row->action = L"instance:open:" + inst.id;
         row->style.height = 48.0f;
         row->style.pad_l = 14.0f;
         row->style.pad_r = 10.0f;
@@ -2497,6 +2710,144 @@ static std::wstring loader_icon_path(const std::wstring& id) {
     return L"assets/img/loader-icon/" + id + L".png";
 }
 
+static std::wstring documents_dir() {
+    wchar_t path[MAX_PATH]{};
+    if (SHGetFolderPathW(nullptr, CSIDL_PERSONAL | CSIDL_FLAG_CREATE, nullptr, 0, path) == S_OK)
+        return path;
+    return user_data_dir();
+}
+
+static bool ensure_dir_tree(const std::wstring& path) {
+    if (path.empty()) return false;
+    std::wstring current;
+    size_t start = 0;
+    if (path.size() > 2 && path[1] == L':') {
+        current = path.substr(0, 2);
+        start = 2;
+    }
+    while (start <= path.size()) {
+        size_t next = path.find(L'\\', start);
+        if (next == std::wstring::npos) next = path.size();
+        std::wstring part = path.substr(start, next - start);
+        if (!part.empty()) {
+            if (!current.empty() && current.back() != L'\\') current += L'\\';
+            current += part;
+            CreateDirectoryW(current.c_str(), nullptr);
+        }
+        if (next == path.size()) break;
+        start = next + 1;
+    }
+    return GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES;
+}
+
+static std::wstring instance_slug(const std::wstring& value) {
+    std::wstring out;
+    for (wchar_t ch : value) {
+        if ((ch >= L'a' && ch <= L'z') || (ch >= L'A' && ch <= L'Z') ||
+            (ch >= L'0' && ch <= L'9') || ch == L'.' || ch == L'-' || ch == L'_')
+            out.push_back(ch);
+        else if (!out.empty() && out.back() != L'-')
+            out.push_back(L'-');
+    }
+    while (!out.empty() && out.back() == L'-') out.pop_back();
+    return out.empty() ? L"instance" : out;
+}
+
+static int compare_version_text(const std::wstring& a, const std::wstring& b) {
+    size_t i = 0, j = 0;
+    while (i < a.size() || j < b.size()) {
+        if (i < a.size() && j < b.size() && iswdigit(a[i]) && iswdigit(b[j])) {
+            size_t ie = i, je = j;
+            while (ie < a.size() && iswdigit(a[ie])) ++ie;
+            while (je < b.size() && iswdigit(b[je])) ++je;
+            std::wstring na = a.substr(i, ie - i), nb = b.substr(j, je - j);
+            while (na.size() > 1 && na[0] == L'0') na.erase(0, 1);
+            while (nb.size() > 1 && nb[0] == L'0') nb.erase(0, 1);
+            if (na.size() != nb.size()) return na.size() < nb.size() ? -1 : 1;
+            if (na != nb) return na < nb ? -1 : 1;
+            i = ie;
+            j = je;
+        } else {
+            wchar_t ca = i < a.size() ? a[i] : 0;
+            wchar_t cb = j < b.size() ? b[j] : 0;
+            if (ca != cb) return ca < cb ? -1 : 1;
+            ++i;
+            ++j;
+        }
+    }
+    return 0;
+}
+
+static std::vector<std::wstring> xml_version_list(const std::string& text) {
+    std::vector<std::wstring> out;
+    size_t pos = 0;
+    const std::string open = "<version>", close = "</version>";
+    while (true) {
+        size_t begin = text.find(open, pos);
+        if (begin == std::string::npos) break;
+        begin += open.size();
+        size_t end = text.find(close, begin);
+        if (end == std::string::npos) break;
+        out.push_back(utf8_to_wide(text.substr(begin, end - begin)));
+        pos = end + close.size();
+    }
+    return out;
+}
+
+static bool forge_at_least(const std::wstring& version, const std::wstring& min) {
+    int a[4]{}, b[4]{};
+    swscanf(version.c_str(), L"%d.%d.%d", &a[0], &a[1], &a[2]);
+    swscanf(min.c_str(), L"%d.%d.%d", &b[0], &b[1], &b[2]);
+    for (int i = 0; i < 3; ++i) {
+        if (a[i] != b[i]) return a[i] > b[i];
+    }
+    return true;
+}
+
+static std::wstring forge_display(const std::wstring& game, const std::wstring& id) {
+    std::wstring value = id;
+    std::wstring prefix = game + L"-";
+    std::wstring suffix = L"-" + game;
+    if (value.rfind(prefix, 0) == 0) value = value.substr(prefix.size());
+    if (value.size() > suffix.size() &&
+        value.compare(value.size() - suffix.size(), suffix.size(), suffix) == 0)
+        value = value.substr(0, value.size() - suffix.size());
+    return value;
+}
+
+static std::wstring neo_game_of(const std::wstring& version) {
+    std::wstring head = version.substr(0, version.find_first_of(L"-+"));
+    std::vector<int> parts;
+    size_t start = 0;
+    while (start <= head.size()) {
+        size_t dot = head.find(L'.', start);
+        if (dot == std::wstring::npos) dot = head.size();
+        std::wstring piece = head.substr(start, dot - start);
+        if (piece.empty()) return L"";
+        for (wchar_t ch : piece)
+            if (!iswdigit(ch)) return L"";
+        parts.push_back(_wtoi(piece.c_str()));
+        if (dot == head.size()) break;
+        start = dot + 1;
+    }
+    if (parts.size() < 3) return L"";
+    wchar_t out[32];
+    if (parts[0] >= 26) {
+        if (parts[2] == 0) swprintf(out, 32, L"%d.%d", parts[0], parts[1]);
+        else swprintf(out, 32, L"%d.%d.%d", parts[0], parts[1], parts[2]);
+    } else {
+        if (parts[1] == 0) swprintf(out, 32, L"1.%d", parts[0]);
+        else swprintf(out, 32, L"1.%d.%d", parts[0], parts[1]);
+    }
+    return out;
+}
+
+static std::wstring neo_build_of(const std::wstring& version) {
+    std::wstring head = version.substr(0, version.find_first_of(L"-+"));
+    size_t dot = head.find_last_of(L'.');
+    return dot == std::wstring::npos ? head : head.substr(dot + 1);
+}
+
 static std::vector<LoaderInfo> default_loaders() {
     return {
         { L"vanilla", L"Vanilla", L"Bản gốc Mojang, không mod", L"", false, false, true, false, 0 },
@@ -2506,6 +2857,12 @@ static std::vector<LoaderInfo> default_loaders() {
         { L"neoforge", L"NeoForge", L"Bản tách từ Forge, hiện đại hơn", L"", false, false, false, false, 0 },
         { L"lunar", L"LunarLoader", L"Loader riêng của XyoLauncher, tối ưu cho mod hiện đại", L"", false, false, false, false, 0 },
     };
+}
+
+static std::wstring loader_name(const std::wstring& id) {
+    for (const auto& loader : default_loaders())
+        if (loader.id == id) return loader.name;
+    return id;
 }
 
 void App::load_home_async() {
@@ -2526,15 +2883,17 @@ void App::load_home_async() {
             const Json* list = root.find("versions");
             if (list) {
                 for (const auto& item : list->arr) {
-                    if (item.text("type") != "release") continue;
-                    ++data->total;
-                    if (data->releases.size() < 9) {
-                        VersionInfo version;
-                        version.id = utf8_to_wide(item.text("id"));
-                        version.release_time = utf8_to_wide(item.text("releaseTime"));
-                        version.type = L"release";
-                        data->releases.push_back(std::move(version));
+                    VersionInfo version;
+                    version.id = utf8_to_wide(item.text("id"));
+                    version.release_time = utf8_to_wide(item.text("releaseTime"));
+                    version.type = utf8_to_wide(item.text("type"));
+                    if (version.type.empty()) version.type = L"release";
+                    bool release = version.type == L"release";
+                    if (release) {
+                        ++data->total;
+                        if (data->releases.size() < 9) data->releases.push_back(version);
                     }
+                    if (!version.id.empty()) data->all.push_back(std::move(version));
                 }
                 data->ok = true;
             }
@@ -2641,6 +3000,8 @@ void App::apply_home_data(HomeData* data) {
     if (!data) return;
     if (data->ok) {
         versions_ = data->releases;
+        versions_all_ = data->all;
+        versions_manifest_ready_ = true;
         latest_release_ = data->latest;
         latest_snapshot_ = data->latest_snapshot;
         version_total_ = data->total;
@@ -2648,7 +3009,299 @@ void App::apply_home_data(HomeData* data) {
     if (!data->loaders.empty()) loaders_ = data->loaders;
     home_data_loading_ = false;
     rebuild_home();
+    if (page_ == L"versions") rebuild_versions();
     ui_apply_page();
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+static bool contains_ci(const std::wstring& value, const wchar_t* needle) {
+    std::wstring lowered = value;
+    for (auto& ch : lowered) ch = wchar_t(towlower(ch));
+    return lowered.find(needle) != std::wstring::npos;
+}
+
+void App::load_loader_games_async(const std::wstring& kind) {
+    HWND target = hwnd_;
+    HANDLE thread = CreateThread(nullptr, 0, +[](LPVOID param) -> DWORD {
+        auto* job = reinterpret_cast<std::pair<HWND, std::wstring>*>(param);
+        auto* result = new LoaderGamesResult();
+        result->kind = job->second;
+        const std::wstring& kind2 = result->kind;
+        if (kind2 == L"vanilla") {
+            result->ok = true;
+            result->all = true;
+        } else if (kind2 == L"fabric" || kind2 == L"quilt") {
+            HttpResult res = http_request(
+                kind2 == L"fabric" ? L"https://meta.fabricmc.net/v2/versions/game"
+                                   : L"https://meta.quiltmc.org/v3/versions/game",
+                L"GET");
+            Json root;
+            if (root.parse(res.body) && root.type == Json::Type::Array) {
+                for (const auto& row : root.arr) {
+                    std::wstring game = utf8_to_wide(row.text("version"));
+                    if (!game.empty()) result->games.insert(game);
+                }
+                result->ok = true;
+                result->all = result->games.empty();
+            }
+        } else if (kind2 == L"forge") {
+            HttpResult res = http_request(
+                L"https://files.minecraftforge.net/net/minecraftforge/forge/maven-metadata.json",
+                L"GET");
+            Json root;
+            if (root.parse(res.body) && root.type == Json::Type::Object) {
+                for (const auto& entry : root.obj) {
+                    std::wstring game = utf8_to_wide(entry.first);
+                    if (!game.empty() && forge_at_least(game, L"1.5.2"))
+                        result->games.insert(game);
+                }
+                result->ok = true;
+                result->all = result->games.empty();
+            }
+        } else if (kind2 == L"neoforge") {
+            HttpResult modern = http_request(
+                L"https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml",
+                L"GET");
+            HttpResult legacy = http_request(
+                L"https://maven.neoforged.net/releases/net/neoforged/forge/maven-metadata.xml",
+                L"GET");
+            bool any = false;
+            for (const auto& version : xml_version_list(modern.body)) {
+                if (contains_ci(version, L"-alpha") || contains_ci(version, L"-snapshot") ||
+                    contains_ci(version, L"+snapshot"))
+                    continue;
+                std::wstring game = neo_game_of(version);
+                if (!game.empty()) result->games.insert(game);
+                any = true;
+            }
+            for (const auto& version : xml_version_list(legacy.body)) {
+                if (version.rfind(L"1.20.1-", 0) == 0) {
+                    result->games.insert(L"1.20.1");
+                    any = true;
+                }
+            }
+            result->ok = any;
+        } else if (kind2 == L"lunar") {
+            HttpResult res = http_request(L"https://lunarspace.site/api-v2/versions", L"GET");
+            Json root;
+            if (root.parse(res.body)) {
+                const Json* versions = root.find("versions");
+                if (versions) {
+                    for (const auto& row : versions->arr) {
+                        std::wstring game = utf8_to_wide(row.text("minecraft"));
+                        if (!game.empty()) result->games.insert(game);
+                    }
+                    result->ok = true;
+                }
+            }
+        }
+        PostMessage(job->first, WM_APP + 16, 0, reinterpret_cast<LPARAM>(result));
+        delete job;
+        return 0;
+    }, new std::pair<HWND, std::wstring>(target, kind), 0, nullptr);
+    if (thread) CloseHandle(thread);
+    loader_games_kind_ = kind;
+    loader_games_loading_ = true;
+    loader_games_ready_ = false;
+    loader_games_all_ = false;
+    loader_games_.clear();
+}
+
+void App::load_loader_builds_async(const std::wstring& kind, const std::wstring& game) {
+    HWND target = hwnd_;
+    auto* job = new std::pair<HWND, std::wstring>(target, kind + L":" + game);
+    HANDLE thread = CreateThread(nullptr, 0, +[](LPVOID param) -> DWORD {
+        auto* job2 = reinterpret_cast<std::pair<HWND, std::wstring>*>(param);
+        auto* result = new LoaderBuildsResult();
+        std::wstring key = job2->second;
+        size_t split = key.find(L':');
+        result->kind = key.substr(0, split);
+        result->game = split == std::wstring::npos ? L"" : key.substr(split + 1);
+        const std::wstring& kind2 = result->kind;
+        const std::wstring& game2 = result->game;
+        if (kind2 == L"fabric" || kind2 == L"quilt") {
+            HttpResult res = http_request(
+                kind2 == L"fabric"
+                    ? L"https://meta.fabricmc.net/v2/versions/loader/" + game2
+                    : L"https://meta.quiltmc.org/v3/versions/loader/" + game2,
+                L"GET");
+            Json root;
+            if (root.parse(res.body) && root.type == Json::Type::Array) {
+                for (const auto& row : root.arr) {
+                    const Json* loader = row.find("loader");
+                    if (!loader) continue;
+                    LoaderBuild build;
+                    build.version = utf8_to_wide(loader->text("version"));
+                    build.build = utf8_to_wide(loader->text("build"));
+                    build.stable = kind2 == L"fabric"
+                                       ? loader->boolean("stable", true)
+                                       : loader->text("version").find('-') == std::string::npos;
+                    if (!build.version.empty()) result->rows.push_back(std::move(build));
+                }
+                std::stable_sort(result->rows.begin(), result->rows.end(),
+                                 [](const LoaderBuild& a, const LoaderBuild& b) {
+                                     if (a.stable != b.stable) return a.stable;
+                                     return compare_version_text(a.version, b.version) > 0;
+                                 });
+                if (result->rows.size() > 60) result->rows.resize(60);
+                if (!result->rows.empty()) result->rows[0].latest = true;
+                result->ok = true;
+            }
+        } else if (kind2 == L"forge") {
+            if (!forge_at_least(game2, L"1.5.2")) {
+                result->ok = true;
+            } else {
+                HttpResult meta_res = http_request(
+                    L"https://files.minecraftforge.net/net/minecraftforge/forge/maven-metadata.json",
+                    L"GET");
+                HttpResult promo_res = http_request(
+                    L"https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json",
+                    L"GET");
+                Json meta;
+                if (meta.parse(meta_res.body)) {
+                    const Json* ids = meta.find(wide_to_utf8(game2).c_str());
+                    std::wstring latest_promo, recommended;
+                    Json promos;
+                    if (promos.parse(promo_res.body)) {
+                        const Json* map = promos.find("promos");
+                        if (map) {
+                            latest_promo = utf8_to_wide(map->text(
+                                (wide_to_utf8(game2) + "-latest").c_str()));
+                            recommended = utf8_to_wide(map->text(
+                                (wide_to_utf8(game2) + "-recommended").c_str()));
+                        }
+                    }
+                    if (ids && ids->type == Json::Type::Array) {
+                        for (auto it = ids->arr.rbegin(); it != ids->arr.rend(); ++it) {
+                            std::wstring id = utf8_to_wide(it->str);
+                            if (id.empty()) continue;
+                            LoaderBuild build;
+                            build.version = forge_display(game2, id);
+                            build.stable = !recommended.empty() &&
+                                           id.size() > recommended.size() &&
+                                           id.compare(id.size() - recommended.size(),
+                                                      recommended.size(), recommended) == 0;
+                            build.latest = !latest_promo.empty() &&
+                                           id.size() > latest_promo.size() &&
+                                           id.compare(id.size() - latest_promo.size(),
+                                                      latest_promo.size(), latest_promo) == 0;
+                            result->rows.push_back(std::move(build));
+                        }
+                        if (result->rows.size() > 60) result->rows.resize(60);
+                        if (!result->rows.empty() &&
+                            !std::any_of(result->rows.begin(), result->rows.end(),
+                                         [](const LoaderBuild& b) { return b.latest; }))
+                            result->rows[0].latest = true;
+                    }
+                    result->ok = true;
+                }
+            }
+        } else if (kind2 == L"neoforge") {
+            HttpResult modern = http_request(
+                L"https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml",
+                L"GET");
+            HttpResult legacy = http_request(
+                L"https://maven.neoforged.net/releases/net/neoforged/forge/maven-metadata.xml",
+                L"GET");
+            std::vector<LoaderBuild> candidates;
+            for (const auto& version : xml_version_list(modern.body)) {
+                if (contains_ci(version, L"-alpha") || contains_ci(version, L"-snapshot") ||
+                    contains_ci(version, L"+snapshot"))
+                    continue;
+                if (neo_game_of(version) != game2) continue;
+                LoaderBuild build;
+                build.version = neo_build_of(version);
+                build.beta = contains_ci(version, L"-beta");
+                if (!build.version.empty()) candidates.push_back(std::move(build));
+            }
+            if (game2 == L"1.20.1") {
+                for (const auto& version : xml_version_list(legacy.body)) {
+                    if (version.rfind(L"1.20.1-", 0) != 0) continue;
+                    LoaderBuild build;
+                    build.version = version.substr(7);
+                    if (!build.version.empty()) candidates.push_back(std::move(build));
+                }
+            }
+            std::stable_sort(candidates.begin(), candidates.end(),
+                             [](const LoaderBuild& a, const LoaderBuild& b) {
+                                 return compare_version_text(a.version, b.version) > 0;
+                             });
+            bool stable_set = false;
+            for (auto& build : candidates) {
+                if (!stable_set && !build.beta) {
+                    build.stable = true;
+                    stable_set = true;
+                }
+                result->rows.push_back(std::move(build));
+                if (result->rows.size() >= 80) break;
+            }
+            if (!result->rows.empty()) result->rows[0].latest = true;
+            result->ok = !result->rows.empty();
+        } else if (kind2 == L"lunar") {
+            HttpResult res = http_request(
+                L"https://lunarspace.site/api-v2/versions?mc=" + game2, L"GET");
+            Json root;
+            if (root.parse(res.body)) {
+                const Json* versions = root.find("versions");
+                if (versions) {
+                    int index = 0;
+                    for (const auto& row : versions->arr) {
+                        LoaderBuild build;
+                        build.version = utf8_to_wide(row.text("version"));
+                        build.stable = row.text("channel", "stable") == "stable";
+                        build.latest = index == 0;
+                        ++index;
+                        if (!build.version.empty()) result->rows.push_back(std::move(build));
+                    }
+                    result->ok = true;
+                }
+            }
+        }
+        PostMessage(job2->first, WM_APP + 17, 0, reinterpret_cast<LPARAM>(result));
+        delete job2;
+        return 0;
+    }, job, 0, nullptr);
+    if (thread) CloseHandle(thread);
+    builds_key_ = kind + L":" + game;
+    builds_loading_ = true;
+    builds_ready_ = false;
+    builds_failed_ = false;
+    builds_.clear();
+}
+
+void App::apply_loader_games(LoaderGamesResult* result) {
+    if (!result) return;
+    if (result->kind != loader_games_kind_) return;
+    loader_games_loading_ = false;
+    loader_games_ready_ = true;
+    loader_games_all_ = result->all;
+    loader_games_ = std::move(result->games);
+    if (!result->ok) {
+        loader_games_ready_ = false;
+        loader_games_.clear();
+    }
+    if (loader_games_ready_ && !loader_games_all_ && !versions_picked_.empty() &&
+        !loader_games_.count(versions_picked_)) {
+        std::wstring missing = versions_picked_;
+        versions_picked_.clear();
+        versions_error_ = loader_name(versions_loader_) + L" không hỗ trợ Minecraft " + missing;
+    }
+    if (page_ == L"versions") rebuild_versions();
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+void App::apply_loader_builds(LoaderBuildsResult* result) {
+    if (!result) return;
+    if (result->kind + L":" + result->game != builds_key_) return;
+    builds_loading_ = false;
+    builds_ready_ = true;
+    builds_failed_ = !result->ok;
+    builds_ = std::move(result->rows);
+    bool found = false;
+    for (const auto& build : builds_)
+        if (build.version == versions_build_) { found = true; break; }
+    if (!found) versions_build_ = builds_.empty() ? L"" : builds_.front().version;
+    if (page_ == L"versions") rebuild_versions();
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
@@ -2745,6 +3398,39 @@ void App::on_wheel(int delta, int px, int py) {
     GetClientRect(hwnd_, &rc);
     float x = float(px) / renderer_.scale();
     float y = float(py) / renderer_.scale();
+    if (page_ == L"versions" && versions_ui_) {
+        if (versions_menu_open_) {
+            float total = float(builds_.size()) * 32.0f + 8.0f;
+            float view = versions_menu_rect_.bottom - versions_menu_rect_.top;
+            float max_scroll = std::max(0.0f, total - view);
+            versions_menu_scroll_ =
+                std::clamp(versions_menu_scroll_ + (delta > 0 ? -48.0f : 48.0f), 0.0f, max_scroll);
+            InvalidateRect(hwnd_, nullptr, FALSE);
+            return;
+        }
+        layout_versions();
+        if (!versions_picker_) {
+            float aside_view = versions_aside_rect_.bottom - versions_aside_rect_.top;
+            float aside_max = std::max(0.0f, versions_aside_content_h_ - aside_view + 32.0f);
+            float list_view = versions_list_rect_.bottom - versions_list_rect_.top;
+            float list_max = std::max(0.0f, versions_content_h_ - list_view + 40.0f);
+            if (x >= versions_aside_rect_.left && x <= versions_aside_rect_.right) {
+                versions_aside_scroll_ =
+                    std::clamp(versions_aside_scroll_ + (delta > 0 ? -72.0f : 72.0f), 0.0f,
+                               aside_max);
+            } else {
+                versions_scroll_ = std::clamp(versions_scroll_ + (delta > 0 ? -72.0f : 72.0f),
+                                              0.0f, list_max);
+            }
+        } else {
+            float view = versions_list_rect_.bottom - versions_list_rect_.top;
+            float max_scroll = std::max(0.0f, versions_content_h_ - view + 40.0f);
+            versions_scroll_ = std::clamp(versions_scroll_ + (delta > 0 ? -72.0f : 72.0f), 0.0f,
+                                          max_scroll);
+        }
+        InvalidateRect(hwnd_, nullptr, FALSE);
+        return;
+    }
     if (page_ == L"settings" && settings_) {
         if (x < settings_slot_rect_.left || x > settings_slot_rect_.right ||
             y < settings_slot_rect_.top || y > settings_slot_rect_.bottom)
@@ -3876,6 +4562,1297 @@ void App::layout_settings() {
             slot->rect.top - settings_scroll_ + 4.0f);
 }
 
+std::wstring App::instance_base_dir() const {
+    return documents_dir() + L"\\LunarSpace\\instances";
+}
+
+std::vector<VersionInfo> App::versions_filtered() const {
+    std::vector<VersionInfo> rows;
+    std::wstring query = versions_query_;
+    for (auto& ch : query) ch = wchar_t(towlower(ch));
+    for (const auto& version : versions_all_) {
+        if (!versions_snapshots_ && version.type != L"release") continue;
+        if (!query.empty()) {
+            std::wstring id = version.id;
+            for (auto& ch : id) ch = wchar_t(towlower(ch));
+            if (id.find(query) == std::wstring::npos) continue;
+        }
+        if (versions_loader_ != L"vanilla") {
+            if (!loader_games_ready_ || loader_games_all_) continue;
+            if (!loader_games_.count(version.id)) continue;
+        }
+        rows.push_back(version);
+    }
+    return rows;
+}
+
+void App::versions_pick_loader(const std::wstring& id) {
+    versions_loader_ = id;
+    versions_picker_ = false;
+    versions_picked_.clear();
+    versions_build_.clear();
+    versions_error_.clear();
+    versions_scroll_ = 0.0f;
+    versions_aside_scroll_ = 0.0f;
+    versions_visible_ = 50;
+    versions_focus_ = 0;
+    versions_menu_open_ = false;
+    if (id != L"vanilla") {
+        load_loader_games_async(id);
+    } else {
+        loader_games_loading_ = false;
+        loader_games_ready_ = true;
+        loader_games_all_ = true;
+        loader_games_.clear();
+    }
+    rebuild_versions();
+}
+
+void App::versions_pick_game(const std::wstring& id) {
+    versions_picked_ = id;
+    versions_error_.clear();
+    versions_build_.clear();
+    versions_focus_ = 0;
+    if (versions_loader_ != L"vanilla") {
+        builds_.clear();
+        builds_ready_ = false;
+        builds_loading_ = true;
+        builds_failed_ = false;
+        load_loader_builds_async(versions_loader_, id);
+    }
+    rebuild_versions();
+}
+
+void App::layout_versions() {
+    Node* slot = ui_find(ui_.get(), L"versions-slot");
+    if (!slot) return;
+    versions_slot_rect_ = slot->rect;
+    float view_w = slot->rect.right - slot->rect.left;
+    float view_h = slot->rect.bottom - slot->rect.top;
+    if (view_w < 10.0f || view_h < 10.0f) return;
+
+    if (versions_picker_) {
+        float width = std::min(1024.0f, std::max(320.0f, view_w - 64.0f));
+        if (std::fabs(width - versions_list_width_) > 1.0f) {
+            versions_list_width_ = width;
+            rebuild_versions();
+        }
+        versions_list_rect_ = versions_slot_rect_;
+        versions_aside_rect_ = D2D1::RectF();
+        if (!versions_ui_) return;
+        ui_layout(versions_ui_.get(), width, 100000.0f, renderer_);
+        versions_content_h_ = 0.0f;
+        for (auto& kid : versions_ui_->kids)
+            versions_content_h_ = std::max(versions_content_h_, node_max_bottom(kid.get()));
+        float max_scroll = std::max(0.0f, versions_content_h_ - view_h + 40.0f);
+        versions_scroll_ = std::clamp(versions_scroll_, 0.0f, max_scroll);
+        ui_move(versions_ui_.get(), slot->rect.left + (view_w - width) * 0.5f,
+                slot->rect.top + 20.0f - versions_scroll_);
+        versions_mem_track_ = D2D1::RectF();
+        versions_build_rect_ = D2D1::RectF();
+        return;
+    }
+
+    float left_w = std::max(340.0f, view_w - 320.0f);
+    float content_w = std::max(240.0f, left_w - 48.0f);
+    if (std::fabs(content_w - versions_list_width_) > 1.0f) {
+        versions_list_width_ = content_w;
+        rebuild_versions();
+    }
+    versions_list_rect_ = D2D1::RectF(slot->rect.left, slot->rect.top,
+                                      slot->rect.left + left_w, slot->rect.bottom);
+    float aside_x = versions_list_rect_.right;
+    if (versions_ui_) {
+        ui_layout(versions_ui_.get(), content_w, 100000.0f, renderer_);
+        versions_content_h_ = 0.0f;
+        for (auto& kid : versions_ui_->kids)
+            versions_content_h_ = std::max(versions_content_h_, node_max_bottom(kid.get()));
+        float max_scroll = std::max(0.0f, versions_content_h_ - view_h + 40.0f);
+        versions_scroll_ = std::clamp(versions_scroll_, 0.0f, max_scroll);
+        ui_move(versions_ui_.get(), slot->rect.left + 24.0f, slot->rect.top + 16.0f - versions_scroll_);
+    }
+    float footer_h = 74.0f;
+    versions_footer_rect_ = D2D1::RectF(aside_x, slot->rect.bottom - footer_h, slot->rect.right,
+                                        slot->rect.bottom);
+    if (versions_footer_) {
+        float w = 320.0f - 40.0f;
+        ui_layout(versions_footer_.get(), w, 100000.0f, renderer_);
+        float h = 0.0f;
+        for (auto& kid : versions_footer_->kids) h = std::max(h, node_max_bottom(kid.get()));
+        footer_h = std::min(140.0f, std::max(74.0f, h + 24.0f));
+        versions_footer_rect_ = D2D1::RectF(aside_x, slot->rect.bottom - footer_h,
+                                            slot->rect.right, slot->rect.bottom);
+        ui_move(versions_footer_.get(), aside_x + 20.0f,
+                versions_footer_rect_.top + 14.0f);
+    }
+    versions_aside_rect_ = D2D1::RectF(aside_x, slot->rect.top, slot->rect.right,
+                                       versions_footer_rect_.top);
+    if (versions_aside_) {
+        float w = 320.0f - 40.0f;
+        ui_layout(versions_aside_.get(), w, 100000.0f, renderer_);
+        versions_aside_content_h_ = 0.0f;
+        for (auto& kid : versions_aside_->kids)
+            versions_aside_content_h_ =
+                std::max(versions_aside_content_h_, node_max_bottom(kid.get()));
+        float aside_view = versions_aside_rect_.bottom - versions_aside_rect_.top;
+        float max_scroll = std::max(0.0f, versions_aside_content_h_ - aside_view + 32.0f);
+        versions_aside_scroll_ = std::clamp(versions_aside_scroll_, 0.0f, max_scroll);
+        ui_move(versions_aside_.get(), aside_x + 20.0f,
+                versions_aside_rect_.top + 16.0f - versions_aside_scroll_);
+        if (Node* track = ui_find(versions_aside_.get(), L"versions-mem-track"))
+            versions_mem_track_ = track->rect;
+        if (Node* select = ui_find(versions_aside_.get(), L"versions-build-select"))
+            versions_build_rect_ = select->rect;
+    }
+}
+
+void App::rebuild_versions() {
+    versions_menu_open_ = false;
+    auto root = std::make_unique<Node>();
+    root->kind = Kind::Column;
+    root->style.gap = 12.0f;
+
+    auto text = [&](const std::wstring& value, float size, int weight, Color color,
+                    float width = -1.0f, bool mono = false, bool wrap = false) {
+        auto node = std::make_unique<Node>();
+        node->kind = Kind::Text;
+        node->text = value;
+        node->style.font_size = size;
+        node->style.weight = weight;
+        node->style.color = color;
+        node->style.mono = mono;
+        node->style.wrap = wrap;
+        if (width > 0.0f) node->style.width = width;
+        return node;
+    };
+    auto image = [&](const std::wstring& src, float width, float height, float radius = 0.0f,
+                     Color color = Color{}) {
+        auto node = std::make_unique<Node>();
+        node->kind = Kind::Image;
+        node->src = src;
+        node->style.width = width;
+        node->style.height = height;
+        node->style.radius = radius;
+        if (color.visible()) node->style.color = color;
+        return node;
+    };
+    auto spacer = [&](float width, float height, bool grow_x = false) {
+        auto node = std::make_unique<Node>();
+        node->kind = Kind::Spacer;
+        node->style.width = width;
+        node->style.height = height;
+        node->style.grow_x = grow_x;
+        return node;
+    };
+    auto box = [&](Kind kind, float height = -1.0f, float gap = 0.0f) {
+        auto node = std::make_unique<Node>();
+        node->kind = kind;
+        node->style.height = height;
+        node->style.gap = gap;
+        return node;
+    };
+    auto card = [&](float height) {
+        auto node = box(Kind::Column, height, 8.0f);
+        node->style.bg = ui_token(L"surface");
+        node->style.border = true;
+        node->style.border_color = ui_token(L"border");
+        node->style.radius = 12.0f;
+        node->style.glass = true;
+        return node;
+    };
+    auto tag = [&](const std::wstring& label, Color bg, Color fg) {
+        auto node = box(Kind::Row, 16.0f);
+        node->style.pad_l = node->style.pad_r = 5.0f;
+        node->style.radius = 4.0f;
+        node->style.bg = bg;
+        node->kids.push_back(text(label, 8.5f, 700, fg, -1.0f, true));
+        return node;
+    };
+    auto toggle = [&](bool on, const std::wstring& action) {
+        auto node = box(Kind::Row, 20.0f);
+        node->style.width = 36.0f;
+        node->style.radius = 10.0f;
+        node->style.bg = on ? ui_token(L"accent") : ui_token(L"input");
+        if (!on) {
+            node->style.border = true;
+            node->style.border_color = ui_token(L"border");
+        }
+        node->style.pad_l = node->style.pad_r = 2.0f;
+        node->action = action;
+        auto knob = spacer(16.0f, 16.0f);
+        knob->style.radius = 8.0f;
+        knob->style.bg = on ? Color::rgb(0xFFFFFF) : ui_token(L"label");
+        if (on) {
+            node->kids.push_back(spacer(0, 0, true));
+            node->kids.push_back(std::move(knob));
+        } else {
+            node->kids.push_back(std::move(knob));
+            node->kids.push_back(spacer(0, 0, true));
+        }
+        return node;
+    };
+    auto button = [&](const std::wstring& label, const std::wstring& action, bool primary,
+                      float height = 28.0f) {
+        auto node = box(Kind::Row, height);
+        node->style.pad_l = node->style.pad_r = 10.0f;
+        node->style.radius = 8.0f;
+        node->style.bg = primary ? ui_token(L"accent") : ui_token(L"input");
+        if (!primary) {
+            node->style.border = true;
+            node->style.border_color = ui_token(L"border");
+        }
+        node->action = action;
+        node->kids.push_back(spacer(0, 0, true));
+        node->kids.push_back(text(label, 10.0f, 600,
+                                  primary ? ui_token(L"ink") : ui_token(L"label")));
+        node->kids.push_back(spacer(0, 0, true));
+        return node;
+    };
+    auto field_label = [&](const std::wstring& label) {
+        return text(upper_text(label), 9.5f, 600, ui_token(L"faint"));
+    };
+
+    float content_w = versions_list_width_ > 40.0f ? versions_list_width_ : 880.0f;
+
+    if (versions_picker_) {
+        auto head = box(Kind::Row, 46.0f);
+        auto head_info = box(Kind::Column, -1.0f, 3.0f);
+        head_info->style.grow_x = true;
+        head_info->kids.push_back(text(L"Chọn loader", 18.0f, 700, ui_token(L"text")));
+        head_info->kids.push_back(text(
+            L"Chọn loại loader trước, sau đó chọn phiên bản Minecraft và cấu hình instance.",
+            11.0f, 400, ui_token(L"faint"), content_w - 160.0f, false, true));
+        head->kids.push_back(std::move(head_info));
+        head->kids.push_back(spacer(0, 0, true));
+        head->kids.push_back(text(L"Bước 1 / 2", 10.0f, 400, ui_token(L"faint"), -1.0f, true));
+        root->kids.push_back(std::move(head));
+
+        float gap = 12.0f;
+        int cols = std::max(1, int((content_w + gap) / (250.0f + gap)));
+        int total = int(loaders_.size());
+        if (cols > total) cols = std::max(1, total);
+        float card_w = (content_w - gap * float(cols - 1)) / float(cols);
+        size_t index = 0;
+        while (index < loaders_.size()) {
+            auto row = box(Kind::Row, 136.0f, gap);
+            for (int c = 0; c < cols && index < loaders_.size(); ++c, ++index) {
+                const LoaderInfo& loader = loaders_[index];
+                auto node = card(136.0f);
+                node->style.width = card_w;
+                node->style.pad_l = node->style.pad_r = 16.0f;
+                node->style.pad_t = node->style.pad_b = 16.0f;
+                node->style.gap = 14.0f;
+                node->style.radius = 16.0f;
+                node->action = L"versions:loader:" + loader.id;
+                auto top = box(Kind::Row, 56.0f, 12.0f);
+                auto icon = box(Kind::Row, 56.0f);
+                icon->style.width = 56.0f;
+                icon->style.radius = 16.0f;
+                icon->style.bg = ui_token(L"input");
+                icon->style.border = true;
+                icon->style.border_color = ui_token(L"border");
+                icon->kids.push_back(spacer(0, 0, true));
+                icon->kids.push_back(image(asset(loader_icon_path(loader.id)), 36.0f, 36.0f));
+                icon->kids.push_back(spacer(0, 0, true));
+                top->kids.push_back(std::move(icon));
+                auto info = box(Kind::Column, -1.0f, 3.0f);
+                info->style.grow_x = true;
+                auto name_row = box(Kind::Row, -1.0f, 6.0f);
+                name_row->kids.push_back(text(loader.name, 14.0f, 700, ui_token(L"text")));
+                if (loader.id == L"lunar") {
+                    auto chip = box(Kind::Row, 16.0f);
+                    chip->style.pad_l = chip->style.pad_r = 5.0f;
+                    chip->style.radius = 4.0f;
+                    chip->style.bg = ui_token(L"input");
+                    chip->style.border = true;
+                    chip->style.border_color = ui_token(L"border");
+                    chip->kids.push_back(text(L"KHUYẾN NGHỊ", 8.0f, 700, ui_token(L"label"),
+                                              -1.0f, true));
+                    name_row->kids.push_back(std::move(chip));
+                }
+                info->kids.push_back(std::move(name_row));
+                info->kids.push_back(text(loader.desc, 10.0f, 400, ui_token(L"faint"),
+                                          card_w - 110.0f));
+                top->kids.push_back(std::move(info));
+                node->kids.push_back(std::move(top));
+                auto footer = box(Kind::Row, 16.0f, 6.0f);
+                footer->kids.push_back(text(
+                    loader.vanilla ? L"KHÔNG MOD" : L"HỖ TRỢ MOD", 9.0f, 400,
+                    ui_token(L"label"), -1.0f, true));
+                footer->kids.push_back(spacer(0, 0, true));
+                footer->kids.push_back(text(L"Chọn →", 10.0f, 700, ui_token(L"accent")));
+                node->kids.push_back(std::move(footer));
+                row->kids.push_back(std::move(node));
+            }
+            root->kids.push_back(std::move(row));
+        }
+        root->kids.push_back(text(
+            L"Có thể đổi loader sau ở cột bên phải. LunarLoader đi kèm shaderpack, HUD client và "
+            L"renderer tối ưu.",
+            10.0f, 400, ui_token(L"faint"), content_w, false, true));
+        versions_ui_ = std::move(root);
+        versions_aside_.reset();
+        versions_footer_.reset();
+        return;
+    }
+
+    // ── Step 2: version list (left) ────────────────────────────────────────
+    auto search = box(Kind::Row, 36.0f, 8.0f);
+    search->style.width = std::min(384.0f, content_w * 0.62f);
+    search->style.radius = 8.0f;
+    search->style.bg = ui_token(L"input");
+    search->style.border = true;
+    search->style.border_color = ui_token(L"border");
+    search->style.pad_l = search->style.pad_r = 10.0f;
+    search->action = L"versions:focus-query";
+    search->kids.push_back(image(asset(L"assets/icons/magnifying-glass.svg"), 14.0f, 14.0f, 0.0f,
+                                 ui_token(L"label")));
+    auto query_text = text(versions_query_.empty() ? L"Tìm phiên bản…" : versions_query_, 12.0f,
+                           500, versions_query_.empty() ? ui_token(L"faint") : ui_token(L"text"));
+    query_text->id = L"versions-query-text";
+    query_text->style.mono = false;
+    search->kids.push_back(std::move(query_text));
+    root->kids.push_back(std::move(search));
+
+    std::vector<VersionInfo> filtered = versions_filtered();
+    auto meta_row = box(Kind::Row, 16.0f, 8.0f);
+    meta_row->kids.push_back(text(std::to_wstring(filtered.size()) + L" kết quả", 10.0f, 400,
+                                  ui_token(L"faint"), -1.0f, true));
+    if (versions_loader_ != L"vanilla") {
+        std::wstring hint;
+        Color hint_color = ui_token(L"faint");
+        if (loader_games_loading_) {
+            hint = L"đang kiểm tra hỗ trợ…";
+        } else if (!loader_games_ready_) {
+            hint = L"không đọc được danh sách hỗ trợ";
+            hint_color = Color::rgb(0xF87171);
+        } else {
+            hint = loader_name(versions_loader_) + L" hỗ trợ " +
+                   std::to_wstring(loader_games_.size()) + L" phiên bản";
+            hint_color = ui_token(L"accent");
+        }
+        meta_row->kids.push_back(text(hint, 10.0f, 400, hint_color, -1.0f, true));
+    }
+    root->kids.push_back(std::move(meta_row));
+
+    if (versions_all_.empty() && !versions_manifest_ready_) {
+        root->kids.push_back(text(L"Đang tải danh sách phiên bản…", 12.0f, 500,
+                                  ui_token(L"label"), content_w, false, true));
+    } else if (versions_loader_ != L"vanilla" && loader_games_loading_) {
+        root->kids.push_back(text(L"Đang kiểm tra phiên bản được hỗ trợ…", 12.0f, 500,
+                                  ui_token(L"label"), content_w, false, true));
+    } else {
+        int show = std::min(int(filtered.size()), versions_visible_);
+        float gap = 12.0f;
+        int cols = std::max(1, int((content_w + gap) / (190.0f + gap)));
+        if (cols > show) cols = std::max(1, show);
+        float card_w = (content_w - gap * float(cols - 1)) / float(cols);
+        size_t index = 0;
+        while (index < size_t(show)) {
+            auto row = box(Kind::Row, 106.0f, gap);
+            for (int c = 0; c < cols && index < size_t(show); ++c, ++index) {
+                const VersionInfo& version = filtered[index];
+                bool active = version.id == versions_picked_;
+                auto node = card(106.0f);
+                node->style.width = card_w;
+                node->style.pad_l = node->style.pad_r = 12.0f;
+                node->style.pad_t = node->style.pad_b = 12.0f;
+                node->style.gap = 8.0f;
+                node->style.bg = active ? Color::rgb(0xE9B872, 0.12f) : ui_token(L"surface");
+                node->style.border_color = active ? Color::rgb(0xE9B872, 0.5f)
+                                                  : ui_token(L"border");
+                node->style.glass = !active;
+                node->action = L"versions:pick:" + version.id;
+                auto top = box(Kind::Row, 36.0f, 10.0f);
+                auto icon = box(Kind::Row, 36.0f);
+                icon->style.width = 36.0f;
+                icon->style.radius = 8.0f;
+                icon->style.bg = ui_token(L"input");
+                icon->style.border = true;
+                icon->style.border_color = ui_token(L"border");
+                icon->kids.push_back(spacer(0, 0, true));
+                icon->kids.push_back(image(asset(loader_icon_path(versions_loader_)), 24.0f,
+                                           24.0f));
+                icon->kids.push_back(spacer(0, 0, true));
+                top->kids.push_back(std::move(icon));
+                top->kids.push_back(text(version.id, 12.5f, 700,
+                                         active ? ui_token(L"accent") : ui_token(L"text"), -1.0f,
+                                         true));
+                top->kids.push_back(spacer(0, 0, true));
+                if (active)
+                    top->kids.push_back(image(asset(L"assets/icons/check.svg"), 14.0f, 14.0f,
+                                              0.0f, ui_token(L"accent")));
+                node->kids.push_back(std::move(top));
+                auto tags = box(Kind::Row, 16.0f, 6.0f);
+                bool release = version.type == L"release";
+                tags->kids.push_back(tag(release ? L"BẢN PHÁT HÀNH" : L"BẢN THỬ NGHIỆM",
+                                         release ? Color::rgb(0x22C55E, 0.14f)
+                                                 : Color::rgb(0xEAB308, 0.14f),
+                                         release ? Color::rgb(0x22C55E)
+                                                 : Color::rgb(0xEAB308)));
+                if (version.id == latest_release_)
+                    tags->kids.push_back(tag(L"LATEST", Color::rgb(0xE9B872, 0.16f),
+                                             ui_token(L"accent")));
+                node->kids.push_back(std::move(tags));
+                node->kids.push_back(text(iso_date(version.release_time), 10.0f, 400,
+                                          ui_token(L"faint"), -1.0f, true));
+                row->kids.push_back(std::move(node));
+            }
+            root->kids.push_back(std::move(row));
+        }
+        if (filtered.empty() && !versions_query_.empty()) {
+            root->kids.push_back(text(L"Không có phiên bản nào khớp.", 11.0f, 400,
+                                      ui_token(L"faint"), content_w));
+        }
+        if (int(filtered.size()) > versions_visible_) {
+            auto more = button(L"Hiện thêm (" +
+                                   std::to_wstring(int(filtered.size()) - versions_visible_) +
+                                   L")",
+                               L"versions:more", false, 36.0f);
+            more->style.width = content_w;
+            root->kids.push_back(std::move(more));
+        }
+    }
+    versions_ui_ = std::move(root);
+
+    // ── Aside: create form ────────────────────────────────────────────────
+    const float aside_w = 280.0f;
+    auto aside = std::make_unique<Node>();
+    aside->kind = Kind::Column;
+    aside->style.gap = 12.0f;
+
+    auto heading = box(Kind::Row, 34.0f, 8.0f);
+    heading->kids.push_back(image(asset(loader_icon_path(versions_loader_)), 28.0f, 28.0f, 7.0f));
+    auto heading_text = box(Kind::Column, -1.0f, 1.0f);
+    heading_text->style.grow_x = true;
+    heading_text->kids.push_back(text(L"Tạo phiên bản", 12.0f, 700, ui_token(L"text")));
+    heading_text->kids.push_back(text(L"Chọn loader và phiên bản", 10.0f, 400,
+                                      ui_token(L"faint"), 150.0f, false, true));
+    heading->kids.push_back(std::move(heading_text));
+    auto change = box(Kind::Row, 26.0f);
+    change->style.pad_l = change->style.pad_r = 8.0f;
+    change->style.radius = 8.0f;
+    change->style.bg = ui_token(L"input");
+    change->style.border = true;
+    change->style.border_color = ui_token(L"border");
+    change->action = L"versions:change-loader";
+    change->kids.push_back(text(L"Đổi loader", 10.0f, 600, ui_token(L"label")));
+    heading->kids.push_back(std::move(change));
+    aside->kids.push_back(std::move(heading));
+
+    auto loader_row = box(Kind::Row, 32.0f, 8.0f);
+    loader_row->style.pad_l = loader_row->style.pad_r = 10.0f;
+    loader_row->style.radius = 8.0f;
+    loader_row->style.bg = ui_token(L"input");
+    loader_row->style.border = true;
+    loader_row->style.border_color = ui_token(L"border");
+    loader_row->kids.push_back(image(asset(loader_icon_path(versions_loader_)), 20.0f, 20.0f,
+                                     5.0f));
+    loader_row->kids.push_back(text(loader_name(versions_loader_), 11.0f, 700,
+                                    ui_token(L"accent")));
+    std::wstring loader_desc;
+    for (const auto& loader : loaders_)
+        if (loader.id == versions_loader_) loader_desc = loader.desc;
+    loader_row->kids.push_back(text(loader_desc, 9.0f, 400, ui_token(L"faint"), 150.0f));
+    aside->kids.push_back(std::move(loader_row));
+
+    if (versions_loader_ != L"vanilla") {
+        auto block = box(Kind::Column, -1.0f, 6.0f);
+        block->kids.push_back(field_label(L"Bản build loader"));
+        if (versions_picked_.empty()) {
+            block->kids.push_back(text(L"Chọn phiên bản game trước.", 10.0f, 400,
+                                       ui_token(L"faint")));
+        } else if (builds_loading_) {
+            auto loading = box(Kind::Row, 30.0f, 6.0f);
+            loading->kids.push_back(image(asset(L"assets/icons/arrows-clockwise.svg"), 12.0f,
+                                          12.0f, 0.0f, ui_token(L"label")));
+            loading->kids.push_back(text(L"Đang tải build…", 10.0f, 400, ui_token(L"label")));
+            block->kids.push_back(std::move(loading));
+        } else if (!builds_.empty()) {
+            auto select = box(Kind::Row, 34.0f, 6.0f);
+            select->id = L"versions-build-select";
+            select->style.pad_l = select->style.pad_r = 10.0f;
+            select->style.radius = 8.0f;
+            select->style.bg = ui_token(L"input");
+            select->style.border = true;
+            select->style.border_color = ui_token(L"border");
+            select->action = L"versions:build-menu";
+            select->kids.push_back(text(versions_build_, 11.0f, 700, ui_token(L"text"),
+                                        -1.0f, true));
+            select->kids.push_back(spacer(0, 0, true));
+            for (const auto& build : builds_) {
+                if (build.version != versions_build_) continue;
+                if (build.latest) select->kids.push_back(tag(L"LATEST", Color::rgb(0xE9B872, 0.16f), ui_token(L"accent")));
+                select->kids.push_back(tag(build.beta ? L"THỬ NGHIỆM" : L"ỔN ĐỊNH",
+                                           build.beta ? Color::rgb(0xEAB308, 0.16f)
+                                                      : Color::rgb(0x22C55E, 0.14f),
+                                           build.beta ? Color::rgb(0xEAB308)
+                                                      : Color::rgb(0x22C55E)));
+                break;
+            }
+            block->kids.push_back(std::move(select));
+        } else if (builds_failed_) {
+            block->kids.push_back(text(L"Không tải được danh sách build.", 10.0f, 500,
+                                       Color::rgb(0xF87171)));
+        } else if (builds_ready_) {
+            block->kids.push_back(text(loader_name(versions_loader_) +
+                                           L" không có bản build cho Minecraft " +
+                                           versions_picked_ + L".",
+                                       10.0f, 600, Color::rgb(0xF87171), aside_w, false, true));
+            block->kids.push_back(text(
+                L"Loader này không phát hành cho phiên bản game đó. Chọn phiên bản khác.",
+                10.0f, 400, ui_token(L"faint"), aside_w, false, true));
+        }
+        aside->kids.push_back(std::move(block));
+    }
+
+    auto picked_block = box(Kind::Column, -1.0f, 6.0f);
+    picked_block->kids.push_back(field_label(L"Chọn phiên bản"));
+    auto picked_box = box(Kind::Row, 34.0f);
+    picked_box->style.pad_l = picked_box->style.pad_r = 10.0f;
+    picked_box->style.radius = 8.0f;
+    picked_box->style.bg = ui_token(L"input");
+    picked_box->style.border = true;
+    picked_box->style.border_color = ui_token(L"border");
+    picked_box->kids.push_back(text(versions_picked_.empty() ? L"chưa chọn" : versions_picked_,
+                                    11.0f, 700,
+                                    versions_picked_.empty() ? ui_token(L"faint")
+                                                             : ui_token(L"accent"),
+                                    -1.0f, true));
+    picked_block->kids.push_back(std::move(picked_box));
+    aside->kids.push_back(std::move(picked_block));
+
+    auto name_block = box(Kind::Column, -1.0f, 6.0f);
+    name_block->kids.push_back(field_label(L"Tên phiên bản"));
+    auto name_box = box(Kind::Row, 36.0f);
+    name_box->style.pad_l = name_box->style.pad_r = 10.0f;
+    name_box->style.radius = 8.0f;
+    name_box->style.bg = ui_token(L"input");
+    name_box->style.border = true;
+    name_box->style.border_color = ui_token(L"border");
+    name_box->action = L"versions:focus-name";
+    std::wstring name_shown = versions_name_;
+    if (name_shown.empty()) {
+        name_shown = versions_picked_.empty()
+                         ? L"my-instance"
+                         : loader_name(versions_loader_) + L" " + versions_picked_;
+    }
+    auto name_text = text(name_shown, 11.0f, 500,
+                          versions_name_.empty() ? ui_token(L"faint") : ui_token(L"text"),
+                          aside_w - 20.0f, false, true);
+    name_text->id = L"versions-name-text";
+    name_box->kids.push_back(std::move(name_text));
+    name_block->kids.push_back(std::move(name_box));
+    aside->kids.push_back(std::move(name_block));
+
+    std::wstring label_name = versions_name_;
+    if (label_name.empty())
+        label_name = versions_picked_.empty() ? L"instance"
+                                              : loader_name(versions_loader_) + L" " + versions_picked_;
+    std::wstring target_dir = versions_dir_.empty()
+                                  ? instance_base_dir() + L"\\" + instance_slug(label_name)
+                                  : versions_dir_;
+    auto dir_block = box(Kind::Column, -1.0f, 6.0f);
+    dir_block->kids.push_back(field_label(L"Thư mục lưu instance"));
+    auto dir_row = box(Kind::Row, 36.0f, 6.0f);
+    auto dir_box = box(Kind::Row, 36.0f);
+    dir_box->style.grow_x = true;
+    dir_box->style.pad_l = dir_box->style.pad_r = 10.0f;
+    dir_box->style.radius = 8.0f;
+    dir_box->style.bg = ui_token(L"input");
+    dir_box->style.border = true;
+    dir_box->style.border_color = ui_token(L"border");
+    dir_box->kids.push_back(text(target_dir, 9.5f, 400, ui_token(L"label"), aside_w - 70.0f,
+                                 true));
+    dir_row->kids.push_back(std::move(dir_box));
+    auto browse = box(Kind::Row, 36.0f);
+    browse->style.width = 36.0f;
+    browse->style.radius = 8.0f;
+    browse->style.bg = ui_token(L"input");
+    browse->style.border = true;
+    browse->style.border_color = ui_token(L"border");
+    browse->action = L"versions:dir";
+    browse->kids.push_back(spacer(0, 0, true));
+    browse->kids.push_back(image(asset(L"assets/icons/folder-open.svg"), 14.0f, 14.0f, 0.0f,
+                                 ui_token(L"label")));
+    browse->kids.push_back(spacer(0, 0, true));
+    dir_row->kids.push_back(std::move(browse));
+    dir_block->kids.push_back(std::move(dir_row));
+    aside->kids.push_back(std::move(dir_block));
+
+    auto mem_block = box(Kind::Column, -1.0f, 6.0f);
+    mem_block->kids.push_back(
+        field_label(L"Bộ nhớ cấp cho game · " + std::to_wstring(versions_memory_) + L" MB"));
+    auto track = spacer(0.0f, 18.0f, true);
+    track->id = L"versions-mem-track";
+    mem_block->kids.push_back(std::move(track));
+    auto mem_steps = box(Kind::Row, 24.0f, 4.0f);
+    const int steps[5] = { 1024, 2048, 3072, 4096, 6144 };
+    for (int step : steps) {
+        auto chip = box(Kind::Row, 24.0f);
+        chip->style.grow = 1.0f;
+        chip->style.grow_x = true;
+        chip->style.radius = 6.0f;
+        chip->style.bg = versions_memory_ == step ? Color::rgb(0xE9B872, 0.16f)
+                                                  : ui_token(L"input");
+        chip->action = L"versions:mem:" + std::to_wstring(step);
+        chip->kids.push_back(spacer(0, 0, true));
+        chip->kids.push_back(text(std::to_wstring(step / 1024) + L"G", 9.0f, 500,
+                                  versions_memory_ == step ? ui_token(L"accent")
+                                                           : ui_token(L"faint"),
+                                  -1.0f, true));
+        chip->kids.push_back(spacer(0, 0, true));
+        mem_steps->kids.push_back(std::move(chip));
+    }
+    mem_block->kids.push_back(std::move(mem_steps));
+    aside->kids.push_back(std::move(mem_block));
+
+    auto player_block = box(Kind::Column, -1.0f, 6.0f);
+    player_block->kids.push_back(field_label(L"Người chơi"));
+    auto player_row = box(Kind::Row, 36.0f, 8.0f);
+    player_row->style.pad_l = player_row->style.pad_r = 10.0f;
+    player_row->style.radius = 8.0f;
+    player_row->style.bg = ui_token(L"input");
+    player_row->style.border = true;
+    player_row->style.border_color = ui_token(L"border");
+    const Account* account = active_account();
+    if (account) {
+        std::wstring head = account_head(account->name);
+        if (!head.empty())
+            player_row->kids.push_back(image(head, 20.0f, 20.0f, 5.0f));
+        player_row->kids.push_back(text(account->name, 11.0f, 500, ui_token(L"text"),
+                                        aside_w - 110.0f));
+        player_row->kids.push_back(spacer(0, 0, true));
+        auto change_account = box(Kind::Row, 20.0f);
+        change_account->action = L"nav:accounts";
+        change_account->kids.push_back(text(L"Đổi", 10.0f, 600, ui_token(L"accent")));
+        player_row->kids.push_back(std::move(change_account));
+    } else {
+        player_row->kids.push_back(text(L"Chưa có tài khoản — game sẽ dùng tên “Player”.",
+                                        9.5f, 400, Color::rgb(0xF5B84B), aside_w - 110.0f,
+                                        false, true));
+        player_row->kids.push_back(spacer(0, 0, true));
+        auto add = box(Kind::Row, 20.0f);
+        add->action = L"nav:accounts";
+        add->kids.push_back(text(L"Thêm tài khoản", 10.0f, 600, ui_token(L"accent")));
+        player_row->kids.push_back(std::move(add));
+    }
+    player_block->kids.push_back(std::move(player_row));
+    aside->kids.push_back(std::move(player_block));
+
+    auto demo_row = box(Kind::Row, 46.0f, 10.0f);
+    demo_row->style.pad_l = demo_row->style.pad_r = 10.0f;
+    demo_row->style.pad_t = demo_row->style.pad_b = 8.0f;
+    demo_row->style.radius = 8.0f;
+    demo_row->style.bg = versions_demo_ ? Color::rgb(0xE9B872, 0.10f) : ui_token(L"input");
+    demo_row->style.border = true;
+    demo_row->style.border_color =
+        versions_demo_ ? Color::rgb(0xE9B872, 0.42f) : ui_token(L"border");
+    demo_row->kids.push_back(image(asset(L"assets/icons/play-circle.svg"), 14.0f, 14.0f, 0.0f,
+                                   versions_demo_ ? ui_token(L"accent") : ui_token(L"faint")));
+    auto demo_text = box(Kind::Column, -1.0f, 1.0f);
+    demo_text->style.grow_x = true;
+    demo_text->kids.push_back(text(L"Chơi thử (Demo)", 11.0f, 600,
+                                   versions_demo_ ? ui_token(L"accent") : ui_token(L"text")));
+    demo_text->kids.push_back(text(
+        L"Tạo phiên bản ở chế độ chơi thử: kèm cờ --demo, thế giới giới hạn 5 ngày trong game "
+        L"và không vào được máy chủ.",
+        9.0f, 400, ui_token(L"faint"), aside_w - 120.0f, false, true));
+    demo_row->kids.push_back(std::move(demo_text));
+    demo_row->kids.push_back(toggle(versions_demo_, L"versions:demo"));
+    aside->kids.push_back(std::move(demo_row));
+
+    aside->kids.push_back(text(
+        L"Tài nguyên gốc (client jar, thư viện, assets) tải vào thư mục dùng chung và tái sử dụng "
+        L"cho mọi phiên bản.",
+        9.0f, 400, ui_token(L"faint"), aside_w, false, true));
+    versions_aside_ = std::move(aside);
+
+    auto footer = std::make_unique<Node>();
+    footer->kind = Kind::Column;
+    footer->style.gap = 8.0f;
+    if (!versions_error_.empty()) {
+        auto error_row = box(Kind::Row, -1.0f, 8.0f);
+        error_row->style.pad_l = error_row->style.pad_r = 10.0f;
+        error_row->style.pad_t = error_row->style.pad_b = 8.0f;
+        error_row->style.radius = 8.0f;
+        error_row->style.bg = Color::rgb(0xF87171, 0.10f);
+        error_row->style.border = true;
+        error_row->style.border_color = Color::rgb(0xF87171, 0.28f);
+        error_row->kids.push_back(image(asset(L"assets/icons/warning-circle.svg"), 13.0f, 13.0f,
+                                        0.0f, Color::rgb(0xF87171)));
+        error_row->kids.push_back(text(versions_error_, 10.0f, 400, Color::rgb(0xF87171),
+                                       aside_w - 70.0f, false, true));
+        footer->kids.push_back(std::move(error_row));
+    }
+    auto create = box(Kind::Row, 40.0f);
+    create->style.radius = 8.0f;
+    create->style.bg = ui_token(L"accent");
+    create->action = L"versions:create";
+    create->kids.push_back(spacer(0, 0, true));
+    create->kids.push_back(text(L"Tạo phiên bản", 12.0f, 700, ui_token(L"ink")));
+    create->kids.push_back(spacer(0, 0, true));
+    footer->kids.push_back(std::move(create));
+    versions_footer_ = std::move(footer);
+}
+
+void App::versions_open_build_menu() {
+    if (builds_.empty()) return;
+    float width = versions_build_rect_.right - versions_build_rect_.left;
+    if (width < 120.0f) width = 220.0f;
+    int rows = int(builds_.size());
+    float row_h = 32.0f;
+    float menu_h = std::min(float(rows) * row_h + 8.0f, 10.0f * row_h + 8.0f);
+    float top = versions_build_rect_.bottom + 4.0f;
+    if (top + menu_h > versions_slot_rect_.bottom - 6.0f)
+        top = versions_build_rect_.top - 4.0f - menu_h;
+    if (top < versions_slot_rect_.top + 6.0f) top = versions_slot_rect_.top + 6.0f;
+    versions_menu_rect_ = D2D1::RectF(versions_build_rect_.left, top,
+                                      versions_build_rect_.left + width, top + menu_h);
+
+    auto menu = std::make_unique<Node>();
+    menu->kind = Kind::Column;
+    menu->style.gap = 2.0f;
+    menu->style.pad_l = menu->style.pad_r = 4.0f;
+    menu->style.pad_t = menu->style.pad_b = 4.0f;
+    menu->style.radius = 10.0f;
+    menu->style.bg = theme_locked_ ? Color::rgb(0x13171F) : ui_token(L"surface");
+    menu->style.border = true;
+    menu->style.border_color = ui_token(L"border");
+    for (size_t i = 0; i < builds_.size(); ++i) {
+        const LoaderBuild& build = builds_[i];
+        auto row = std::make_unique<Node>();
+        row->kind = Kind::Row;
+        row->style.height = 30.0f;
+        row->style.gap = 6.0f;
+        row->style.pad_l = row->style.pad_r = 8.0f;
+        row->style.radius = 6.0f;
+        row->style.hover_bg = ui_token(L"hover");
+        row->action = L"versions:build:" + std::to_wstring(i);
+        auto label = std::make_unique<Node>();
+        label->kind = Kind::Text;
+        label->text = build.version;
+        label->style.font_size = 11.0f;
+        label->style.weight = 700;
+        label->style.mono = true;
+        label->style.color = build.version == versions_build_ ? ui_token(L"accent")
+                                                              : ui_token(L"text");
+        row->kids.push_back(std::move(label));
+        auto grow = std::make_unique<Node>();
+        grow->kind = Kind::Spacer;
+        grow->style.grow_x = true;
+        grow->style.grow = 1.0f;
+        row->kids.push_back(std::move(grow));
+        auto add_tag = [&](const std::wstring& label_text, Color bg, Color fg) {
+            auto chip = std::make_unique<Node>();
+            chip->kind = Kind::Row;
+            chip->style.height = 15.0f;
+            chip->style.pad_l = chip->style.pad_r = 4.0f;
+            chip->style.radius = 3.0f;
+            chip->style.bg = bg;
+            auto chip_text = std::make_unique<Node>();
+            chip_text->kind = Kind::Text;
+            chip_text->text = label_text;
+            chip_text->style.font_size = 8.0f;
+            chip_text->style.weight = 700;
+            chip_text->style.mono = true;
+            chip_text->style.color = fg;
+            chip->kids.push_back(std::move(chip_text));
+            row->kids.push_back(std::move(chip));
+        };
+        if (build.latest && build.stable)
+            add_tag(L"LATEST", Color::rgb(0xE9B872, 0.16f), ui_token(L"accent"));
+        add_tag(build.beta ? L"THỬ NGHIỆM" : L"ỔN ĐỊNH",
+                build.beta ? Color::rgb(0xEAB308, 0.16f) : Color::rgb(0x22C55E, 0.14f),
+                build.beta ? Color::rgb(0xEAB308) : Color::rgb(0x22C55E));
+        menu->kids.push_back(std::move(row));
+    }
+    versions_menu_ = std::move(menu);
+    versions_menu_open_ = true;
+    float total_h = float(builds_.size()) * row_h + 8.0f;
+    float max_scroll = std::max(0.0f, total_h - menu_h);
+    versions_menu_scroll_ = 0.0f;
+    for (size_t i = 0; i < builds_.size(); ++i) {
+        if (builds_[i].version == versions_build_) {
+            versions_menu_scroll_ =
+                std::clamp(float(i) * row_h - 2.0f * row_h, 0.0f, max_scroll);
+            break;
+        }
+    }
+    dirty_ = true;
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+void App::versions_close_build_menu() {
+    if (!versions_menu_open_) return;
+    versions_menu_open_ = false;
+    versions_menu_.reset();
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+void App::draw_versions_popup() {
+    if (!versions_menu_open_ || !versions_menu_) return;
+    float width = versions_menu_rect_.right - versions_menu_rect_.left;
+    ui_layout(versions_menu_.get(), width, 100000.0f, renderer_);
+    ui_move(versions_menu_.get(), versions_menu_rect_.left,
+            versions_menu_rect_.top - versions_menu_scroll_);
+    renderer_.clip_push(versions_menu_rect_);
+    ui_draw(versions_menu_.get(), renderer_, hovered_);
+    renderer_.clip_pop();
+}
+
+void App::versions_memory_from_x(float x) {
+    float left = versions_mem_track_.left;
+    float right = versions_mem_track_.right;
+    if (right - left < 10.0f) return;
+    float ratio = std::clamp((x - left) / (right - left), 0.0f, 1.0f);
+    int value = int(std::lround((1024.0f + ratio * float(16384 - 1024)) / 512.0f)) * 512;
+    value = std::clamp(value, 1024, 16384);
+    if (value == versions_memory_) return;
+    versions_memory_ = value;
+    rebuild_versions();
+    dirty_ = true;
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+void App::versions_browse_dir() {
+    BROWSEINFOW info{};
+    info.lpszTitle = L"Chọn thư mục lưu instance";
+    info.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE | BIF_USENEWUI;
+    PIDLIST_ABSOLUTE pidl = SHBrowseForFolderW(&info);
+    if (!pidl) return;
+    wchar_t path[MAX_PATH]{};
+    if (SHGetPathFromIDListW(pidl, path)) versions_dir_ = path;
+    CoTaskMemFree(pidl);
+    rebuild_versions();
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+void App::versions_create_instance() {
+    versions_error_.clear();
+    if (versions_loader_.empty()) {
+        versions_error_ = L"Chưa chọn loader.";
+    } else if (versions_picked_.empty()) {
+        versions_error_ = L"Chưa chọn phiên bản game.";
+    } else if (versions_loader_ != L"vanilla" && versions_build_.empty()) {
+        versions_error_ = L"Chưa chọn bản build của loader.";
+    }
+    if (!versions_error_.empty()) {
+        rebuild_versions();
+        InvalidateRect(hwnd_, nullptr, FALSE);
+        return;
+    }
+
+    std::wstring label = versions_name_;
+    if (label.empty()) label = loader_name(versions_loader_) + L" " + versions_picked_;
+    std::wstring dir = versions_dir_.empty()
+                           ? instance_base_dir() + L"\\" + instance_slug(label)
+                           : versions_dir_;
+    for (const auto& inst : instances_) {
+        if (!inst.dir.empty() && _wcsicmp(inst.dir.c_str(), dir.c_str()) == 0) {
+            versions_error_ = L"Thư mục này đã có một instance của XyoLauncher.";
+            rebuild_versions();
+            InvalidateRect(hwnd_, nullptr, FALSE);
+            return;
+        }
+    }
+    if (!ensure_dir_tree(dir)) {
+        versions_error_ = L"Không tạo được thư mục instance: " + dir;
+        rebuild_versions();
+        InvalidateRect(hwnd_, nullptr, FALSE);
+        return;
+    }
+    const wchar_t* subs[] = { L"mods", L"config", L"saves", L"resourcepacks", L"shaderpacks",
+                              L"logs" };
+    for (const wchar_t* sub : subs) ensure_dir_tree(dir + L"\\" + sub);
+
+    SYSTEMTIME st{};
+    GetSystemTime(&st);
+    wchar_t created[40];
+    swprintf(created, 40, L"%04d-%02d-%02dT%02d:%02d:%02d.000Z", st.wYear, st.wMonth, st.wDay,
+             st.wHour, st.wMinute, st.wSecond);
+    wchar_t id_buf[96];
+    swprintf(id_buf, 96, L"%ls-%ls-%llx", versions_loader_.c_str(), versions_picked_.c_str(),
+             (unsigned long long)GetTickCount64());
+    std::wstring id = id_buf;
+
+    const Account* account = active_account();
+    std::wstring username = account ? account->name : L"Player";
+
+    Json entry = Json::object();
+    entry.set("id", Json::string(wide_to_utf8(id)));
+    entry.set("name", Json::string(wide_to_utf8(label)));
+    entry.set("version", Json::string(wide_to_utf8(versions_picked_)));
+    entry.set("loader", Json::string(wide_to_utf8(versions_loader_)));
+    if (versions_loader_ != L"vanilla")
+        entry.set("loaderVersion", Json::string(wide_to_utf8(versions_build_)));
+    entry.set("memoryMb", Json::number(versions_memory_));
+    entry.set("username", Json::string(wide_to_utf8(username)));
+    entry.set("demo", Json::boolean(versions_demo_));
+    entry.set("dir", Json::string(wide_to_utf8(dir)));
+    entry.set("status", Json::string("ready"));
+    entry.set("created", Json::string(wide_to_utf8(created)));
+    entry.set("playtimeMs", Json::number(0.0));
+    Json instance_json = Json::object();
+    for (const auto& field : entry.obj) instance_json.set(field.first, field.second);
+    instance_json.set("sharedDir", Json::string(wide_to_utf8(shared_dir_)));
+    write_file_utf8(dir + L"\\instance.json", instance_json.dump(2));
+
+    Json index;
+    index.parse(read_file_utf8(user_data_dir() + L"\\instances.json"));
+    Json updated = Json::array();
+    updated.arr.push_back(entry);
+    if (index.type == Json::Type::Array) {
+        for (const auto& item : index.arr) updated.arr.push_back(item);
+    }
+    write_file_utf8(user_data_dir() + L"\\instances.json", updated.dump(2));
+
+    InstanceInfo info;
+    info.id = id;
+    info.name = label;
+    info.version = versions_picked_;
+    info.loader = versions_loader_;
+    info.loader_version = versions_build_;
+    info.dir = dir;
+    info.status = L"ready";
+    info.memory_mb = versions_memory_;
+    info.created = created;
+    instances_.insert(instances_.begin(), std::move(info));
+    rebuild_instance_rows();
+    rebuild_home();
+
+    versions_error_.clear();
+    notify(L"Phiên bản", L"Đã tạo " + label + L".", L"success");
+    rebuild_versions();
+    dirty_ = true;
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+InstanceInfo* App::find_instance(const std::wstring& id) {
+    for (auto& inst : instances_)
+        if (inst.id == id) return &inst;
+    return nullptr;
+}
+
+std::string App::load_account_token(const std::wstring& account_id) const {
+    Json store;
+    if (!store.parse(read_file_utf8(user_data_dir() + L"\\auth.json"))) return "";
+    const Json* entry = store.find(wide_to_utf8(account_id).c_str());
+    if (!entry) return "";
+    std::string data = entry->text("data");
+    if (data.empty()) return "";
+    if (entry->boolean("enc", false)) data = oscrypt_decrypt(data);
+    return data;
+}
+
+void App::persist_instance_fields(const std::wstring& id, const std::function<void(Json&)>& mutate) {
+    if (id.empty()) return;
+    std::string body = read_file_utf8(user_data_dir() + L"\\instances.json");
+    Json index;
+    if (index.parse(body) && index.type == Json::Type::Array) {
+        for (auto& item : index.arr)
+            if (item.text("id") == wide_to_utf8(id)) mutate(item);
+        write_file_utf8(user_data_dir() + L"\\instances.json", index.dump(2));
+    }
+    InstanceInfo* inst = find_instance(id);
+    if (!inst || inst->dir.empty()) return;
+    std::wstring file = inst->dir + L"\\instance.json";
+    Json local;
+    if (local.parse(read_file_utf8(file)) && local.type == Json::Type::Object) {
+        mutate(local);
+        write_file_utf8(file, local.dump(2));
+    }
+}
+
+void App::launch_instance(const std::wstring& id_in, const std::wstring& quick_type,
+                          const std::wstring& quick_value) {
+    std::wstring id = id_in;
+    InstanceInfo* inst = find_instance(id);
+    if (!inst) return;
+    if (!launcher_) launcher_ = std::make_unique<LaunchManager>();
+    if (inst->status == L"running" || inst->status == L"starting" || inst->status == L"stopping") {
+        stop_instance(id);
+        return;
+    }
+    InstanceLaunchSpec spec;
+    spec.instance_id = id;
+    spec.instance_dir = inst->dir;
+    spec.version_id = inst->version_id.empty() ? inst->version : inst->version_id;
+    const Account* account = active_account();
+    spec.username = account ? account->name : (inst->username.empty() ? L"Player" : inst->username);
+    spec.uuid = account && !account->uuid.empty() ? account->uuid
+                                                  : utf8_to_wide(offline_uuid(spec.username));
+    if (account) {
+        Json token;
+        token.parse(load_account_token(account->id));
+        spec.access_token = utf8_to_wide(token.text("accessToken"));
+        spec.user_type = account->type == L"microsoft" ? L"msa"
+                         : account->type == L"ely"     ? L"mojang"
+                                                       : L"legacy";
+        spec.xuid = account->xuid;
+    } else {
+        spec.user_type = L"legacy";
+    }
+    spec.java_path = inst->java_path;
+    spec.settings_java = java_path_;
+    spec.extra_jvm = inst->jvm_args;
+    spec.memory_mb = inst->memory_mb > 0 ? inst->memory_mb : 4096;
+    spec.demo = inst->demo;
+    spec.quick_play_type = quick_type;
+    spec.quick_play_value = quick_value;
+    spec.shared_dir = shared_dir_;
+
+    launch_ui_ = LaunchUiState{};
+    launch_ui_.id = id;
+    launch_ui_.lines.push_back(L"[XyoLauncher] Chuẩn bị khởi chạy " + inst->name + L" (" +
+                               inst->version + L")");
+    launch_started_ = now_ms();
+    inst->status = L"starting";
+    persist_instance_fields(id, [](Json& entry) {
+        entry.set("status", Json::string("starting"));
+    });
+    rebuild_instance_rows();
+    rebuild_home();
+    if (page_ == L"console") {
+        console_dirty_ = true;
+        rebuild_console();
+    }
+
+    HWND target = hwnd_;
+    LaunchCallbacks callbacks;
+    callbacks.progress = [target](const std::wstring& instance_id, const ProgressReport& report) {
+        auto* msg = new LaunchProgressMsg();
+        msg->id = instance_id;
+        msg->phase = report.phase;
+        msg->label = report.label;
+        msg->done = report.done;
+        msg->total = report.total;
+        msg->bytes = report.bytes;
+        msg->bytes_total = report.bytes_total;
+        PostMessage(target, WM_APP + 20, 0, reinterpret_cast<LPARAM>(msg));
+    };
+    callbacks.log = [target](const std::wstring& instance_id, const std::wstring& line) {
+        auto* msg = new LaunchLogMsg();
+        msg->id = instance_id;
+        msg->line = line;
+        PostMessage(target, WM_APP + 21, 0, reinterpret_cast<LPARAM>(msg));
+    };
+    callbacks.state = [target](const std::wstring& instance_id, const std::wstring& state) {
+        auto* msg = new LaunchStateMsg();
+        msg->id = instance_id;
+        msg->state = state;
+        PostMessage(target, WM_APP + 22, 0, reinterpret_cast<LPARAM>(msg));
+    };
+    callbacks.exit = [target](const std::wstring& instance_id, int code, bool crashed,
+                              const CrashInfo& crash, const std::wstring& error) {
+        auto* msg = new LaunchExitMsg();
+        msg->id = instance_id;
+        msg->code = code;
+        msg->crashed = crashed;
+        msg->error = error;
+        msg->title = crash.title;
+        msg->hint = crash.hint;
+        PostMessage(target, WM_APP + 23, 0, reinterpret_cast<LPARAM>(msg));
+    };
+    std::wstring error;
+    if (!launcher_->start(spec, std::move(callbacks), &error)) {
+        inst->status = L"ready";
+        persist_instance_fields(id, [](Json& entry) {
+            entry.set("status", Json::string("ready"));
+        });
+        rebuild_instance_rows();
+        rebuild_home();
+        notify(L"Khởi chạy", error.empty() ? L"Không khởi chạy được." : error, L"bad");
+    }
+    dirty_ = true;
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+void App::stop_instance(const std::wstring& id) {
+    if (!launcher_) return;
+    launcher_->stop(id);
+    if (!launcher_->running(id)) {
+        if (InstanceInfo* inst = find_instance(id)) {
+            inst->status = L"ready";
+            persist_instance_fields(id, [](Json& entry) {
+                entry.set("status", Json::string("ready"));
+            });
+        }
+    } else if (InstanceInfo* inst = find_instance(id)) {
+        inst->status = L"stopping";
+    }
+    rebuild_instance_rows();
+    rebuild_home();
+    if (page_ == L"console") {
+        console_dirty_ = true;
+        SetTimer(hwnd_, 2, 16, nullptr);
+    }
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+void App::open_console(const std::wstring& id_in) {
+    std::wstring id = id_in;
+    if (id.empty()) return;
+    InstanceInfo* inst = find_instance(id);
+    if (!inst) return;
+    if (launch_ui_.id != id) {
+        launch_ui_ = LaunchUiState{};
+        launch_ui_.id = id;
+        launch_ui_.lines.push_back(L"[XyoLauncher] " + inst->name + L" · " + inst->version);
+    }
+    page_ = L"console";
+    rebuild_console();
+    ui_apply_page();
+    dirty_ = true;
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+void App::rebuild_console() {
+    if (!ui_) return;
+    InstanceInfo* inst = find_instance(launch_ui_.id);
+    std::wstring name = inst ? inst->name : L"Console";
+    std::wstring status = inst ? inst->status : L"ready";
+    if (Node* title = ui_find(ui_.get(), L"console-title")) title->text = name;
+    if (Node* sub = ui_find(ui_.get(), L"console-sub")) {
+        std::wstring text = status;
+        if (inst) {
+            text = inst->version;
+            if (!inst->loader.empty() && inst->loader != L"vanilla")
+                text += L" · " + inst->loader +
+                        (inst->loader_version.empty() ? L"" : L" " + inst->loader_version);
+            text += L" · " + status_label(status);
+        }
+        sub->text = text;
+    }
+    if (Node* progress = ui_find(ui_.get(), L"console-progress")) {
+        if (!launch_ui_.phase.empty() && launch_ui_.phase != L"done") {
+            std::wstring text = L"Đang cài tệp: " + launch_ui_.label;
+            if (launch_ui_.total > 0)
+                text += L"  ·  " + std::to_wstring(launch_ui_.done) + L"/" +
+                        std::to_wstring(launch_ui_.total);
+            if (launch_ui_.bytes_total > 0)
+                text += L"  ·  " + format_size(launch_ui_.bytes) + L" / " +
+                        format_size(launch_ui_.bytes_total);
+            progress->text = text;
+        } else if (!launch_ui_.error.empty()) {
+            progress->text = launch_ui_.error;
+        } else {
+            progress->text.clear();
+        }
+    }
+    bool busy = status == L"running" || status == L"starting" || status == L"stopping";
+    ui_set_visible(ui_find(ui_.get(), L"btn-console-play"), !busy);
+    ui_set_visible(ui_find(ui_.get(), L"btn-console-stop"), busy);
+    if (Node* lines = ui_find(ui_.get(), L"console-lines")) {
+        lines->kids.clear();
+        size_t total = launch_ui_.lines.size();
+        size_t take = std::min<size_t>(total, 24);
+        for (size_t i = total - take; i < total; ++i) {
+            auto line = std::make_unique<Node>();
+            line->kind = Kind::Text;
+            line->text = launch_ui_.lines[i];
+            line->style.font_size = 10.0f;
+            line->style.color = launch_ui_.lines[i].rfind(L"[XyoLauncher]", 0) == 0
+                                    ? ui_token(L"accent")
+                                    : ui_token(L"label");
+            line->style.wrap = true;
+            lines->kids.push_back(std::move(line));
+        }
+    }
+    console_dirty_ = false;
+}
+
+void App::apply_launch_progress(LaunchProgressMsg* msg) {
+    if (!msg) return;
+    if (msg->id != launch_ui_.id) return;
+    launch_ui_.phase = msg->phase;
+    launch_ui_.label = msg->label;
+    launch_ui_.done = msg->done;
+    launch_ui_.total = msg->total;
+    launch_ui_.bytes = msg->bytes;
+    launch_ui_.bytes_total = msg->bytes_total;
+    if (page_ == L"console") console_dirty_ = true;
+    SetTimer(hwnd_, 2, 16, nullptr);
+}
+
+void App::apply_launch_log(LaunchLogMsg* msg) {
+    if (!msg) return;
+    if (msg->id != launch_ui_.id) return;
+    launch_ui_.lines.push_back(msg->line);
+    if (launch_ui_.lines.size() > 600)
+        launch_ui_.lines.erase(launch_ui_.lines.begin(),
+                               launch_ui_.lines.begin() + (launch_ui_.lines.size() - 600));
+    if (page_ == L"console") console_dirty_ = true;
+    SetTimer(hwnd_, 2, 16, nullptr);
+}
+
+void App::apply_launch_state(LaunchStateMsg* msg) {
+    if (!msg) return;
+    InstanceInfo* inst = find_instance(msg->id);
+    if (inst) {
+        inst->status = msg->state;
+        persist_instance_fields(msg->id, [&](Json& entry) {
+            entry.set("status", Json::string(wide_to_utf8(msg->state)));
+        });
+        if (inst->status == L"running") launch_ui_.error.clear();
+        rebuild_instance_rows();
+        rebuild_home();
+    }
+    if (msg->id == launch_ui_.id && page_ == L"console") {
+        console_dirty_ = true;
+        SetTimer(hwnd_, 2, 16, nullptr);
+    }
+    dirty_ = true;
+}
+
+void App::apply_launch_exit(LaunchExitMsg* msg) {
+    if (!msg) return;
+    InstanceInfo* inst = find_instance(msg->id);
+    std::wstring name = inst ? inst->name : msg->id;
+    bool user_stopped = inst && inst->status == L"stopping";
+    if (inst) {
+        inst->status = L"ready";
+        inst->last_played = utf8_to_wide(iso_now());
+        if (launch_started_) {
+            ULONGLONG elapsed = now_ms() - launch_started_;
+            if (elapsed < 1000ull * 60 * 60 * 24) inst->playtime_ms += double(elapsed);
+        }
+        launch_started_ = 0;
+    }
+    std::wstring last_played = inst ? inst->last_played : L"";
+    double playtime = inst ? inst->playtime_ms : 0;
+    persist_instance_fields(msg->id, [&](Json& entry) {
+        entry.set("status", Json::string("ready"));
+        entry.set("lastPlayed", Json::string(wide_to_utf8(last_played)));
+        entry.set("playtimeMs", Json::number(playtime));
+    });
+    rebuild_instance_rows();
+    rebuild_home();
+    if (msg->id == launch_ui_.id) {
+        launch_ui_.error = msg->error;
+        launch_ui_.crashed = msg->crashed;
+        launch_ui_.crash_title = msg->title;
+        launch_ui_.crash_hint = msg->hint;
+        launch_ui_.exit_code = msg->code;
+        launch_ui_.phase.clear();
+        launch_ui_.done = launch_ui_.total = 0;
+        if (page_ == L"console") console_dirty_ = true;
+    }
+    if (!msg->error.empty()) {
+        notify(L"Khởi chạy thất bại", msg->error, L"bad");
+    } else if (msg->crashed) {
+        notify(L"Game gặp lỗi",
+               msg->title + (msg->hint.empty() ? L"" : L" — " + msg->hint), L"bad");
+    } else if (user_stopped || msg->code == 0) {
+        notify(L"Phiên bản", L"Đã đóng " + name + L".", L"ok");
+    } else {
+        notify(L"Phiên bản", L"Tiến trình kết thúc (mã " + std::to_wstring(msg->code) + L").",
+               L"info");
+    }
+    dirty_ = true;
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
 void App::rebuild_settings() {
     if (bg_items_.empty()) load_settings_page_state();
     auto root = std::make_unique<Node>();
@@ -4613,6 +6590,12 @@ Node* App::hit_test(float x, float y) {
     if (menu_open_) {
         if (Node* menu_hit = ui_hit(menu_.get(), x, y)) return menu_hit;
     }
+    if (versions_menu_open_) {
+        if (x >= versions_menu_rect_.left && x <= versions_menu_rect_.right &&
+            y >= versions_menu_rect_.top && y <= versions_menu_rect_.bottom) {
+            if (Node* item = ui_hit(versions_menu_.get(), x, y)) return item;
+        }
+    }
     if (sidebar3d_active_ && sidebar_rect_.right > sidebar_rect_.left) {
         float u = 0.0f, v = 0.0f;
         if (sidebar_unproject(x, y, u, v)) {
@@ -4631,6 +6614,25 @@ Node* App::hit_test(float x, float y) {
         x <= settings_slot_rect_.right && y >= settings_slot_rect_.top &&
         y <= settings_slot_rect_.bottom) {
         if (Node* settings_hit = ui_hit(settings_.get(), x, y)) return settings_hit;
+    }
+    if (page_ == L"versions" && versions_ui_) {
+        if (versions_picker_) {
+            if (x >= versions_slot_rect_.left && x <= versions_slot_rect_.right &&
+                y >= versions_slot_rect_.top && y <= versions_slot_rect_.bottom) {
+                if (Node* hit = ui_hit(versions_ui_.get(), x, y)) return hit;
+            }
+        } else {
+            const D2D1_RECT_F* areas[3] = { &versions_list_rect_, &versions_aside_rect_,
+                                            &versions_footer_rect_ };
+            Node* trees[3] = { versions_ui_.get(), versions_aside_.get(), versions_footer_.get() };
+            for (int i = 0; i < 3; ++i) {
+                const auto& area = *areas[i];
+                if (!trees[i]) continue;
+                if (x >= area.left && x <= area.right && y >= area.top && y <= area.bottom) {
+                    if (Node* hit = ui_hit(trees[i], x, y)) return hit;
+                }
+            }
+        }
     }
     ui_set_skip_id(sidebar3d_active_ ? L"sidebar" : L"");
     Node* hit = ui_hit(ui_.get(), x, y);
@@ -4678,13 +6680,56 @@ void App::do_action(const std::wstring& action) {
         rebuild_home();
         ui_apply_page();
     } else if (action == L"home:launch") {
-        notify(L"Phiên bản", L"Chức năng khởi chạy game sẽ được port sau.", L"info");
+        const InstanceInfo* active = nullptr;
+        for (const auto& inst : instances_)
+            if (inst.status == L"running" || inst.status == L"starting" || inst.status == L"stopping") {
+                active = &inst;
+                break;
+            }
+        if (!active && !instances_.empty()) active = &instances_.front();
+        if (active) launch_instance(active->id);
     } else if (action == L"home:open") {
-        notify(L"Phiên bản", L"Trang chi tiết phiên bản sẽ được port sau.", L"info");
+        const InstanceInfo* active = nullptr;
+        for (const auto& inst : instances_)
+            if (inst.status == L"running" || inst.status == L"starting") {
+                active = &inst;
+                break;
+            }
+        if (!active && !instances_.empty()) active = &instances_.front();
+        if (active) open_console(active->id);
+    } else if (action.rfind(L"instance:open:", 0) == 0) {
+        open_console(action.substr(14));
+    } else if (action == L"console:play") {
+        launch_instance(launch_ui_.id);
+    } else if (action == L"console:stop") {
+        stop_instance(launch_ui_.id);
+    } else if (action == L"console:back") {
+        page_ = L"home";
+        rebuild_home();
+        ui_apply_page();
     } else if (action == L"home:play-world") {
-        notify(L"Thế giới", L"Vào world trực tiếp sẽ được port sau.", L"info");
+        const InstanceInfo* active = instances_.empty() ? nullptr : &instances_.front();
+        for (const auto& inst : instances_)
+            if (inst.status == L"running" || inst.status == L"starting") {
+                active = &inst;
+                break;
+            }
+        if (active && !active->worlds.empty())
+            launch_instance(active->id, L"world", active->worlds.front().folder);
     } else if (action == L"home:play-server") {
-        notify(L"Server", L"Tham gia server trực tiếp sẽ được port sau.", L"info");
+        const InstanceInfo* active = instances_.empty() ? nullptr : &instances_.front();
+        for (const auto& inst : instances_)
+            if (inst.status == L"running" || inst.status == L"starting") {
+                active = &inst;
+                break;
+            }
+        if (active && !active->servers.empty()) {
+            const auto& srv = active->servers.front();
+            std::wstring address = srv.host;
+            if (srv.port != 0 && srv.port != 25565)
+                address += L":" + std::to_wstring(srv.port);
+            launch_instance(active->id, L"server", address);
+        }
     } else if (action == L"home:open-shared") {
         ShellExecuteW(nullptr, L"open", shared_dir_.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
     } else if (action == L"account:add") {
@@ -4820,9 +6865,71 @@ void App::do_action(const std::wstring& action) {
     } else if (action == L"settings:whats-new") {
         notify(L"XyoLauncher+ 2.0.0",
                L"Engine native: sidebar 3D, tài khoản, trang chủ và hệ thống đầy đủ.", L"info");
+    } else if (action.rfind(L"versions:loader:", 0) == 0) {
+        versions_pick_loader(action.substr(16));
+    } else if (action == L"versions:change-loader") {
+        versions_picker_ = true;
+        versions_menu_open_ = false;
+        versions_focus_ = 0;
+        versions_scroll_ = 0.0f;
+        rebuild_versions();
+    } else if (action.rfind(L"versions:pick:", 0) == 0) {
+        versions_pick_game(action.substr(14));
+    } else if (action == L"versions:snapshots") {
+        versions_snapshots_ = !versions_snapshots_;
+        versions_visible_ = 50;
+        versions_scroll_ = 0.0f;
+        rebuild_versions();
+        ui_apply_page();
+    } else if (action == L"versions:more") {
+        versions_visible_ += 80;
+        rebuild_versions();
+    } else if (action == L"versions:refresh") {
+        load_home_async();
+        if (versions_loader_ != L"vanilla") {
+            load_loader_games_async(versions_loader_);
+            if (!versions_picked_.empty())
+                load_loader_builds_async(versions_loader_, versions_picked_);
+        }
+        rebuild_versions();
+    } else if (action == L"versions:import") {
+        notify(L"Nhập profile", L"Tính năng nhập modpack sẽ có ở bản sau.", L"info");
+    } else if (action == L"versions:focus-query") {
+        versions_focus_ = 1;
+        SetTimer(hwnd_, 2, 16, nullptr);
+        InvalidateRect(hwnd_, nullptr, FALSE);
+    } else if (action == L"versions:focus-name") {
+        versions_focus_ = 2;
+        SetTimer(hwnd_, 2, 16, nullptr);
+        InvalidateRect(hwnd_, nullptr, FALSE);
+    } else if (action == L"versions:build-menu") {
+        if (versions_menu_open_)
+            versions_close_build_menu();
+        else
+            versions_open_build_menu();
+    } else if (action.rfind(L"versions:build:", 0) == 0) {
+        size_t index = size_t(std::max(0, _wtoi(action.substr(15).c_str())));
+        if (index < builds_.size()) versions_build_ = builds_[index].version;
+        versions_focus_ = 0;
+        versions_close_build_menu();
+        rebuild_versions();
+    } else if (action == L"versions:demo") {
+        versions_demo_ = !versions_demo_;
+        rebuild_versions();
+    } else if (action.rfind(L"versions:mem:", 0) == 0) {
+        versions_memory_ = std::clamp(_wtoi(action.substr(13).c_str()), 1024, 16384);
+        rebuild_versions();
+    } else if (action == L"versions:dir") {
+        versions_browse_dir();
+    } else if (action == L"versions:create") {
+        versions_create_instance();
     } else if (action.rfind(L"nav:", 0) == 0) {
         page_ = action.substr(4);
         close_account_menu();
+        if (page_ != L"versions") {
+            versions_menu_open_ = false;
+            versions_focus_ = 0;
+        }
         ui_apply_page();
     }
     dirty_ = true;
@@ -4846,6 +6953,12 @@ void App::tick() {
         InvalidateRect(hwnd_, nullptr, FALSE);
     }
     update_toasts(now);
+    if (page_ == L"console" && console_dirty_) {
+        rebuild_console();
+        dirty_ = true;
+        busy = true;
+    }
+    if (page_ == L"versions" && versions_focus_) busy = true;
     if (!toasts_.empty() || (modal_open_ && modal_busy_)) busy = true;
     if (busy) InvalidateRect(hwnd_, nullptr, FALSE);
     else KillTimer(hwnd_, 2);
@@ -5121,6 +7234,57 @@ void App::paint() {
         renderer_.clip_push(settings_slot_rect_);
         ui_draw(settings_.get(), renderer_, hovered_);
         renderer_.clip_pop();
+    } else if (page_ == L"versions" && versions_ui_) {
+        layout_versions();
+        renderer_.clip_push(versions_slot_rect_);
+        if (versions_picker_) {
+            ui_draw(versions_ui_.get(), renderer_, hovered_);
+        } else {
+            renderer_.clip_push(versions_list_rect_);
+            ui_draw(versions_ui_.get(), renderer_, hovered_);
+            renderer_.clip_pop();
+            if (versions_aside_) {
+                renderer_.clip_push(versions_aside_rect_);
+                ui_draw(versions_aside_.get(), renderer_, hovered_);
+                renderer_.clip_pop();
+            }
+            if (versions_footer_) {
+                renderer_.clip_push(versions_footer_rect_);
+                ui_draw(versions_footer_.get(), renderer_, hovered_);
+                renderer_.clip_pop();
+            }
+            if (versions_mem_track_.right - versions_mem_track_.left > 10.0f) {
+                float ratio = float(versions_memory_ - 1024) / float(16384 - 1024);
+                float cy = (versions_mem_track_.top + versions_mem_track_.bottom) * 0.5f;
+                float lx = versions_mem_track_.left, rx = versions_mem_track_.right;
+                renderer_.fill_rect(D2D1::RectF(lx, cy - 3.0f, rx, cy + 3.0f), 3.0f,
+                                    ui_color(L"border"));
+                renderer_.fill_rect(
+                    D2D1::RectF(lx, cy - 3.0f, lx + (rx - lx) * ratio, cy + 3.0f), 3.0f,
+                    ui_color(L"accent"));
+                float kx = lx + (rx - lx) * ratio;
+                renderer_.fill_rect(D2D1::RectF(kx - 6.0f, cy - 6.0f, kx + 6.0f, cy + 6.0f),
+                                    6.0f, ui_token(L"text"));
+                renderer_.stroke_rect(D2D1::RectF(kx - 6.0f, cy - 6.0f, kx + 6.0f, cy + 6.0f),
+                                      6.0f, ui_color(L"border"), 1.0f);
+            }
+        }
+        if (versions_focus_) {
+            Node* field = ui_find(versions_focus_ == 1 ? versions_ui_.get() : versions_aside_.get(),
+                                  versions_focus_ == 1 ? L"versions-query-text"
+                                                       : L"versions-name-text");
+            if (field && (GetTickCount64() / 500) % 2 == 0) {
+                std::wstring value = versions_focus_ == 1 ? versions_query_ : versions_name_;
+                SizeF m = renderer_.measure_text(value, field->style.font_size, field->style.weight,
+                                                 false, 10000.0f, 200.0f, false);
+                float cx = field->rect.left + (value.empty() ? 0.0f : m.w) + 1.0f;
+                float line_h = field->style.font_size * 1.35f;
+                float top = (field->rect.top + field->rect.bottom) * 0.5f - line_h * 0.5f;
+                renderer_.fill_rect(D2D1::RectF(cx, top, cx + 1.0f, top + line_h), 0.0f,
+                                    ui_color(L"accent"), 0.9f);
+            }
+        }
+        renderer_.clip_pop();
     }
     bool main_ok = renderer_.end_main();
     sidebar3d_active_ = false;
@@ -5131,6 +7295,7 @@ void App::paint() {
                                        kSidebarDepth * 180.0f, sidebar_rise_);
     renderer_.begin_overlay();
     draw_account_menu();
+    draw_versions_popup();
     draw_toasts();
     draw_account_modal();
     draw_splash(now_ms());
@@ -5163,6 +7328,12 @@ void App::on_mouse_move(int px, int py) {
     if (splash_active()) return;
     if (modal_open_) {
         hovered_ = nullptr;
+        SetCursor(LoadCursorW(nullptr, IDC_ARROW));
+        return;
+    }
+    if (versions_mem_drag_) {
+        hovered_ = nullptr;
+        versions_memory_from_x(float(px) / renderer_.scale());
         SetCursor(LoadCursorW(nullptr, IDC_ARROW));
         return;
     }
@@ -5288,11 +7459,49 @@ void App::close_account_menu() {
 
 void App::on_key_down(WPARAM key) {
     if (account_modal_key(key)) return;
+    if (page_ == L"versions") {
+        if (key == VK_ESCAPE) {
+            if (versions_menu_open_) {
+                versions_close_build_menu();
+                return;
+            }
+            if (versions_focus_) {
+                versions_focus_ = 0;
+                InvalidateRect(hwnd_, nullptr, FALSE);
+                return;
+            }
+        }
+        if (versions_focus_ && key == VK_BACK) {
+            std::wstring& value = versions_focus_ == 1 ? versions_query_ : versions_name_;
+            if (!value.empty()) {
+                value.pop_back();
+                if (versions_focus_ == 1) versions_visible_ = 50;
+                rebuild_versions();
+                dirty_ = true;
+                InvalidateRect(hwnd_, nullptr, FALSE);
+            }
+            return;
+        }
+    }
     if (key == VK_ESCAPE) close_account_menu();
 }
 
 void App::on_char(wchar_t ch) {
-    if (modal_open_) account_modal_char(ch);
+    if (modal_open_) {
+        account_modal_char(ch);
+        return;
+    }
+    if (page_ == L"versions" && versions_focus_ && ch >= 32) {
+        std::wstring& value = versions_focus_ == 1 ? versions_query_ : versions_name_;
+        size_t limit = versions_focus_ == 1 ? 40 : 60;
+        if (value.size() < limit) {
+            value.push_back(ch);
+            if (versions_focus_ == 1) versions_visible_ = 50;
+            rebuild_versions();
+            dirty_ = true;
+            InvalidateRect(hwnd_, nullptr, FALSE);
+        }
+    }
 }
 
 void App::draw_account_menu() {
@@ -5654,7 +7863,32 @@ void App::on_mouse_down(int px, int py) {
             return;
         }
     }
+    if (page_ == L"versions" && versions_menu_open_) {
+        if (x >= versions_menu_rect_.left && x <= versions_menu_rect_.right &&
+            y >= versions_menu_rect_.top && y <= versions_menu_rect_.bottom) {
+            Node* item = ui_hit(versions_menu_.get(), x, y);
+            if (item) {
+                pressed_ = item->action;
+                return;
+            }
+        }
+        versions_close_build_menu();
+    }
     Node* hit = hit_test(x, y);
+    if (page_ == L"versions" && !versions_picker_ && !hit &&
+        versions_mem_track_.right - versions_mem_track_.left > 10.0f &&
+        x >= versions_mem_track_.left - 6.0f && x <= versions_mem_track_.right + 6.0f &&
+        y >= versions_mem_track_.top - 5.0f && y <= versions_mem_track_.bottom + 5.0f) {
+        versions_mem_drag_ = true;
+        SetCapture(hwnd_);
+        versions_focus_ = 0;
+        versions_memory_from_x(x);
+        pressed_.clear();
+        return;
+    }
+    if (page_ == L"versions" && hit &&
+        hit->action.rfind(L"versions:focus-", 0) != 0)
+        versions_focus_ = 0;
     pressed_ = hit ? hit->action : L"";
     if (pressed_ == L"window:drag") {
         pressed_.clear();
@@ -5665,6 +7899,12 @@ void App::on_mouse_down(int px, int py) {
 
 void App::on_mouse_up(int px, int py) {
     if (splash_active()) { pressed_.clear(); return; }
+    if (versions_mem_drag_) {
+        versions_mem_drag_ = false;
+        ReleaseCapture();
+        pressed_.clear();
+        return;
+    }
     if (modal_open_) { pressed_.clear(); return; }
     float x = px / renderer_.scale();
     float y = py / renderer_.scale();
@@ -5765,6 +8005,24 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         case WM_APP + 15:
             if (app) app->handle_java_removed();
+            return 0;
+        case WM_APP + 16:
+            if (app) app->handle_loader_games_msg(lp);
+            return 0;
+        case WM_APP + 17:
+            if (app) app->handle_loader_builds_msg(lp);
+            return 0;
+        case WM_APP + 20:
+            if (app) app->handle_launch_progress_msg(lp);
+            return 0;
+        case WM_APP + 21:
+            if (app) app->handle_launch_log_msg(lp);
+            return 0;
+        case WM_APP + 22:
+            if (app) app->handle_launch_state_msg(lp);
+            return 0;
+        case WM_APP + 23:
+            if (app) app->handle_launch_exit_msg(lp);
             return 0;
         case WM_MOUSEWHEEL: {
             if (app) {

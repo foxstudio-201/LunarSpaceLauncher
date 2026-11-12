@@ -1,4 +1,5 @@
 #include "net.h"
+#include "fs.h"
 #include "json.h"
 #include <winhttp.h>
 #include <bcrypt.h>
@@ -157,14 +158,136 @@ HttpResult http_request(const std::wstring& url, const wchar_t* method,
     return result;
 }
 
+DownloadResult http_download_file(const std::wstring& url, const std::wstring& dest_path,
+                                  const std::function<bool(uint64_t, uint64_t)>& on_progress,
+                                  int attempts) {
+    DownloadResult result;
+    std::wstring part = dest_path + L".part";
+    dir_create_all(path_dirname(dest_path));
+    int tries = attempts < 1 ? 1 : attempts;
+    for (int attempt = 0; attempt < tries; ++attempt) {
+        if (attempt > 0) Sleep(250 << attempt);
+        result = {};
+        URL_COMPONENTS parts{};
+        parts.dwStructSize = sizeof(parts);
+        wchar_t host[256]{};
+        wchar_t path[4096]{};
+        wchar_t extra[2048]{};
+        parts.lpszHostName = host;
+        parts.dwHostNameLength = 255;
+        parts.lpszUrlPath = path;
+        parts.dwUrlPathLength = 4095;
+        parts.lpszExtraInfo = extra;
+        parts.dwExtraInfoLength = 2047;
+        if (!WinHttpCrackUrl(url.c_str(), (DWORD)url.size(), 0, &parts)) {
+            result.error = "URL không hợp lệ";
+            continue;
+        }
+        std::wstring target = path;
+        target += extra;
+        HINTERNET session = WinHttpOpen(L"LunarSpaceLauncher/1.0.0",
+                                        WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+                                        WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+        if (!session) {
+            result.error = "Không tạo được WinHTTP";
+            continue;
+        }
+        WinHttpSetTimeouts(session, 15000, 20000, 60000, 60000);
+        DWORD redirect = WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS;
+        WinHttpSetOption(session, WINHTTP_OPTION_REDIRECT_POLICY, &redirect, sizeof(redirect));
+        HINTERNET connect = WinHttpConnect(session, host, parts.nPort, 0);
+        HINTERNET request =
+            connect ? WinHttpOpenRequest(connect, L"GET", target.c_str(), nullptr,
+                                         WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
+                                         parts.nScheme == INTERNET_SCHEME_HTTPS
+                                             ? WINHTTP_FLAG_SECURE
+                                             : 0)
+                    : nullptr;
+        if (!request) {
+            result.error = "Không kết nối được máy chủ";
+            if (connect) WinHttpCloseHandle(connect);
+            WinHttpCloseHandle(session);
+            continue;
+        }
+        std::wstring headers = L"User-Agent: LunarSpaceLauncher/1.0.0\r\nAccept: */*\r\n";
+        BOOL sent = WinHttpSendRequest(request, headers.c_str(), (DWORD)headers.size(),
+                                       WINHTTP_NO_REQUEST_DATA, 0, 0, 0);
+        if (sent) sent = WinHttpReceiveResponse(request, nullptr);
+        if (!sent) {
+            result.error = "Không tải được tệp";
+        } else {
+            DWORD status = 0, size = sizeof(status);
+            WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                                WINHTTP_HEADER_NAME_BY_INDEX, &status, &size,
+                                WINHTTP_NO_HEADER_INDEX);
+            result.status = int(status);
+            if (status < 200 || status >= 300) {
+                result.error = "HTTP " + std::to_string(status);
+            } else {
+                uint64_t total = 0;
+                DWORD total_len = sizeof(total);
+                WinHttpQueryHeaders(request,
+                                    WINHTTP_QUERY_CONTENT_LENGTH | WINHTTP_QUERY_FLAG_NUMBER,
+                                    WINHTTP_HEADER_NAME_BY_INDEX, &total, &total_len,
+                                    WINHTTP_NO_HEADER_INDEX);
+                file_delete(part);
+                HANDLE file = CreateFileW(part.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                                          FILE_ATTRIBUTE_NORMAL, nullptr);
+                if (file == INVALID_HANDLE_VALUE) {
+                    result.error = "Không ghi được tệp đích";
+                } else {
+                    bool aborted = false;
+                    uint64_t done = 0;
+                    for (;;) {
+                        DWORD available = 0;
+                        if (!WinHttpQueryDataAvailable(request, &available)) break;
+                        if (available == 0) break;
+                        std::vector<char> chunk(available);
+                        DWORD read = 0;
+                        if (!WinHttpReadData(request, chunk.data(), available, &read)) break;
+                        if (read == 0) break;
+                        DWORD written = 0;
+                        if (!WriteFile(file, chunk.data(), read, &written, nullptr) ||
+                            written != read)
+                            break;
+                        done += read;
+                        if (on_progress && !on_progress(done, total)) {
+                            aborted = true;
+                            break;
+                        }
+                    }
+                    CloseHandle(file);
+                    if (aborted) {
+                        result.error = "Đã hủy tải";
+                    } else if (done == 0 && total > 0) {
+                        result.error = "Tệp rỗng";
+                    } else {
+                        if (MoveFileExW(part.c_str(), dest_path.c_str(),
+                                        MOVEFILE_REPLACE_EXISTING)) {
+                            result.ok = true;
+                            result.bytes = done;
+                        } else {
+                            result.error = "Không đổi tên được tệp";
+                        }
+                    }
+                }
+            }
+        }
+        WinHttpCloseHandle(request);
+        WinHttpCloseHandle(connect);
+        WinHttpCloseHandle(session);
+        if (result.ok) break;
+        file_delete(part);
+    }
+    return result;
+}
+
 std::wstring appdata_dir() {
     wchar_t dir[MAX_PATH]{};
     DWORD len = GetEnvironmentVariableW(L"APPDATA", dir, MAX_PATH);
     if (len > 0 && len < MAX_PATH) return std::wstring(dir, len);
     return L".";
-}
-
-std::wstring user_data_dir() {
+}std::wstring user_data_dir() {
     std::wstring dir = appdata_dir() + L"\\xyolauncher";
     CreateDirectoryW(dir.c_str(), nullptr);
     return dir;

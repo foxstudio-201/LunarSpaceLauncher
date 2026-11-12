@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(XyoLauncherEngine LANGUAGES CXX)
+project(XyoLauncherEngine LANGUAGES C CXX)
 enable_language(RC)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -14,13 +14,22 @@ add_executable(XyoLauncherEngine WIN32
   src/auth.cpp
   src/discord.cpp
   src/anim.cpp
+  src/fs.cpp
+  src/proc.cpp
+  src/zip.cpp
+  src/mc_install.cpp
+  src/java.cpp
+  src/launch.cpp
+  src/third_party/miniz.c
   resource.rc
 )
 
 target_include_directories(XyoLauncherEngine PRIVATE src)
 set_target_properties(XyoLauncherEngine PROPERTIES OUTPUT_NAME "XyoLauncher+")
 target_compile_definitions(XyoLauncherEngine PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00)
-target_compile_options(XyoLauncherEngine PRIVATE -O2 -fno-exceptions -fno-rtti -Wall -Wextra -Wno-unused-parameter)
+target_compile_options(XyoLauncherEngine PRIVATE
+  $<$<COMPILE_LANGUAGE:CXX>:-O2 -fno-exceptions -fno-rtti -Wall -Wextra -Wno-unused-parameter>
+  $<$<COMPILE_LANGUAGE:C>:-O2 -w>)
 target_link_libraries(XyoLauncherEngine PRIVATE
   d3d11 dxgi d2d1 dwrite windowscodecs ole32 uuid user32 gdi32 shell32
   winhttp bcrypt crypt32 ws2_32 advapi32 d3dcompiler comdlg32

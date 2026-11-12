@@ -105,7 +105,7 @@ Palette make_glass() {
     return Palette{ Color{},
                     Color::rgb(0x090C12, 0.50f), Color::rgb(0x10141C, 0.42f),
                     Color::rgb(0xFFFFFF, 0.13f), Color::rgb(0xF2F4F8),
-                    Color::rgb(0xF2F4F8, 0.80f), Color::rgb(0xF2F4F8, 0.60f),
+                    Color::rgb(0xF2F4F8, 0.86f), Color::rgb(0xF2F4F8, 0.70f),
                     Color::rgb(0xFFFFFF, 0.14f), Color::rgb(0xFFFFFF, 0.08f),
                     Color::rgb(0xFFFFFF, 0.08f), Color::rgb(0xFFFFFF, 0.10f),
                     Color::rgb(0xE9B872), Color::rgb(0xF3C98A), Color::rgb(0xF0C991),
@@ -418,6 +418,9 @@ SizeF pref_size(Node* node, Renderer& renderer) {
             SizeF m = renderer.measure_text(node->text, node->style.font_size,
                                             node->style.weight, node->style.mono, maxw, 1e6f,
                                             node->style.wrap);
+            // Rounding on measured widths makes DWrite trim the last glyph once the
+            // text is drawn into a rect of exactly that width; keep a little slack.
+            m.w = std::ceil(m.w) + 1.0f;
             if (node->style.width > 0.0f) m.w = node->style.width;
             if (node->style.height > 0.0f) m.h = node->style.height;
             return m;
@@ -523,9 +526,9 @@ void arrange(Node* node, D2D1_RECT_F rect, Renderer& renderer) {
         float cw = row ? main_sizes[i] : (kid->style.width > 0.0f ? kid->style.width : iw);
         float ch = row ? (kid->style.height > 0.0f ? kid->style.height : ih) : main_sizes[i];
         if (row) {
-            if (cw > iw - (cursor - ix)) cw = std::max(0.0f, iw - (cursor - ix));
+            if (cw > iw - (cursor - ix) + 0.5f) cw = std::max(0.0f, iw - (cursor - ix));
         } else {
-            if (ch > ih - (cursor - iy)) ch = std::max(0.0f, ih - (cursor - iy));
+            if (ch > ih - (cursor - iy) + 0.5f) ch = std::max(0.0f, ih - (cursor - iy));
         }
         float child_y = row ? iy + (ih - ch) * 0.5f : cursor;
         float child_x = row ? cursor : ix;

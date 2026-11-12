@@ -1,5 +1,7 @@
 #pragma once
 #include <windows.h>
+#include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -10,9 +12,21 @@ struct HttpResult {
     bool ok() const { return error.empty(); }
 };
 
+struct DownloadResult {
+    bool ok = false;
+    int status = 0;
+    uint64_t bytes = 0;
+    std::string error;
+};
+
 HttpResult http_request(const std::wstring& url, const wchar_t* method,
                         const std::string& body = "", const wchar_t* content_type = nullptr,
                         const std::vector<std::pair<std::wstring, std::wstring>>& headers = {});
+
+DownloadResult http_download_file(
+    const std::wstring& url, const std::wstring& dest_path,
+    const std::function<bool(uint64_t done, uint64_t total)>& on_progress = nullptr,
+    int attempts = 3);
 
 std::string url_encode(const std::string& value);
 std::string base64_encode(const std::vector<unsigned char>& data);

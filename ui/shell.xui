@@ -106,6 +106,24 @@ column id=root bg=$bg growx=1 growy=1 {
             text value="Lưu" size=11 weight=600 color=$ink
           }
         }
+        row id=header-tools-versions hidden=1 gap=8 {
+          row height=34 paddingx=10 gap=6 radius=8 bg=$input border=1 bordercolor=$border {
+            image src=assets/icons/globe.svg width=12 height=12 color=$label
+            text value="Mojang" size=10 weight=600 color=$label
+          }
+          row id=btn-versions-import height=34 paddingx=12 gap=6 radius=8 bg=$accent action=versions:import {
+            image src=assets/icons/file-arrow-up.svg width=14 height=14 color=$ink
+            text value="Nhập profile" size=11 weight=700 color=$ink
+          }
+          row id=btn-versions-snapshots height=34 paddingx=12 radius=8 bg=$input border=1 bordercolor=$border action=versions:snapshots {
+            text id=label-versions-snapshots value="Hiện bản thử nghiệm" size=11 weight=600 color=$label
+          }
+          row id=btn-versions-refresh width=34 height=34 radius=8 bg=$input border=1 bordercolor=$border action=versions:refresh {
+            spacer growx=1
+            image src=assets/icons/arrows-clockwise.svg width=15 height=15 color=$label
+            spacer growx=1
+          }
+        }
       }
 
       row id=home-tabs gap=4 {
@@ -202,6 +220,33 @@ column id=root bg=$bg growx=1 growy=1 {
 
       column id=settings-view hidden=1 growx=1 growy=1 {
         column id=settings-slot growx=1 growy=1 {
+        }
+      }
+
+      column id=versions-view hidden=1 growx=1 growy=1 {
+        column id=versions-slot growx=1 growy=1 {
+        }
+      }
+
+      column id=console-view hidden=1 growx=1 growy=1 padding=14 gap=10 radius=16 bg=$surface border=1 bordercolor=$border {
+        row gap=10 {
+          column growx=1 gap=3 {
+            text id=console-title value="Console" size=18 weight=700 color=$text
+            text id=console-sub value="—" size=11 color=$label
+          }
+          row id=btn-console-play height=34 paddingx=16 radius=8 bg=$accent action=console:play {
+            text value="Chơi" size=11 weight=700 color=$ink
+          }
+          row id=btn-console-stop hidden=1 height=34 paddingx=16 radius=8 bg=#EF4444 action=console:stop {
+            text value="Dừng" size=11 weight=700 color=#FFFFFF
+          }
+          row id=btn-console-back height=34 paddingx=12 radius=8 bg=$input border=1 bordercolor=$border action=console:back {
+            image src=assets/icons/corners-in.svg width=14 height=14 color=$text
+            text value="Quay lại" size=11 weight=600 color=$text
+          }
+        }
+        text id=console-progress value="" size=11 color=$label
+        column id=console-lines growy=1 gap=1 {
         }
       }
 
