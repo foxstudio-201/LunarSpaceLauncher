@@ -362,7 +362,6 @@ public:
     void on_key_down(WPARAM key);
     void on_char(wchar_t ch);
     void on_wheel(int delta, int px, int py);
-    void start_sidebar_depth_anim(float to, unsigned duration);
     void sidebar_project(float u, float v, float& x, float& y) const;
     bool sidebar_unproject(float x, float y, float& u, float& v) const;
     Node* hit_test(float x, float y);
@@ -481,9 +480,6 @@ private:
     HomeSystem system_info_;
     bool system_loading_ = true;
     std::wstring shared_dir_;
-    bool sidebar_entered_ = false;
-    bool sidebar_hover_ = false;
-    float sidebar_depth_ = 0.0f;
     D2D1_RECT_F sidebar_rect_ = D2D1::RectF();
     bool sidebar3d_active_ = false;
     int discord_phase_ = 0;
@@ -3257,17 +3253,10 @@ void App::rebuild_home() {
     hovered_ = nullptr;
 }
 
-void App::start_sidebar_depth_anim(float to, unsigned duration) {
-    float target = std::clamp(to, 0.0f, 0.3f);
-    anims_.run(L"sidebar.depth", sidebar_depth_, target, duration ? duration : 1,
-               anim_ease::Spring, [this](float v) {
-                   sidebar_depth_ = std::clamp(v, 0.0f, 0.3f);
-               });
-    SetTimer(hwnd_, 2, 16, nullptr);
-}
+// Fixed sidebar perspective pose (no depth animation).
+static constexpr float kSidebarDepth = 0.155f;
 
-
-// Must mirror Renderer::draw_capture_3d (rotation about the left edge, depth 900).
+// Must mirror Renderer::draw_sidebar_3d (rotation about the left edge, depth 900).
 static QuadMap sidebar_quad(const D2D1_RECT_F& rect, float depth) {
     float w = rect.right - rect.left;
     float h = rect.bottom - rect.top;
@@ -3280,11 +3269,11 @@ static QuadMap sidebar_quad(const D2D1_RECT_F& rect, float depth) {
                     rect.left + rx, rect.bottom - inset_y, rect.left, rect.bottom);
 }
 void App::sidebar_project(float u, float v, float& x, float& y) const {
-    quad_project(sidebar_quad(sidebar_rect_, sidebar_depth_), u, v, x, y);
+    quad_project(sidebar_quad(sidebar_rect_, kSidebarDepth), u, v, x, y);
 }
 
 bool App::sidebar_unproject(float x, float y, float& u, float& v) const {
-    return quad_unproject(sidebar_quad(sidebar_rect_, sidebar_depth_), x, y, u, v);
+    return quad_unproject(sidebar_quad(sidebar_rect_, kSidebarDepth), x, y, u, v);
 }
 
 Node* App::hit_test(float x, float y) {
@@ -3381,10 +3370,6 @@ void App::tick() {
         else theme_animating_ = false;
     }
     if (anims_.tick(now)) busy = true;
-    if (!splash_active() && !sidebar_entered_) {
-        sidebar_entered_ = true;
-        start_sidebar_depth_anim(0.12f, 700);
-    }
     update_toasts(now);
     if (!toasts_.empty() || (modal_open_ && modal_busy_)) busy = true;
     if (busy) InvalidateRect(hwnd_, nullptr, FALSE);
@@ -3625,7 +3610,7 @@ void App::paint() {
     bool main_ok = renderer_.end_main();
     sidebar3d_active_ = false;
     if (use3d && main_ok)
-        sidebar3d_active_ = renderer_.draw_sidebar_3d(sidebar_rect_, sidebar_depth_ * 180.0f);
+        sidebar3d_active_ = renderer_.draw_sidebar_3d(sidebar_rect_, kSidebarDepth * 180.0f);
     renderer_.begin_overlay();
     draw_account_menu();
     draw_toasts();
@@ -3673,18 +3658,6 @@ void App::on_mouse_move(int px, int py) {
     }
     float x = px / renderer_.scale();
     float y = py / renderer_.scale();
-    bool over_sidebar = false;
-    if (sidebar3d_active_ && sidebar_rect_.right > sidebar_rect_.left) {
-        float u = 0.0f, v = 0.0f;
-        over_sidebar = sidebar_unproject(x, y, u, v);
-    } else {
-        over_sidebar = x >= sidebar_rect_.left && x <= sidebar_rect_.right &&
-                       y >= sidebar_rect_.top && y <= sidebar_rect_.bottom;
-    }
-    if (sidebar_entered_ && over_sidebar != sidebar_hover_) {
-        sidebar_hover_ = over_sidebar;
-        start_sidebar_depth_anim(over_sidebar ? 0.155f : 0.12f, 320);
-    }
     Node* hit = hit_test(x, y);
     if (hit != hovered_) {
         hovered_ = hit;
@@ -3695,13 +3668,10 @@ void App::on_mouse_move(int px, int py) {
 
 void App::on_mouse_leave() {
     mouse_tracking_ = false;
-    bool need_paint = hovered_ != nullptr || sidebar_hover_;
-    hovered_ = nullptr;
-    if (sidebar_hover_) {
-        sidebar_hover_ = false;
-        if (sidebar_entered_) start_sidebar_depth_anim(0.12f, 320);
+    if (hovered_) {
+        hovered_ = nullptr;
+        InvalidateRect(hwnd_, nullptr, FALSE);
     }
-    if (need_paint) InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
 std::wstring App::settings_path() const {
