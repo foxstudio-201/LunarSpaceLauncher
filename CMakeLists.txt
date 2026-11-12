@@ -12,6 +12,7 @@ add_executable(XyoLauncherEngine WIN32
   src/ui.cpp
   src/net.cpp
   src/auth.cpp
+  src/discord.cpp
   resource.rc
 )
 

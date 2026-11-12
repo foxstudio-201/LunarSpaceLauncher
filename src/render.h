@@ -12,6 +12,8 @@ struct SizeF {
 
 enum class TextAlign { Left, Center, Right };
 
+bool make_head_png(const std::wstring& skin_path, const std::wstring& out_path);
+
 class Renderer {
 public:
     bool init(HWND hwnd);

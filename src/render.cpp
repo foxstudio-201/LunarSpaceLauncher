@@ -700,3 +700,75 @@ bool Renderer::load_pixels(const std::wstring& path, std::vector<unsigned char>&
     height = h;
     return true;
 }
+
+bool make_head_png(const std::wstring& skin_path, const std::wstring& out_path) {
+    ComPtr<IWICImagingFactory> factory;
+    if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
+                                IID_PPV_ARGS(factory.put()))))
+        return false;
+    ComPtr<IWICBitmapDecoder> decoder;
+    if (FAILED(factory->CreateDecoderFromFilename(skin_path.c_str(), nullptr, GENERIC_READ,
+                                                  WICDecodeMetadataCacheOnLoad,
+                                                  decoder.put())))
+        return false;
+    ComPtr<IWICBitmapFrameDecode> frame;
+    if (FAILED(decoder->GetFrame(0, frame.put()))) return false;
+    ComPtr<IWICFormatConverter> converter;
+    if (FAILED(factory->CreateFormatConverter(converter.put()))) return false;
+    if (FAILED(converter->Initialize(frame.get(), GUID_WICPixelFormat32bppBGRA,
+                                     WICBitmapDitherTypeNone, nullptr, 0.0,
+                                     WICBitmapPaletteTypeCustom)))
+        return false;
+    UINT w = 0, h = 0;
+    if (FAILED(converter->GetSize(&w, &h)) || w < 64 || h < 32) return false;
+    std::vector<unsigned char> pixels(size_t(w) * h * 4);
+    if (FAILED(converter->CopyPixels(nullptr, w * 4, UINT(pixels.size()), pixels.data())))
+        return false;
+    std::vector<unsigned char> head(32 * 32 * 4);
+    for (int y = 0; y < 32; ++y) {
+        for (int x = 0; x < 32; ++x) {
+            size_t face = (size_t(8 + y / 4) * w + (8 + x / 4)) * 4;
+            float r = pixels[face + 2], g = pixels[face + 1], b = pixels[face + 0];
+            float a = pixels[face + 3] / 255.0f;
+            if (h >= 64) {
+                size_t hat = (size_t(8 + y / 4) * w + (40 + x / 4)) * 4;
+                float ha = pixels[hat + 3] / 255.0f;
+                if (ha > 0.0f) {
+                    float out_a = ha + a * (1.0f - ha);
+                    r = (pixels[hat + 2] * ha + r * a * (1.0f - ha)) / out_a;
+                    g = (pixels[hat + 1] * ha + g * a * (1.0f - ha)) / out_a;
+                    b = (pixels[hat + 0] * ha + b * a * (1.0f - ha)) / out_a;
+                    a = out_a;
+                }
+            }
+            size_t dst = (size_t(y) * 32 + x) * 4;
+            head[dst + 0] = (unsigned char)std::clamp(b, 0.0f, 255.0f);
+            head[dst + 1] = (unsigned char)std::clamp(g, 0.0f, 255.0f);
+            head[dst + 2] = (unsigned char)std::clamp(r, 0.0f, 255.0f);
+            head[dst + 3] = (unsigned char)std::clamp(a * 255.0f, 0.0f, 255.0f);
+        }
+    }
+    ComPtr<IWICBitmap> bitmap;
+    if (FAILED(factory->CreateBitmapFromMemory(32, 32, GUID_WICPixelFormat32bppBGRA, 32 * 4,
+                                               32 * 32 * 4, head.data(), bitmap.put())))
+        return false;
+    ComPtr<IWICStream> stream;
+    if (FAILED(factory->CreateStream(stream.put()))) return false;
+    if (FAILED(stream->InitializeFromFilename(out_path.c_str(), GENERIC_WRITE))) return false;
+    ComPtr<IWICBitmapEncoder> encoder;
+    if (FAILED(factory->CreateEncoder(GUID_ContainerFormatPng, nullptr, encoder.put())))
+        return false;
+    if (FAILED(encoder->Initialize(stream.get(), WICBitmapEncoderNoCache))) return false;
+    ComPtr<IWICBitmapFrameEncode> encode_frame;
+    ComPtr<IPropertyBag2> props;
+    if (FAILED(encoder->CreateNewFrame(encode_frame.put(), props.put()))) return false;
+    if (FAILED(encode_frame->Initialize(props.get()))) return false;
+    if (FAILED(encode_frame->SetSize(32, 32))) return false;
+    WICPixelFormatGUID format = GUID_WICPixelFormat32bppBGRA;
+    if (FAILED(encode_frame->SetPixelFormat(&format))) return false;
+    if (FAILED(encode_frame->WriteSource(bitmap.get(), nullptr))) return false;
+    if (FAILED(encode_frame->Commit())) return false;
+    if (FAILED(encoder->Commit())) return false;
+    stream->Commit(STGC_DEFAULT);
+    return true;
+}

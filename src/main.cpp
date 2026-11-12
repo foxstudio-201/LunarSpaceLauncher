@@ -4,6 +4,7 @@
 #include "json.h"
 #include "net.h"
 #include "auth.h"
+#include "discord.h"
 #include <d2d1helper.h>
 #include <windowsx.h>
 #include <shellapi.h>
@@ -20,6 +21,7 @@ namespace {
 constexpr UINT kSplashTimer = 1;
 
 ULONGLONG now_ms() { return GetTickCount64(); }
+static std::wstring head_cache_dir();
 
 void hsl_to_rgb(float h, float s, float l, float& r, float& g, float& b) {
     float c = (1.0f - std::fabs(2.0f * l - 1.0f)) * s;
@@ -126,6 +128,7 @@ struct Account {
     std::wstring type;
     std::wstring uuid;
     std::wstring xuid;
+    std::wstring head;
     Json raw;
 };
 
@@ -151,13 +154,45 @@ struct AuthResult {
 struct ModalLayout {
     D2D1_RECT_F card = D2D1::RectF();
     D2D1_RECT_F close = D2D1::RectF();
-    D2D1_RECT_F kinds[3]{};
+    D2D1_RECT_F kinds[4]{};
     D2D1_RECT_F name_input = D2D1::RectF();
     D2D1_RECT_F user_input = D2D1::RectF();
     D2D1_RECT_F pass_input = D2D1::RectF();
     D2D1_RECT_F eye = D2D1::RectF();
     D2D1_RECT_F cancel = D2D1::RectF();
     D2D1_RECT_F submit = D2D1::RectF();
+};
+
+struct DiscordLink {
+    std::wstring id;
+    std::wstring account_id;
+    std::wstring account_uuid;
+    std::wstring account_name;
+    std::wstring discord_name;
+    std::wstring discord_tag;
+    std::wstring discord_avatar;
+};
+
+struct DiscordAuthResult {
+    bool ok = false;
+    std::wstring error;
+    std::wstring name;
+    std::wstring uuid;
+    std::wstring account_id;
+    std::wstring discord_name;
+    std::wstring discord_tag;
+    std::wstring discord_avatar;
+    std::wstring link_id;
+    bool created = false;
+};
+
+struct DiscordJob {
+    HWND hwnd = nullptr;
+    std::wstring api_url;
+    std::wstring api_key;
+    std::wstring name;
+    std::wstring account_id;
+    std::wstring account_uuid;
 };
 
 struct AuthJob {
@@ -189,6 +224,9 @@ public:
     void on_key_down(WPARAM key);
     void on_char(wchar_t ch);
     void handle_auth_result(LPARAM lp) { apply_auth_result(reinterpret_cast<AuthResult*>(lp)); }
+    void handle_discord_links_msg(LPARAM lp) { auto* body = reinterpret_cast<std::string*>(lp); if (body) { apply_discord_links_body(*body); delete body; } }
+    void handle_discord_result_msg(LPARAM lp) { auto* result = reinterpret_cast<DiscordAuthResult*>(lp); if (result) { apply_discord_result(result); delete result; } }
+    void handle_unlink_msg(LPARAM lp) { auto* payload = reinterpret_cast<std::pair<bool, std::wstring>*>(lp); if (payload) { handle_unlink_result(payload->first, payload->second); delete payload; } }
     void on_dpi_changed();
     bool splash_active() const { return splash_.phase != Splash::Phase::None; }
 
@@ -210,6 +248,15 @@ private:
     const Account* find_account(const std::wstring& id) const;
     const Account* active_account() const;
     std::wstring account_head(const std::wstring& name) const;
+    void refresh_discord_links();
+    void apply_discord_links_body(const std::string& body);
+    const DiscordLink* discord_link_for(const Account& account) const;
+    void open_discord_link_modal(const std::wstring& account_id);
+    void start_discord_job();
+    void apply_discord_result(DiscordAuthResult* result);
+    void unlink_discord(const std::wstring& account_id);
+    void handle_unlink_result(bool ok, const std::wstring& error);
+    std::wstring resolve_head(const Account& account, bool network);
     std::wstring account_kind_label(const std::wstring& type) const;
     void open_account_modal();
     void close_account_modal();
@@ -268,6 +315,11 @@ private:
     std::vector<Account> accounts_;
     std::wstring active_id_;
     std::vector<InstanceInfo> instances_;
+    std::vector<DiscordLink> discord_links_;
+    std::wstring discord_api_url_;
+    std::wstring discord_api_key_;
+    std::wstring modal_discord_account_;
+    Json skin_index_;
     bool accounts_skin_ = false;
     bool skin_upload_ = true;
     bool modal_open_ = false;
@@ -450,6 +502,14 @@ void App::load_data() {
     instances_.clear();
     Json root;
     root.parse(read_file_utf8(user_data_dir() + L"\\settings.json"));
+    discord_api_url_ = L"http://a29sv1.bumboohost.vn:25691";
+    discord_api_key_ = L"80e48059386dd0f5b0831af9a6990d7b4e5482657d626853";
+    if (const Json* discord = root.find("discord")) {
+        std::string url = discord->text("apiUrl");
+        std::string key = discord->text("apiKey");
+        if (!url.empty()) discord_api_url_ = utf8_to_wide(url);
+        if (!key.empty()) discord_api_key_ = utf8_to_wide(key);
+    }
     if (const Json* list = root.find("accounts")) {
         for (const auto& item : list->arr) {
             if (item.type != Json::Type::Object) continue;
@@ -465,6 +525,11 @@ void App::load_data() {
     }
     active_id_ = utf8_to_wide(root.text("activeAccountId"));
     if (!find_account(active_id_) && !accounts_.empty()) active_id_ = accounts_.front().id;
+
+    Json skin_cache;
+    skin_cache.parse(read_file_utf8(head_cache_dir() + L"\\index.json"));
+    skin_index_ = skin_cache.type == Json::Type::Object ? skin_cache : Json::object();
+    for (auto& account : accounts_) account.head = resolve_head(account, false);
 
     Json index;
     index.parse(read_file_utf8(user_data_dir() + L"\\instances.json"));
@@ -484,6 +549,7 @@ void App::load_data() {
     }
     rebuild_instance_rows();
     rebuild_account_rows();
+    refresh_discord_links();
 }
 
 const Account* App::find_account(const std::wstring& id) const {
@@ -494,9 +560,124 @@ const Account* App::find_account(const std::wstring& id) const {
 
 const Account* App::active_account() const { return find_account(active_id_); }
 
+static std::wstring head_cache_dir() {
+    std::wstring dir = user_data_dir() + L"\\skin-cache";
+    CreateDirectoryW(dir.c_str(), nullptr);
+    return dir;
+}
+
+static std::wstring safe_id(const std::wstring& value) {
+    std::wstring out;
+    for (wchar_t c : value)
+        if ((c >= L'a' && c <= L'z') || (c >= L'A' && c <= L'Z') ||
+            (c >= L'0' && c <= L'9') || c == L'-' || c == L'_')
+            out.push_back(c);
+    return out;
+}
+
+static std::string dashless_lower(const std::wstring& uuid) {
+    std::string out;
+    for (char c : wide_to_utf8(uuid))
+        if (c != '-') out.push_back(char(tolower((unsigned char)c)));
+    return out;
+}
+
+static std::string texture_url_of_profile(const std::string& body) {
+    Json profile;
+    if (!profile.parse(body)) return "";
+    const Json* props = profile.find("properties");
+    if (!props) return "";
+    for (const auto& prop : props->arr) {
+        if (prop.text("name") != "textures") continue;
+        std::vector<unsigned char> decoded = base64_decode(prop.text("value"));
+        Json textures;
+        if (!textures.parse(std::string(decoded.begin(), decoded.end()))) continue;
+        const Json* tex = textures.find("textures");
+        if (!tex) continue;
+        const Json* skin = tex->find("SKIN");
+        if (skin) return skin->text("url");
+    }
+    return "";
+}
+
+static std::wstring skin_texture_url(const Account& account) {
+    std::string hex = dashless_lower(account.uuid);
+    if (account.type == L"microsoft" && hex.size() == 32) {
+        HttpResult res = http_request(utf8_to_wide("https://sessionserver.mojang.com/session/minecraft/profile/" + hex), L"GET");
+        return utf8_to_wide(texture_url_of_profile(res.body));
+    }
+    if (account.type == L"ely" && hex.size() == 32) {
+        HttpResult res = http_request(utf8_to_wide("https://authserver.ely.by/sessionserver/session/minecraft/profile/" + hex), L"GET");
+        return utf8_to_wide(texture_url_of_profile(res.body));
+    }
+    std::string name = wide_to_utf8(account.name);
+    if (name.empty()) return L"";
+    HttpResult res = http_request(utf8_to_wide("https://api.mojang.com/users/profiles/minecraft/" + url_encode(name)), L"GET");
+    Json user;
+    user.parse(res.body);
+    std::string id = user.text("id");
+    if (id.empty()) return L"";
+    HttpResult profile = http_request(utf8_to_wide("https://sessionserver.mojang.com/session/minecraft/profile/" + id), L"GET");
+    return utf8_to_wide(texture_url_of_profile(profile.body));
+}
+
+std::wstring App::resolve_head(const Account& account, bool network) {
+    std::wstring cache = head_cache_dir();
+    std::wstring head = cache + L"\\head-" + safe_id(account.uuid) + L".png";
+    std::wstring shared = user_data_dir() + L"\\shared";
+    Json settings;
+    settings.parse(read_file_utf8(user_data_dir() + L"\\settings.json"));
+    std::string shared_dir = settings.text("sharedDir");
+    if (!shared_dir.empty()) shared = utf8_to_wide(shared_dir);
+    std::wstring custom = shared + L"\\skins\\" + safe_id(account.uuid) + L".png";
+
+    std::string key = account.type == L"microsoft" ? "m-" + dashless_lower(account.uuid)
+                      : account.type == L"ely"       ? "e-" + dashless_lower(account.uuid)
+                                                     : "n-" + wide_to_utf8(account.name);
+    std::string lower_key = key;
+    for (char& c : lower_key) c = char(tolower((unsigned char)c));
+
+    std::wstring source;
+    if (GetFileAttributesW(custom.c_str()) != INVALID_FILE_ATTRIBUTES) source = custom;
+    if (source.empty()) {
+        for (const auto& kv : skin_index_.obj) {
+            std::string index_key = kv.first;
+            for (char& c : index_key) c = char(tolower((unsigned char)c));
+            if (index_key != lower_key) continue;
+            std::wstring file = utf8_to_wide(kv.second.text("file"));
+            if (!file.empty() && GetFileAttributesW(file.c_str()) != INVALID_FILE_ATTRIBUTES)
+                source = file;
+            break;
+        }
+    }
+    bool made = !source.empty() && make_head_png(source, head);
+    if (made) return head;
+    if (GetFileAttributesW(head.c_str()) != INVALID_FILE_ATTRIBUTES) return head;
+    if (!network) return L"";
+
+    std::wstring texture = skin_texture_url(account);
+    if (!texture.empty()) {
+        HttpResult image = http_request(texture, L"GET");
+        if (image.ok() && image.status == 200 && image.body.size() > 100 &&
+            (unsigned char)image.body[0] == 0x89 && (unsigned char)image.body[1] == 'P') {
+            std::wstring skin_file = cache + L"\\" + utf8_to_wide(key) + L".png";
+            write_file_bytes(skin_file, std::vector<unsigned char>(image.body.begin(), image.body.end()));
+            if (make_head_png(skin_file, head)) return head;
+        }
+    }
+    std::wstring id = !account.uuid.empty() ? account.uuid : account.name;
+    HttpResult avatar = http_request(L"https://crafthead.net/avatar/" + id, L"GET");
+    if (avatar.ok() && avatar.status == 200 && avatar.body.size() > 100 &&
+        (unsigned char)avatar.body[0] == 0x89 && (unsigned char)avatar.body[1] == 'P') {
+        write_file_bytes(head, std::vector<unsigned char>(avatar.body.begin(), avatar.body.end()));
+        return head;
+    }
+    return L"";
+}
+
 std::wstring App::account_head(const std::wstring& name) const {
-    if (name == L"Sharks909") return asset(L"assets\\img\\head.png");
-    if (name == L"hung") return asset(L"assets\\img\\head-hung.png");
+    for (const auto& account : accounts_)
+        if (account.name == name && !account.head.empty()) return account.head;
     return asset(L"assets\\icons\\user-circle.svg");
 }
 
@@ -534,7 +715,7 @@ void App::rebuild_account_rows() {
     auto make_head = [&](const Account& account, float size, float radius) {
         auto image = std::make_unique<Node>();
         image->kind = Kind::Image;
-        image->src = account_head(account.name);
+        image->src = account.head.empty() ? asset(L"assets/icons/user-circle.svg") : account.head;
         image->style.width = size;
         image->style.height = size;
         image->style.radius = radius;
@@ -622,6 +803,41 @@ void App::rebuild_account_rows() {
             column->kids.push_back(make_text(provider + L" · " + account.uuid, 9.0f, 400,
                                              ui_token(L"faint"), true));
             row->kids.push_back(std::move(column));
+            const DiscordLink* dlink = discord_link_for(account);
+            auto link_btn = std::make_unique<Node>();
+            link_btn->kind = Kind::Row;
+            link_btn->action = L"discord:link:" + account.id;
+            link_btn->style.height = 24.0f;
+            link_btn->style.pad_l = link_btn->style.pad_r = 8.0f;
+            link_btn->style.gap = 4.0f;
+            link_btn->style.radius = 6.0f;
+            link_btn->style.border = true;
+            link_btn->style.border_color = Color::rgb(0x5865F2);
+            auto link_icon = std::make_unique<Node>();
+            link_icon->kind = Kind::Image;
+            link_icon->src = asset(L"assets/icons/discord.svg");
+            link_icon->style.width = link_icon->style.height = 12.0f;
+            link_icon->style.color = Color::rgb(0x5865F2);
+            link_btn->kids.push_back(std::move(link_icon));
+            link_btn->kids.push_back(make_text(dlink ? L"Đã liên kết" : L"Liên kết Discord", 9.5f, 600,
+                                               Color::rgb(0x5865F2)));
+            row->kids.push_back(std::move(link_btn));
+            if (dlink) {
+                auto unlink_btn = std::make_unique<Node>();
+                unlink_btn->kind = Kind::Row;
+                unlink_btn->action = L"discord:unlink:" + account.id;
+                unlink_btn->style.width = unlink_btn->style.height = 24.0f;
+                unlink_btn->style.radius = 6.0f;
+                unlink_btn->style.border = true;
+                unlink_btn->style.border_color = ui_token(L"border");
+                auto trash = std::make_unique<Node>();
+                trash->kind = Kind::Image;
+                trash->src = asset(L"assets/icons/trash.svg");
+                trash->style.width = trash->style.height = 12.0f;
+                trash->style.color = ui_token(L"bad");
+                unlink_btn->kids.push_back(std::move(trash));
+                row->kids.push_back(std::move(unlink_btn));
+            }
             if (account.id == active_id_) {
                 auto badge = std::make_unique<Node>();
                 badge->kind = Kind::Row;
@@ -766,7 +982,7 @@ ModalLayout App::modal_layout() const {
     float h = float(rc.bottom - rc.top) / renderer_.scale();
     ModalLayout L;
     float cw = 560.0f;
-    float ch = modal_kind_ == 0 ? 268.0f : modal_kind_ == 1 ? 330.0f : 384.0f;
+    float ch = modal_kind_ == 0 ? 268.0f : modal_kind_ == 1 ? 330.0f : modal_kind_ == 2 ? 384.0f : 380.0f;
     if (!modal_error_.empty()) ch += 44.0f;
     float x = (w - cw) * 0.5f;
     float y = (h - ch) * 0.5f;
@@ -775,12 +991,12 @@ ModalLayout App::modal_layout() const {
     L.close = D2D1::RectF(x + cw - 40.0f, y + 10.0f, x + cw - 16.0f, y + 34.0f);
     float kx = x + 16.0f;
     float ky = y + 56.0f;
-    float kw = (cw - 32.0f - 16.0f) / 3.0f;
-    for (int i = 0; i < 3; ++i)
+    float kw = (cw - 32.0f - 24.0f) / 4.0f;
+    for (int i = 0; i < 4; ++i)
         L.kinds[i] = D2D1::RectF(kx + i * (kw + 8.0f), ky, kx + i * (kw + 8.0f) + kw, ky + 64.0f);
     float desc_y = ky + 64.0f + 10.0f;
     float body_y = desc_y + 36.0f + 10.0f;
-    if (modal_kind_ == 0) {
+    if (modal_kind_ == 0 || modal_kind_ == 3) {
         L.name_input = D2D1::RectF(x + 62.0f, body_y, x + cw - 16.0f, body_y + 38.0f);
     } else if (modal_kind_ == 2) {
         L.user_input = D2D1::RectF(x + 16.0f, body_y, x + cw - 16.0f, body_y + 38.0f);
@@ -799,6 +1015,7 @@ ModalLayout App::modal_layout() const {
 bool App::modal_valid() const {
     if (modal_kind_ == 0) return valid_mc_name(trim_text(modal_name_));
     if (modal_kind_ == 1) return true;
+    if (modal_kind_ == 3) return !modal_discord_account_.empty() || valid_mc_name(trim_text(modal_name_));
     return !trim_text(modal_user_).empty() && !modal_pass_.empty();
 }
 
@@ -813,6 +1030,7 @@ void App::open_account_modal() {
     modal_user_.clear();
     modal_pass_.clear();
     modal_error_.clear();
+    modal_discord_account_.clear();
     SetTimer(hwnd_, 4, 500, nullptr);
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
@@ -873,10 +1091,10 @@ void App::draw_account_modal() {
     auto icon = [&](const wchar_t* path, D2D1_RECT_F rect, Color color) {
         renderer_.draw_svg(asset(path), rect, color);
     };
-    icon(L"assets\\icons\\user.svg",
+    icon(modal_kind_ == 3 ? L"assets\\icons\\discord.svg" : L"assets\\icons\\user.svg",
          D2D1::RectF(L.card.left + 16, L.card.top + 15, L.card.left + 31, L.card.top + 30),
-         ui_color(L"accent"));
-    renderer_.draw_text(L"Thêm tài khoản",
+         modal_kind_ == 3 ? Color::rgb(0x5865F2) : ui_color(L"accent"));
+    renderer_.draw_text(modal_kind_ == 3 ? L"Liên kết Discord" : L"Thêm tài khoản",
                         D2D1::RectF(L.card.left + 38, L.card.top + 10, L.card.right - 48,
                                     L.card.top + 34),
                         12.0f, 700, false, TextAlign::Left, ui_color(L"text"));
@@ -884,19 +1102,20 @@ void App::draw_account_modal() {
          D2D1::RectF(L.close.left + 5, L.close.top + 5, L.close.right - 5, L.close.bottom - 5),
          ui_color(L"label"));
 
-    const wchar_t* kind_labels[3] = { L"Ngoại tuyến", L"Microsoft", L"ely.by" };
-    const wchar_t* kind_icons[3] = { L"assets\\icons\\user.svg",
+    const wchar_t* kind_labels[4] = { L"Ngoại tuyến", L"Microsoft", L"ely.by", L"Discord" };
+    const wchar_t* kind_icons[4] = { L"assets\\icons\\user.svg",
                                      L"assets\\icons\\windows-logo.svg",
-                                     L"assets\\icons\\globe.svg" };
-    for (int i = 0; i < 3; ++i) {
+                                     L"assets\\icons\\globe.svg",
+                                     L"assets\\icons\\discord.svg" };
+    for (int i = 0; i < 4; ++i) {
         bool on = modal_kind_ == i;
         D2D1_RECT_F box = L.kinds[i];
         if (on) renderer_.fill_rect(box, 12.0f, ui_color(L"input"));
-        renderer_.stroke_rect(box, 12.0f, on ? ui_color(L"accent") : ui_color(L"border"), 1.0f,
-                              1.0f);
+        Color tint = (i == 3) ? Color::rgb(0x5865F2) : ui_color(L"accent");
+        renderer_.stroke_rect(box, 12.0f, on ? tint : ui_color(L"border"), 1.0f, 1.0f);
         icon(kind_icons[i], D2D1::RectF(box.left + 10, box.top + 10, box.left + 25,
                                        box.top + 25),
-             on ? ui_color(L"accent") : ui_color(L"label"));
+             on ? ((i == 3) ? Color::rgb(0x5865F2) : ui_color(L"accent")) : ui_color(L"label"));
         renderer_.draw_text(kind_labels[i],
                             D2D1::RectF(box.left + 10, box.top + 32, box.right - 8,
                                         box.bottom - 6),
@@ -910,7 +1129,8 @@ void App::draw_account_modal() {
         ? L"Chơi không cần tài khoản Mojang. Tên chỉ gồm chữ, số, gạch dưới và dài 3–16 ký tự."
         : modal_kind_ == 1
             ? L"Đăng nhập bằng tài khoản Microsoft đã sở hữu Minecraft Java Edition. Launcher lưu refresh token và tự làm mới phiên mỗi lần khởi chạy."
-            : L"Tài khoản ely.by qua authlib-injector: chơi được trên server có bật ely.by và dùng skin của ely.by.";
+            : modal_kind_ == 2 ? L"Tài khoản ely.by qua authlib-injector: chơi được trên server có bật ely.by và dùng skin của ely.by."
+            : L"Liên kết tài khoản launcher với Discord để nhận vai trò và đồng bộ trên server.";
     renderer_.draw_text(desc_text, desc, 10.5f, 400, false, TextAlign::Left, ui_color(L"faint"),
                         1.0f, true);
 
@@ -976,7 +1196,7 @@ void App::draw_account_modal() {
                                             note.bottom + 38),
                                 11.0f, 400, false, TextAlign::Left, ui_color(L"label"));
         }
-    } else {
+    } else if (modal_kind_ == 2) {
         input_box(L.user_input, modal_user_, L"Tên đăng nhập hoặc email ely.by", false,
                   modal_focus_ == 0);
         input_box(L.pass_input, modal_pass_, L"Mật khẩu ely.by", !modal_show_pass_,
@@ -994,6 +1214,39 @@ void App::draw_account_modal() {
                             D2D1::RectF(note.left + 32, note.top + 8, note.right - 10,
                                         note.bottom - 8),
                             10.5f, 400, false, TextAlign::Left, ui_color(L"label"), 1.0f, true);
+    } else {
+        if (!modal_discord_account_.empty()) {
+            D2D1_RECT_F chip = D2D1::RectF(L.card.left + 16, L.name_input.top,
+                                           L.card.right - 16, L.name_input.top + 44.0f);
+            renderer_.fill_rect(chip, 8.0f, ui_color(L"input"));
+            renderer_.stroke_rect(chip, 8.0f, ui_color(L"border"), 1.0f);
+            const Account* account = find_account(modal_discord_account_);
+            renderer_.draw_text(account ? account->name : L"Tài khoản",
+                                D2D1::RectF(chip.left + 12, chip.top, chip.right - 12,
+                                            chip.bottom),
+                                12.0f, 600, false, TextAlign::Left, ui_color(L"text"));
+        } else {
+            input_box(L.name_input, modal_name_, L"Tên tài khoản…", false, modal_focus_ == 0);
+        }
+        D2D1_RECT_F note = D2D1::RectF(L.card.left + 16, L.name_input.top + 54.0f,
+                                       L.card.right - 16, L.name_input.top + 110.0f);
+        renderer_.fill_rect(note, 8.0f, ui_color(L"input"));
+        renderer_.stroke_rect(note, 8.0f, ui_color(L"border"), 1.0f);
+        icon(L"assets\\icons\\discord.svg",
+             D2D1::RectF(note.left + 10, note.top + 10, note.left + 25, note.top + 25),
+             Color::rgb(0x5865F2));
+        renderer_.draw_text(L"Trình duyệt sẽ mở trang xác thực Discord. Launcher tự nhận kết quả và tạo tài khoản nếu chưa có.",
+                            D2D1::RectF(note.left + 32, note.top + 8, note.right - 10,
+                                        note.bottom - 8),
+                            10.5f, 400, false, TextAlign::Left, ui_color(L"label"), 1.0f, true);
+        if (modal_busy_) {
+            draw_spinner(renderer_, L.card.left + 24, note.bottom + 24, 6.0f,
+                         Color::rgb(0x5865F2), 1.0f);
+            renderer_.draw_text(L"Đang chờ bạn xác thực trong Discord…",
+                                D2D1::RectF(L.card.left + 38, note.bottom + 12, L.card.right - 16,
+                                            note.bottom + 38),
+                                11.0f, 400, false, TextAlign::Left, ui_color(L"label"));
+        }
     }
 
     float footer_top = L.card.bottom - 52.0f;
@@ -1013,7 +1266,8 @@ void App::draw_account_modal() {
                         0.0f, ui_color(L"border"));
     const wchar_t* hint = modal_kind_ == 0 ? L"Tên chỉ gồm chữ, số, gạch dưới và dài 3–16 ký tự."
                          : modal_kind_ == 1 ? L"Cần tài khoản đã mua Minecraft Java Edition."
-                                            : L"Thông tin đăng nhập chỉ dùng để lấy token từ ely.by.";
+                         : modal_kind_ == 2 ? L"Thông tin đăng nhập chỉ dùng để lấy token từ ely.by."
+                                            : L"Tài khoản sẽ được tạo nếu chưa tồn tại.";
     renderer_.draw_text(hint,
                         D2D1::RectF(L.card.left + 16, footer_top + 10, L.submit.left - 8,
                                     footer_top + 42),
@@ -1022,21 +1276,23 @@ void App::draw_account_modal() {
                         D2D1::RectF(L.cancel.left, L.cancel.top, L.cancel.right, L.cancel.bottom),
                         11.0f, 600, false, TextAlign::Center, ui_color(L"label"));
     bool enabled = !modal_busy_ && modal_valid();
-    renderer_.fill_rect(L.submit, 8.0f, ui_color(L"accent"), enabled ? 1.0f : 0.4f);
+    Color submit_bg = modal_kind_ == 3 ? Color::rgb(0x5865F2) : ui_color(L"accent");
+    Color submit_ink = modal_kind_ == 3 ? Color::rgb(0xFFFFFF) : ui_color(L"ink");
+    renderer_.fill_rect(L.submit, 8.0f, submit_bg, enabled ? 1.0f : 0.4f);
     if (modal_busy_) {
         draw_spinner(renderer_, L.submit.left + 22, (L.submit.top + L.submit.bottom) * 0.5f, 5.0f,
-                     ui_color(L"ink"), 1.0f);
+                     submit_ink, 1.0f);
     } else {
-        icon(L"assets\\icons\\check-circle.svg",
+        icon(modal_kind_ == 3 ? L"assets\\icons\\discord.svg" : L"assets\\icons\\check-circle.svg",
              D2D1::RectF(L.submit.left + 12, L.submit.top + 10, L.submit.left + 24,
                          L.submit.bottom - 10),
-             ui_color(L"ink"));
+             submit_ink);
     }
     const wchar_t* submit_text = modal_kind_ == 0 ? L"Tạo" : L"Đăng nhập";
     renderer_.draw_text(submit_text,
                         D2D1::RectF(L.submit.left + 30, L.submit.top, L.submit.right - 8,
                                     L.submit.bottom),
-                        11.0f, 700, false, TextAlign::Left, ui_color(L"ink"),
+                        11.0f, 700, false, TextAlign::Left, submit_ink,
                         enabled ? 1.0f : 0.5f);
 }
 
@@ -1057,16 +1313,16 @@ bool App::account_modal_mouse_down(int px, int py) {
         return true;
     }
     if (modal_busy_) return true;
-    for (int i = 0; i < 3; ++i) {
+    for (int i = 0; i < 4; ++i) {
         if (inside(L.kinds[i])) {
             modal_kind_ = i;
-            modal_focus_ = i == 2 ? 0 : (i == 0 ? 0 : -1);
+            modal_focus_ = (i == 2 || i == 0 || (i == 3 && modal_discord_account_.empty())) ? 0 : -1;
             modal_error_.clear();
             InvalidateRect(hwnd_, nullptr, FALSE);
             return true;
         }
     }
-    if (modal_kind_ == 0 && inside(L.name_input)) {
+    if ((modal_kind_ == 0 || modal_kind_ == 3) && inside(L.name_input)) {
         modal_focus_ = 0;
         InvalidateRect(hwnd_, nullptr, FALSE);
         return true;
@@ -1118,7 +1374,7 @@ bool App::account_modal_key(WPARAM key) {
     }
     if (key == VK_BACK) {
         std::wstring* target = nullptr;
-        if (modal_kind_ == 0 && modal_focus_ == 0) target = &modal_name_;
+        if ((modal_kind_ == 0 || modal_kind_ == 3) && modal_focus_ == 0) target = &modal_name_;
         else if (modal_kind_ == 2 && modal_focus_ == 0) target = &modal_user_;
         else if (modal_kind_ == 2 && modal_focus_ == 1) target = &modal_pass_;
         if (target && !target->empty()) target->pop_back();
@@ -1133,7 +1389,7 @@ bool App::account_modal_char(wchar_t ch) {
     if (!modal_open_ || modal_busy_ || ch < 32 || ch == 127) return false;
     std::wstring* target = nullptr;
     size_t limit = 64;
-    if (modal_kind_ == 0 && modal_focus_ == 0) {
+    if ((modal_kind_ == 0 || modal_kind_ == 3) && modal_focus_ == 0) {
         target = &modal_name_;
         limit = 16;
     } else if (modal_kind_ == 2 && modal_focus_ == 0) {
@@ -1173,6 +1429,7 @@ void App::submit_account_modal() {
         account.uuid = wide_uuid;
         account.raw = Json::object();
         account.raw.set("created", Json::string(iso_now()));
+        account.head = resolve_head(account, true);
         accounts_.push_back(account);
         active_id_ = account.id;
         save_accounts();
@@ -1180,6 +1437,10 @@ void App::submit_account_modal() {
         ui_apply_page();
         close_account_modal();
         notify(L"Đã thêm tài khoản", name, L"ok");
+        return;
+    }
+    if (modal_kind_ == 3) {
+        start_discord_job();
         return;
     }
     start_auth_job(modal_kind_);
@@ -1257,6 +1518,7 @@ void App::apply_auth_result(AuthResult* result) {
         account.xuid = result->xuid;
         account.raw = Json::object();
         account.raw.set("created", Json::string(iso_now()));
+        account.head = resolve_head(account, true);
         accounts_.push_back(account);
     }
     active_id_ = id;
@@ -1270,6 +1532,212 @@ void App::apply_auth_result(AuthResult* result) {
     delete result;
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
+const DiscordLink* App::discord_link_for(const Account& account) const {
+    for (const auto& link : discord_links_)
+        if ((!link.account_uuid.empty() && link.account_uuid == account.uuid) ||
+            (!link.account_id.empty() && link.account_id == account.id))
+            return &link;
+    return nullptr;
+}
+
+void App::refresh_discord_links() {
+    std::wstring api_url = discord_api_url_;
+    std::wstring api_key = discord_api_key_;
+    HWND target = hwnd_;
+    HANDLE thread = CreateThread(nullptr, 0, +[](LPVOID param) -> DWORD {
+        auto* job = reinterpret_cast<std::pair<HWND, std::pair<std::wstring, std::wstring>>*>(param);
+        std::string* body = new std::string(
+            discord_links_body(job->second.first, job->second.second));
+        PostMessage(job->first, WM_APP + 6, 0, reinterpret_cast<LPARAM>(body));
+        delete job;
+        return 0;
+    }, new std::pair<HWND, std::pair<std::wstring, std::wstring>>(target, { api_url, api_key }), 0, nullptr);
+    if (thread) CloseHandle(thread);
+}
+
+void App::apply_discord_links_body(const std::string& body) {
+    Json root;
+    root.parse(body);
+    discord_links_.clear();
+    const Json* items = root.find("items");
+    if (items && items->type == Json::Type::Array) {
+        for (const auto& item : items->arr) {
+            DiscordLink link;
+            link.id = utf8_to_wide(item.text("id"));
+            link.account_id = utf8_to_wide(item.text("accountId"));
+            link.account_uuid = utf8_to_wide(item.text("accountUuid"));
+            link.account_name = utf8_to_wide(item.text("accountName"));
+            link.discord_name = utf8_to_wide(item.text("discordName"));
+            link.discord_tag = utf8_to_wide(item.text("discordTag"));
+            link.discord_avatar = utf8_to_wide(item.text("discordAvatar"));
+            if (!link.id.empty()) discord_links_.push_back(std::move(link));
+        }
+    }
+    rebuild_account_rows();
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+void App::open_discord_link_modal(const std::wstring& account_id) {
+    close_account_menu();
+    modal_open_ = true;
+    modal_kind_ = 3;
+    modal_busy_ = false;
+    modal_error_.clear();
+    modal_show_pass_ = false;
+    modal_user_.clear();
+    modal_pass_.clear();
+    modal_discord_account_ = account_id;
+    const Account* account = find_account(account_id);
+    modal_name_ = account ? account->name : L"";
+    modal_focus_ = account ? -1 : 0;
+    SetTimer(hwnd_, 4, 500, nullptr);
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+void App::start_discord_job() {
+    if (modal_busy_) return;
+    modal_busy_ = true;
+    modal_error_.clear();
+    DiscordJob* job = new DiscordJob{};
+    job->hwnd = hwnd_;
+    job->api_url = discord_api_url_;
+    job->api_key = discord_api_key_;
+    job->name = trim_text(modal_name_);
+    job->account_id = modal_discord_account_;
+    const Account* account = find_account(modal_discord_account_);
+    if (account) {
+        job->name = account->name;
+        job->account_uuid = account->uuid;
+    }
+    SetTimer(hwnd_, 2, 16, nullptr);
+    InvalidateRect(hwnd_, nullptr, FALSE);
+    HANDLE thread = CreateThread(nullptr, 0, +[](LPVOID param) -> DWORD {
+        DiscordJob* job = reinterpret_cast<DiscordJob*>(param);
+        DiscordResult flow = discord_link_flow(job->api_url, job->api_key, job->name,
+                                               job->account_id, job->account_uuid);
+        DiscordAuthResult* result = new DiscordAuthResult();
+        result->ok = flow.ok;
+        result->error = flow.error;
+        result->name = flow.name;
+        result->uuid = flow.uuid;
+        result->account_id = flow.account_id;
+        result->discord_name = flow.discord_name;
+        result->discord_tag = flow.discord_tag;
+        result->discord_avatar = flow.discord_avatar;
+        result->link_id = flow.link_id;
+        result->created = flow.created;
+        PostMessage(job->hwnd, WM_APP + 8, 0, reinterpret_cast<LPARAM>(result));
+        delete job;
+        return 0;
+    }, job, 0, nullptr);
+    if (thread) CloseHandle(thread);
+}
+
+void App::apply_discord_result(DiscordAuthResult* result) {
+    modal_busy_ = false;
+    if (!result) return;
+    if (!result->ok) {
+        modal_error_ = result->error.empty() ? L"Không liên kết được Discord." : result->error;
+        InvalidateRect(hwnd_, nullptr, FALSE);
+        return;
+    }
+    Account* account = nullptr;
+    for (auto& item : accounts_) {
+        if (item.uuid == result->uuid || item.id == result->account_id) {
+            account = &item;
+            break;
+        }
+    }
+    if (!account) {
+        Account created;
+        created.id = result->account_id.empty()
+                         ? L"off-" + result->uuid.substr(0, 8)
+                         : result->account_id;
+        created.name = trim_text(result->name);
+        if (created.name.empty()) created.name = L"DiscordUser";
+        created.type = L"offline";
+        created.uuid = result->uuid;
+        created.raw = Json::object();
+        created.raw.set("created", Json::string(iso_now()));
+        created.head = resolve_head(created, true);
+        accounts_.push_back(created);
+        account = &accounts_.back();
+        active_id_ = created.id;
+    }
+    if (!result->link_id.empty()) {
+        bool found = false;
+        for (auto& link : discord_links_) {
+            if (link.id == result->link_id) {
+                link.discord_name = result->discord_name;
+                link.discord_tag = result->discord_tag;
+                link.discord_avatar = result->discord_avatar;
+                link.account_uuid = result->uuid;
+                link.account_id = account->id;
+                link.account_name = account->name;
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            DiscordLink link;
+            link.id = result->link_id;
+            link.account_id = account->id;
+            link.account_uuid = result->uuid;
+            link.account_name = account->name;
+            link.discord_name = result->discord_name;
+            link.discord_tag = result->discord_tag;
+            link.discord_avatar = result->discord_avatar;
+            discord_links_.push_back(std::move(link));
+        }
+    }
+    save_accounts();
+    rebuild_account_rows();
+    ui_apply_page();
+    close_account_modal();
+    std::wstring tag = result->discord_tag.empty() ? result->discord_name : result->discord_tag;
+    notify(L"Đã liên kết Discord", account->name + L" · " + tag, L"ok");
+    refresh_discord_links();
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+void App::unlink_discord(const std::wstring& account_id) {
+    const Account* account = find_account(account_id);
+    if (!account) return;
+    const DiscordLink* link = discord_link_for(*account);
+    if (!link) {
+        notify(L"Discord", L"Tài khoản này chưa liên kết Discord.", L"info");
+        return;
+    }
+    std::wstring id = link->id;
+    std::wstring api_url = discord_api_url_;
+    std::wstring api_key = discord_api_key_;
+    HWND target = hwnd_;
+    struct UnlinkJob {
+        HWND hwnd;
+        std::wstring id;
+        std::wstring url;
+        std::wstring key;
+    };
+    HANDLE thread = CreateThread(nullptr, 0, +[](LPVOID param) -> DWORD {
+        UnlinkJob* job = reinterpret_cast<UnlinkJob*>(param);
+        std::wstring error;
+        bool ok = discord_unlink(job->url, job->key, job->id, &error);
+        auto* payload = new std::pair<bool, std::wstring>(ok, error);
+        PostMessage(job->hwnd, WM_APP + 7, 0, reinterpret_cast<LPARAM>(payload));
+        delete job;
+        return 0;
+    }, new UnlinkJob{ target, id, api_url, api_key }, 0, nullptr);
+    if (thread) CloseHandle(thread);
+}
+
+void App::handle_unlink_result(bool ok, const std::wstring& error) {
+    if (!ok) {
+        notify(L"Discord", error.empty() ? L"Không bỏ liên kết được Discord." : error, L"bad");
+        return;
+    }
+    notify(L"Discord", L"Đã bỏ liên kết Discord.", L"ok");
+    refresh_discord_links();
+}
 void App::do_action(const std::wstring& action) {
     if (action == L"toggle:theme") {
         toggle_theme();
@@ -1277,6 +1745,12 @@ void App::do_action(const std::wstring& action) {
         toggle_account_menu();
     } else if (action == L"account:add") {
         open_account_modal();
+    } else if (action == L"discord:add") {
+        open_discord_link_modal(L"");
+    } else if (action.rfind(L"discord:link:", 0) == 0) {
+        open_discord_link_modal(action.substr(13));
+    } else if (action.rfind(L"discord:unlink:", 0) == 0) {
+        unlink_discord(action.substr(15));
     } else if (action.rfind(L"account:", 0) == 0) {
         select_account(action.substr(8));
     } else if (action == L"accounts:tab-list") {
@@ -2122,6 +2596,15 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         case WM_APP + 3:
             if (app) app->handle_auth_result(lp);
+            return 0;
+        case WM_APP + 6:
+            if (app) app->handle_discord_links_msg(lp);
+            return 0;
+        case WM_APP + 7:
+            if (app) app->handle_unlink_msg(lp);
+            return 0;
+        case WM_APP + 8:
+            if (app) app->handle_discord_result_msg(lp);
             return 0;
         case WM_TIMER:
             if (wp == 4) { InvalidateRect(hwnd, nullptr, FALSE); return 0; }
