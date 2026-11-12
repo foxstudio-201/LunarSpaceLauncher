@@ -463,6 +463,7 @@ void arrange(Node* node, D2D1_RECT_F rect, Renderer& renderer) {
     std::vector<float> main_sizes(node->kids.size(), 0.0f);
     std::vector<float> weights(node->kids.size(), 0.0f);
     float fixed = 0.0f;
+    size_t visible_count = 0;
     for (size_t i = 0; i < node->kids.size(); ++i) {
         Node* kid = node->kids[i].get();
         if (!kid->style.visible) continue;
@@ -475,8 +476,9 @@ void arrange(Node* node, D2D1_RECT_F rect, Renderer& renderer) {
                               : (kid->style.grow_y ? 1.0f : 0.0f));
         weights[i] = weight;
         fixed += main;
+        ++visible_count;
     }
-    fixed += node->style.gap * float(node->kids.size() > 0 ? node->kids.size() - 1 : 0);
+    fixed += node->style.gap * float(visible_count > 0 ? visible_count - 1 : 0);
     const float avail = row ? iw : ih;
     const float extra = avail - fixed;
     float total_weight = 0.0f;
@@ -490,9 +492,12 @@ void arrange(Node* node, D2D1_RECT_F rect, Renderer& renderer) {
                    ((extra > 0.0f && total_weight <= 0.0f && node->style.center_main)
                         ? extra * 0.5f
                         : 0.0f);
+    bool first_visible = true;
     for (size_t i = 0; i < node->kids.size(); ++i) {
         Node* kid = node->kids[i].get();
         if (!kid->style.visible) continue;
+        if (!first_visible) cursor += node->style.gap;
+        first_visible = false;
         float cw = row ? main_sizes[i] : (kid->style.width > 0.0f ? kid->style.width : iw);
         float ch = row ? (kid->style.height > 0.0f ? kid->style.height : ih) : main_sizes[i];
         if (row) {
@@ -503,7 +508,7 @@ void arrange(Node* node, D2D1_RECT_F rect, Renderer& renderer) {
         float child_y = row ? iy + (ih - ch) * 0.5f : cursor;
         float child_x = row ? cursor : ix;
         arrange(kid, D2D1::RectF(child_x, child_y, child_x + cw, child_y + ch), renderer);
-        cursor += (row ? cw : ch) + node->style.gap;
+        cursor += row ? cw : ch;
     }
 }
 

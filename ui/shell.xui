@@ -6,7 +6,7 @@
 // colors accept $tokens (bg, bar, surface, surfaceActive, text, label, faint,
 // border, borderSoft, input, hover, accent, accentHover, accentSoft, ...).
 
-column bg=$bg growx=1 growy=1 {
+column id=root bg=$bg growx=1 growy=1 {
   row id=titlebar height=44 gap=0 action=window:drag {
     row paddingleft=16 gap=10 {
       image src=assets/img/xyolauncher.png width=28 height=28 radius=7
@@ -100,6 +100,12 @@ column bg=$bg growx=1 growy=1 {
             text value="Thêm tài khoản" size=11 weight=600 color=$ink
           }
         }
+        row id=header-tools-settings hidden=1 gap=8 {
+          row id=btn-settings-save height=34 paddingx=14 gap=6 radius=8 bg=$accent action=settings:save {
+            image src=assets/icons/floppy-disk.svg width=14 height=14 color=$ink
+            text value="Lưu" size=11 weight=600 color=$ink
+          }
+        }
       }
 
       row id=home-tabs gap=4 {
@@ -191,6 +197,11 @@ column bg=$bg growx=1 growy=1 {
             text value="Chế độ vẽ 3D" size=14 weight=700 color=$text
             text value="Engine MVP giữ chế độ tải tệp; trình vẽ 3D sẽ được port sau." size=11 color=$label
           }
+        }
+      }
+
+      column id=settings-view hidden=1 growx=1 growy=1 {
+        column id=settings-slot growx=1 growy=1 {
         }
       }
 

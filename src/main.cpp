@@ -8,6 +8,7 @@
 #include "anim.h"
 #include <d2d1helper.h>
 #include <windowsx.h>
+#include <commdlg.h>
 #include <shellapi.h>
 #include <string>
 #include <vector>
@@ -211,6 +212,52 @@ struct HomeSystem {
     std::wstring shared_dir;
 };
 
+struct BgItem {
+    std::wstring id;
+    std::wstring name;
+    std::wstring ext;
+    bool local = false;
+    bool ready = false;
+    std::wstring file;
+};
+
+struct ManagedJava {
+    std::wstring component;
+    std::wstring name;
+    std::wstring released;
+    std::wstring java_path;
+    std::wstring dir;
+    int major = 0;
+    bool installed = false;
+    unsigned long long bytes = 0;
+};
+
+struct ZuluJava {
+    std::wstring name;
+    std::wstring java_path;
+    std::wstring dir;
+    int major = 0;
+    unsigned long long bytes = 0;
+};
+
+struct ExternalJava {
+    std::wstring name;
+    std::wstring java_path;
+    int major = 0;
+};
+
+struct JavaState {
+    std::vector<ManagedJava> managed;
+    std::vector<ZuluJava> zulu;
+    std::vector<ExternalJava> external;
+};
+
+struct BgResult {
+    std::wstring id;
+    bool ok = false;
+    std::wstring error;
+};
+
 static std::vector<LoaderInfo> default_loaders();
 
 struct ModalLayout {
@@ -369,6 +416,14 @@ public:
     Node* hit_test(float x, float y);
     void handle_auth_result(LPARAM lp) { apply_auth_result(reinterpret_cast<AuthResult*>(lp)); }
     void handle_discord_links_msg(LPARAM lp) { auto* body = reinterpret_cast<std::string*>(lp); if (body) { apply_discord_links_body(*body); delete body; } }
+    void handle_java_removed() {
+        java_state_ = JavaState{};
+        if (page_ == L"settings") load_java_state_async(true);
+    }
+    void handle_java_state(LPARAM lp) { apply_java_state(reinterpret_cast<JavaState*>(lp)); }
+    void handle_background_result(LPARAM lp) {
+        apply_background_result(reinterpret_cast<BgResult*>(lp));
+    }
     void handle_discord_result_msg(LPARAM lp) { auto* result = reinterpret_cast<DiscordAuthResult*>(lp); if (result) { apply_discord_result(result); delete result; } }
     void handle_unlink_msg(LPARAM lp) { auto* payload = reinterpret_cast<std::pair<bool, std::wstring>*>(lp); if (payload) { handle_unlink_result(payload->first, payload->second); delete payload; } }
     void handle_home_data_msg(LPARAM lp) { auto* data = reinterpret_cast<HomeData*>(lp); if (data) { apply_home_data(data); delete data; } }
@@ -401,6 +456,18 @@ private:
     void apply_system_info(HomeSystem* info);
     void rebuild_home();
     void layout_home();
+    void load_settings_page_state();
+    void rebuild_settings();
+    void layout_settings();
+    void load_java_state_async(bool refresh);
+    void apply_java_state(JavaState* state);
+    void apply_background_result(BgResult* result);
+    void start_background_download(const std::wstring& id);
+    void apply_background(const std::wstring& id);
+    void save_user_setting(const std::string& key, Json value);
+    void browse_java_exe();
+    void remove_java_dir(const std::wstring& dir);
+    void settings_toggle_bool(bool& value, const char* key);
     void refresh_discord_links();
     void apply_discord_links_body(const std::string& body);
     const DiscordLink* discord_link_for(const Account& account) const;
@@ -444,6 +511,7 @@ private:
     Node* hovered_ = nullptr;
     std::wstring pressed_;
     std::wstring page_ = L"home";
+    std::wstring last_page_ = L"home";
     bool dirty_ = true;
     std::wstring base_;
     Splash splash_;
@@ -488,6 +556,28 @@ private:
     D2D1_RECT_F sidebar_item_rect_ = D2D1::RectF();
     float sidebar_rise_ = 0.0f;
     bool sidebar_item_valid_ = false;
+    std::unique_ptr<Node> settings_;
+    D2D1_RECT_F settings_slot_rect_ = D2D1::RectF();
+    float settings_scroll_ = 0.0f;
+    float settings_content_h_ = 0.0f;
+    bool effects_enabled_ = true;
+    bool hide_on_launch_ = true;
+    bool rich_presence_ = true;
+    bool auto_update_ = true;
+    bool settings_lang_en_ = false;
+    std::wstring java_path_;
+    std::wstring background_id_;
+    std::vector<BgItem> bg_items_;
+    std::wstring bg_busy_;
+    std::wstring settings_error_;
+    JavaState java_state_;
+    bool java_loading_ = false;
+    std::wstring zulu_major_ = L"21";
+    std::wstring zulu_kind_ = L"jre";
+    std::wstring java_confirm_;
+    std::wstring zulu_confirm_;
+    ZuluJava java_override_zulu_;
+    std::wstring discord_invite_ = L"https://discord.gg/8UQZTkRSGp";
     int discord_phase_ = 0;
     int discord_seq_ = 0;
     bool discord_force_ = false;
@@ -600,6 +690,8 @@ void App::ui_apply_page() {
             sub->text = L"Quản lý modpack và nội dung tải về";
         else if (page_ == L"versions")
             sub->text = L"Tạo và quản lý phiên bản";
+        else if (page_ == L"settings")
+            sub->text = L"Cấu hình launcher và thông tin máy";
         else
             sub->text = L"Cấu hình launcher và trò chơi";
     }
@@ -607,12 +699,14 @@ void App::ui_apply_page() {
     ui_set_visible(ui_find(ui_.get(), L"content-header"), !skin_wide);
     ui_set_visible(ui_find(ui_.get(), L"home-view"), page_ == L"home");
     ui_set_visible(ui_find(ui_.get(), L"accounts-view"), page_ == L"accounts");
+    ui_set_visible(ui_find(ui_.get(), L"settings-view"), page_ == L"settings");
     ui_set_visible(ui_find(ui_.get(), L"placeholder"),
-                   page_ != L"home" && page_ != L"accounts");
+                   page_ != L"home" && page_ != L"accounts" && page_ != L"settings");
     ui_set_visible(ui_find(ui_.get(), L"home-tabs"), page_ == L"home");
     ui_set_visible(ui_find(ui_.get(), L"accounts-tabs"), page_ == L"accounts" && !skin_wide);
     ui_set_visible(ui_find(ui_.get(), L"header-tools-home"), page_ == L"home");
     ui_set_visible(ui_find(ui_.get(), L"header-tools-accounts"), page_ == L"accounts");
+    ui_set_visible(ui_find(ui_.get(), L"header-tools-settings"), page_ == L"settings");
     ui_set_visible(ui_find(ui_.get(), L"accounts-list-view"),
                    page_ == L"accounts" && !accounts_skin_);
     ui_set_visible(ui_find(ui_.get(), L"skin-view"), skin_wide);
@@ -691,6 +785,12 @@ void App::ui_apply_page() {
         acct->style.bg = ui_token(page_ == L"accounts" ? L"surfaceActive" : L"hover");
         acct->style.accent = false;
     }
+    if (page_ == L"settings" && last_page_ != L"settings") settings_scroll_ = 0.0f;
+    last_page_ = page_;
+    if (page_ == L"settings") {
+        rebuild_settings();
+        if (java_state_.managed.empty() && !java_loading_) load_java_state_async(false);
+    }
     rebuild_account_rows();
     start_pill_slide();
     dirty_ = true;
@@ -724,6 +824,25 @@ void App::load_data() {
     }
     active_id_ = utf8_to_wide(root.text("activeAccountId"));
     if (!find_account(active_id_) && !accounts_.empty()) active_id_ = accounts_.front().id;
+
+    effects_enabled_ = root.boolean("effects", true);
+    hide_on_launch_ = root.boolean("hideOnLaunch", true);
+    rich_presence_ = root.boolean("discordRpc", true);
+    auto_update_ = root.boolean("autoUpdate", true);
+    settings_lang_en_ = root.text("language", "vi") == "en";
+    java_path_ = utf8_to_wide(root.text("javaPath"));
+    background_id_ = utf8_to_wide(root.text("background"));
+    discord_invite_ = utf8_to_wide(root.text("discordInvite", "https://discord.gg/8UQZTkRSGp"));
+    load_settings_page_state();
+    if (!background_id_.empty() && background_id_ != L"theme") {
+        std::wstring file;
+        for (const auto& item : bg_items_)
+            if (item.id == background_id_ && item.ready) { file = item.file; break; }
+        if (Node* root_node = ui_find(ui_.get(), L"root")) {
+            root_node->style.bg_image = file;
+            if (!file.empty()) root_node->style.overlay = Color::rgb(0x06090D, 0.62f);
+        }
+    }
 
     Json skin_cache;
     skin_cache.parse(read_file_utf8(head_cache_dir() + L"\\index.json"));
@@ -2579,6 +2698,7 @@ void App::apply_system_info(HomeSystem* info) {
     system_loading_ = false;
     if (!system_info_.shared_dir.empty()) shared_dir_ = system_info_.shared_dir;
     rebuild_home();
+    if (page_ == L"settings") rebuild_settings();
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
@@ -2608,11 +2728,23 @@ void App::layout_home() {
 }
 
 void App::on_wheel(int delta, int px, int py) {
-    if (page_ != L"home" || !home_) return;
     RECT rc{};
     GetClientRect(hwnd_, &rc);
     float x = float(px) / renderer_.scale();
     float y = float(py) / renderer_.scale();
+    if (page_ == L"settings" && settings_) {
+        if (x < settings_slot_rect_.left || x > settings_slot_rect_.right ||
+            y < settings_slot_rect_.top || y > settings_slot_rect_.bottom)
+            return;
+        layout_settings();
+        float view_h = settings_slot_rect_.bottom - settings_slot_rect_.top;
+        float max_scroll = std::max(0.0f, settings_content_h_ - view_h);
+        settings_scroll_ =
+            std::clamp(settings_scroll_ + (delta > 0 ? -72.0f : 72.0f), 0.0f, max_scroll);
+        InvalidateRect(hwnd_, nullptr, FALSE);
+        return;
+    }
+    if (page_ != L"home" || !home_) return;
     if (x < home_slot_rect_.left || x > home_slot_rect_.right || y < home_slot_rect_.top ||
         y > home_slot_rect_.bottom)
         return;
@@ -3260,6 +3392,1149 @@ void App::rebuild_home() {
     hovered_ = nullptr;
 }
 
+// ---------------------------------------------------------------- settings --
+
+struct BgJob {
+    HWND hwnd = nullptr;
+    std::wstring dir;
+    std::wstring file;
+    std::wstring id;
+};
+
+static bool file_exists_w(const std::wstring& path) {
+    return GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES;
+}
+
+static int leading_int(const std::wstring& value) {
+    int number = 0;
+    for (wchar_t ch : value) {
+        if (ch < L'0' || ch > L'9') break;
+        number = number * 10 + int(ch - L'0');
+    }
+    return number;
+}
+
+static std::wstring runtime_platform() {
+#if defined(__aarch64__) || defined(_M_ARM64)
+    return L"windows-arm64";
+#elif defined(_WIN64)
+    return L"windows-x64";
+#else
+    return L"windows-x86";
+#endif
+}
+
+static std::wstring find_java_in_tree(const std::wstring& root, int depth) {
+    std::wstring direct = root + L"\\bin\\java.exe";
+    if (file_exists_w(direct)) return direct;
+    if (depth <= 0) return L"";
+    WIN32_FIND_DATAW data{};
+    HANDLE find = FindFirstFileW((root + L"\\*").c_str(), &data);
+    if (find == INVALID_HANDLE_VALUE) return L"";
+    do {
+        if (!(data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+        if (wcscmp(data.cFileName, L".") == 0 || wcscmp(data.cFileName, L"..") == 0) continue;
+        std::wstring hit = find_java_in_tree(root + L"\\" + data.cFileName, depth - 1);
+        if (!hit.empty()) { FindClose(find); return hit; }
+    } while (FindNextFileW(find, &data));
+    FindClose(find);
+    return L"";
+}
+
+static std::wstring java_release_version(const std::wstring& exe, int* major) {
+    std::wstring root = exe;
+    for (int i = 0; i < 2 && !root.empty(); ++i) {
+        size_t pos = root.find_last_of(L"\\/");
+        root = pos == std::wstring::npos ? L"" : root.substr(0, pos);
+    }
+    std::string release = read_file_utf8(root + L"\\release");
+    std::wstring version;
+    size_t key = release.find("JAVA_VERSION=\"");
+    if (key != std::string::npos) {
+        size_t start = key + 14;
+        size_t end = release.find('"', start);
+        if (end != std::string::npos) version = utf8_to_wide(release.substr(start, end - start));
+    }
+    if (major) {
+        int value = 0;
+        if (version.size() > 2 && version[0] == L'1' && version[1] == L'.')
+            value = leading_int(version.substr(2));
+        else
+            value = leading_int(version);
+        *major = value;
+    }
+    return version;
+}
+
+static bool remove_tree(const std::wstring& dir) {
+    WIN32_FIND_DATAW data{};
+    HANDLE find = FindFirstFileW((dir + L"\\*").c_str(), &data);
+    if (find != INVALID_HANDLE_VALUE) {
+        do {
+            if (wcscmp(data.cFileName, L".") == 0 || wcscmp(data.cFileName, L"..") == 0) continue;
+            std::wstring path = dir + L"\\" + data.cFileName;
+            if (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+                remove_tree(path);
+            else {
+                SetFileAttributesW(path.c_str(), FILE_ATTRIBUTE_NORMAL);
+                DeleteFileW(path.c_str());
+            }
+        } while (FindNextFileW(find, &data));
+        FindClose(find);
+    }
+    return RemoveDirectoryW(dir.c_str()) != FALSE;
+}
+
+void App::save_user_setting(const std::string& key, Json value) {
+    std::wstring path = user_data_dir() + L"\\settings.json";
+    Json root;
+    root.parse(read_file_utf8(path));
+    if (root.type != Json::Type::Object) root = Json::object();
+    root.set(key, std::move(value));
+    write_file_utf8(path, root.dump(2));
+}
+
+void App::load_settings_page_state() {
+    bg_items_.clear();
+    std::wstring dir = user_data_dir() + L"\\backgrounds";
+    CreateDirectoryW(dir.c_str(), nullptr);
+    struct Def { const wchar_t* id; const wchar_t* name; const wchar_t* ext; bool local; };
+    static const Def defs[] = {
+        { L"1123121", L"Mặc định", L"png", true },
+        { L"984658", L"984658", L"jpg", false },
+        { L"1224149", L"1224149", L"png", false },
+        { L"1265740", L"1265740", L"png", false },
+        { L"1373816", L"1373816", L"png", false },
+        { L"1402908", L"1402908", L"png", false },
+    };
+    for (const auto& def : defs) {
+        BgItem item;
+        item.id = def.id;
+        item.name = def.name;
+        item.ext = def.ext;
+        item.local = def.local;
+        if (def.local) item.file = asset(L"assets\\img\\minecraft-background.png");
+        std::wstring downloaded = dir + L"\\" + item.id + L"." + item.ext;
+        if (file_exists_w(downloaded)) item.file = downloaded;
+        item.ready = !item.file.empty() && file_exists_w(item.file);
+        bg_items_.push_back(std::move(item));
+    }
+}
+
+void App::apply_background(const std::wstring& id) {
+    std::wstring file;
+    if (id != L"theme") {
+        for (const auto& item : bg_items_)
+            if (item.id == id && item.ready) { file = item.file; break; }
+        if (file.empty()) {
+            notify(L"Ảnh nền", L"Ảnh chưa được tải về.", L"error");
+            return;
+        }
+    }
+    background_id_ = id;
+    if (Node* root = ui_find(ui_.get(), L"root")) {
+        root->style.bg_image = id == L"theme" ? L"" : file;
+        root->style.overlay = id == L"theme" ? Color{} : Color::rgb(0x06090D, 0.62f);
+    }
+    save_user_setting("background", Json::string(wide_to_utf8(id)));
+    rebuild_settings();
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+void App::start_background_download(const std::wstring& id) {
+    if (!bg_busy_.empty()) return;
+    const BgItem* target = nullptr;
+    for (const auto& item : bg_items_)
+        if (item.id == id) target = &item;
+    if (!target || target->ready) return;
+    bg_busy_ = id;
+    settings_error_.clear();
+    rebuild_settings();
+    InvalidateRect(hwnd_, nullptr, FALSE);
+    auto* job = new BgJob{ hwnd_, user_data_dir() + L"\\backgrounds", id + L"." + target->ext, id };
+    HANDLE thread = CreateThread(nullptr, 0, +[](LPVOID param) -> DWORD {
+        BgJob* j = reinterpret_cast<BgJob*>(param);
+        HttpResult res = http_request(
+            L"https://raw.githubusercontent.com/foxstudio-201/LunarSpaceLauncher/main/"
+            L"backgrounds/" + j->file,
+            L"GET");
+        auto* result = new BgResult();
+        result->id = j->id;
+        if (!res.ok() || res.body.empty()) {
+            result->ok = false;
+            result->error = res.error.empty() ? L"Tải ảnh nền thất bại."
+                                              : utf8_to_wide(res.error);
+        } else {
+            std::vector<unsigned char> bytes(res.body.begin(), res.body.end());
+            result->ok = write_file_bytes(j->dir + L"\\" + j->file, bytes);
+            if (!result->ok) result->error = L"Không ghi được tệp ảnh nền.";
+        }
+        HWND hwnd = j->hwnd;
+        delete j;
+        PostMessage(hwnd, WM_APP + 14, 0, reinterpret_cast<LPARAM>(result));
+        return 0;
+    }, job, 0, nullptr);
+    if (thread) CloseHandle(thread);
+}
+
+void App::browse_java_exe() {
+    OPENFILENAMEW ofn{};
+    wchar_t file[MAX_PATH] = L"";
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = hwnd_;
+    ofn.lpstrFilter = L"Java (java.exe)\0java.exe\0Tất cả tệp (*.*)\0*.*\0";
+    ofn.lpstrFile = file;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.lpstrTitle = L"Chọn java.exe";
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+    if (!GetOpenFileNameW(&ofn)) return;
+    java_path_ = file;
+    save_user_setting("javaPath", Json::string(wide_to_utf8(java_path_)));
+    rebuild_settings();
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+void App::remove_java_dir(const std::wstring& dir) {
+    std::wstring runtime = shared_dir_ + L"\\runtime\\";
+    if (dir.rfind(runtime, 0) != 0) return;
+    std::wstring copy = dir;
+    HWND hwnd = hwnd_;
+    HANDLE thread = CreateThread(nullptr, 0, +[](LPVOID param) -> DWORD {
+        auto* job = reinterpret_cast<std::pair<HWND, std::wstring>*>(param);
+        bool ok = remove_tree(job->second);
+        HWND target = job->first;
+        delete job;
+        PostMessage(target, WM_APP + 15, ok ? 1 : 0, 0);
+        return 0;
+    }, new std::pair<HWND, std::wstring>(hwnd, copy), 0, nullptr);
+    if (thread) CloseHandle(thread);
+}
+
+void App::load_java_state_async(bool refresh) {
+    (void)refresh;
+    if (java_loading_) return;
+    java_loading_ = true;
+    if (page_ == L"settings") rebuild_settings();
+    HWND target = hwnd_;
+    std::wstring shared = shared_dir_;
+    HANDLE thread = CreateThread(nullptr, 0, +[](LPVOID param) -> DWORD {
+        auto* job = reinterpret_cast<std::pair<HWND, std::wstring>*>(param);
+        HWND hwnd = job->first;
+        std::wstring shared = job->second;
+        delete job;
+        auto* state = new JavaState();
+        std::wstring runtime = shared + L"\\runtime";
+        std::wstring platform = runtime_platform();
+
+        HttpResult res = http_request(
+            L"https://launchermeta.mojang.com/v1/products/java-runtime/"
+            L"2ec0cc96c44e5a76b9c8b7c39df7210883d12871/all.json",
+            L"GET");
+        Json index;
+        bool parsed = res.ok() && index.parse(res.body);
+        const Json* platform_index = parsed ? index.find(wide_to_utf8(platform).c_str()) : nullptr;
+        if (platform_index && platform_index->type == Json::Type::Object) {
+            for (const auto& kv : platform_index->obj) {
+                std::wstring component = utf8_to_wide(kv.first);
+                if (component.find(L"minecraft-java-exe") != std::wstring::npos) continue;
+                if (component.rfind(L"java-runtime", 0) != 0 && component != L"jre-legacy")
+                    continue;
+                if (kv.second.type != Json::Type::Array || kv.second.arr.empty()) continue;
+                const Json& entry = kv.second.arr[0];
+                ManagedJava row;
+                row.component = component;
+                if (const Json* version = entry.find("version")) {
+                    row.name = utf8_to_wide(version->text("name"));
+                    row.released = utf8_to_wide(version->text("released"));
+                }
+                row.major = leading_int(row.name);
+                row.dir = runtime + L"\\" + component + L"-" + platform;
+                row.java_path = row.dir + L"\\bin\\java.exe";
+                row.installed = file_exists_w(row.java_path);
+                if (row.installed) row.bytes = directory_size(row.dir);
+                state->managed.push_back(std::move(row));
+            }
+        }
+        if (state->managed.empty()) {
+            struct Fallback { const wchar_t* component; const wchar_t* label; int major; };
+            static const Fallback fallbacks[] = {
+                { L"java-runtime-epsilon", L"26.x", 26 },
+                { L"java-runtime-delta", L"21.x", 21 },
+                { L"java-runtime-beta", L"17.x", 17 },
+                { L"java-runtime-gamma", L"17.x", 17 },
+                { L"jre-legacy", L"1.8", 8 },
+            };
+            for (const auto& fb : fallbacks) {
+                ManagedJava row;
+                row.component = fb.component;
+                row.name = fb.label;
+                row.major = fb.major;
+                row.dir = runtime + L"\\" + row.component + L"-" + platform;
+                row.java_path = row.dir + L"\\bin\\java.exe";
+                row.installed = file_exists_w(row.java_path);
+                if (row.installed) row.bytes = directory_size(row.dir);
+                state->managed.push_back(std::move(row));
+            }
+        }
+        std::sort(state->managed.begin(), state->managed.end(),
+                  [](const ManagedJava& a, const ManagedJava& b) {
+                      return a.major != b.major ? a.major > b.major : a.component < b.component;
+                  });
+
+        WIN32_FIND_DATAW data{};
+        HANDLE find = FindFirstFileW((runtime + L"\\*").c_str(), &data);
+        if (find != INVALID_HANDLE_VALUE) {
+            do {
+                if (!(data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+                std::wstring name = data.cFileName;
+                if (name.rfind(L"zulu-", 0) != 0) continue;
+                std::wstring dir = runtime + L"\\" + name;
+                Json marker;
+                marker.parse(read_file_utf8(dir + L"\\lunaspace-runtime.json"));
+                if (marker.text("kind") != "zulu") continue;
+                std::wstring java_path = find_java_in_tree(dir, 2);
+                if (java_path.empty()) continue;
+                ZuluJava row;
+                row.dir = dir;
+                row.java_path = java_path;
+                row.major = int(marker.number("major", 0.0));
+                int release_major = 0;
+                std::wstring version = java_release_version(java_path, &release_major);
+                std::string type = marker.text("packageType", "jre");
+                std::string label = type == "jdk" ? "JDK" : "JRE";
+                if (version.empty()) version = utf8_to_wide(marker.text("version"));
+                row.name = L"Zulu " + widen(label) + L" " + (version.empty() ? name : version);
+                row.bytes = directory_size(dir);
+                state->zulu.push_back(std::move(row));
+            } while (FindNextFileW(find, &data));
+            FindClose(find);
+        }
+        std::sort(state->zulu.begin(), state->zulu.end(),
+                  [](const ZuluJava& a, const ZuluJava& b) {
+                      return a.major != b.major ? a.major > b.major : a.name < b.name;
+                  });
+
+        std::vector<std::wstring> seen;
+        for (const auto& row : state->managed) seen.push_back(row.java_path);
+        for (const auto& row : state->zulu) seen.push_back(row.java_path);
+        std::vector<std::wstring> candidates;
+        wchar_t env[MAX_PATH]{};
+        if (GetEnvironmentVariableW(L"JAVA_HOME", env, MAX_PATH) > 0)
+            candidates.push_back(std::wstring(env) + L"\\bin\\java.exe");
+        candidates.push_back(L"C:\\Program Files\\Common Files\\Oracle\\Java\\javapath\\java.exe");
+        candidates.push_back(L"C:\\ProgramData\\Oracle\\Java\\javapath\\java.exe");
+        const wchar_t* hints[] = {
+            L"C:\\Program Files\\Java",
+            L"C:\\Program Files\\Eclipse Adoptium",
+            L"C:\\Program Files\\Microsoft",
+            L"C:\\Program Files\\Zulu",
+            L"C:\\Program Files\\BellSoft",
+            L"C:\\Program Files\\Amazon Corretto",
+            L"C:\\Program Files\\Temurin",
+            L"C:\\Program Files\\Common Files\\Oracle\\Java",
+            L"C:\\Program Files (x86)\\Java",
+            L"C:\\Program Files (x86)\\Eclipse Adoptium",
+        };
+        for (const wchar_t* hint : hints) {
+            WIN32_FIND_DATAW entry{};
+            HANDLE dir_find = FindFirstFileW((std::wstring(hint) + L"\\*").c_str(), &entry);
+            if (dir_find == INVALID_HANDLE_VALUE) continue;
+            do {
+                if (!(entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+                if (wcscmp(entry.cFileName, L".") == 0 || wcscmp(entry.cFileName, L"..") == 0)
+                    continue;
+                std::wstring base = std::wstring(hint) + L"\\" + entry.cFileName;
+                candidates.push_back(base + L"\\bin\\java.exe");
+                WIN32_FIND_DATAW inner{};
+                HANDLE inner_find = FindFirstFileW((base + L"\\*").c_str(), &inner);
+                if (inner_find == INVALID_HANDLE_VALUE) continue;
+                do {
+                    if (!(inner.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+                    if (wcscmp(inner.cFileName, L".") == 0 ||
+                        wcscmp(inner.cFileName, L"..") == 0)
+                        continue;
+                    candidates.push_back(base + L"\\" + inner.cFileName + L"\\bin\\java.exe");
+                } while (FindNextFileW(inner_find, &inner));
+                FindClose(inner_find);
+            } while (FindNextFileW(dir_find, &entry));
+            FindClose(dir_find);
+        }
+        wchar_t path_java[MAX_PATH]{};
+        if (SearchPathW(nullptr, L"java.exe", nullptr, MAX_PATH, path_java, nullptr) > 0)
+            candidates.push_back(path_java);
+
+        for (const auto& candidate : candidates) {
+            if (!file_exists_w(candidate)) continue;
+            bool duplicate = false;
+            for (const auto& used : seen)
+                if (_wcsicmp(used.c_str(), candidate.c_str()) == 0) { duplicate = true; break; }
+            if (duplicate) continue;
+            seen.push_back(candidate);
+            int major = 0;
+            std::wstring version = java_release_version(candidate, &major);
+            ExternalJava row;
+            row.java_path = candidate;
+            row.major = major;
+            row.name = version.empty() ? candidate : L"Java " + version;
+            state->external.push_back(std::move(row));
+        }
+        std::sort(state->external.begin(), state->external.end(),
+                  [](const ExternalJava& a, const ExternalJava& b) { return a.major > b.major; });
+
+        PostMessage(hwnd, WM_APP + 13, 0, reinterpret_cast<LPARAM>(state));
+        return 0;
+    }, new std::pair<HWND, std::wstring>(target, shared), 0, nullptr);
+    if (thread) CloseHandle(thread);
+}
+
+void App::apply_java_state(JavaState* state) {
+    if (!state) return;
+    java_state_ = std::move(*state);
+    delete state;
+    java_loading_ = false;
+    if (page_ == L"settings") {
+        rebuild_settings();
+        InvalidateRect(hwnd_, nullptr, FALSE);
+    }
+}
+
+void App::apply_background_result(BgResult* result) {
+    if (!result) return;
+    bg_busy_.clear();
+    settings_error_ = result->ok ? L"" : result->error;
+    delete result;
+    if (page_ == L"settings") {
+        rebuild_settings();
+        InvalidateRect(hwnd_, nullptr, FALSE);
+    }
+}
+
+void App::layout_settings() {
+    if (!settings_) return;
+    Node* slot = ui_find(ui_.get(), L"settings-slot");
+    if (!slot) return;
+    settings_slot_rect_ = slot->rect;
+    float view_w = slot->rect.right - slot->rect.left;
+    if (view_w < 10.0f) return;
+    float width = std::min(768.0f, view_w - 8.0f);
+    ui_layout(settings_.get(), width, 100000.0f, renderer_);
+    settings_content_h_ = 0.0f;
+    for (auto& kid : settings_->kids)
+        settings_content_h_ = std::max(settings_content_h_, node_max_bottom(kid.get()));
+    float view_h = slot->rect.bottom - slot->rect.top;
+    float max_scroll = std::max(0.0f, settings_content_h_ - view_h);
+    settings_scroll_ = std::clamp(settings_scroll_, 0.0f, max_scroll);
+    ui_move(settings_.get(), slot->rect.left + (view_w - width) * 0.5f,
+            slot->rect.top - settings_scroll_ + 4.0f);
+}
+
+void App::rebuild_settings() {
+    if (bg_items_.empty()) load_settings_page_state();
+    auto root = std::make_unique<Node>();
+    root->kind = Kind::Column;
+    root->style.gap = 14.0f;
+
+    auto text = [&](const std::wstring& value, float size, int weight, Color color,
+                    float width = -1.0f, bool mono = false, bool wrap = false) {
+        auto node = std::make_unique<Node>();
+        node->kind = Kind::Text;
+        node->text = value;
+        node->style.font_size = size;
+        node->style.weight = weight;
+        node->style.color = color;
+        node->style.mono = mono;
+        node->style.wrap = wrap;
+        if (width > 0.0f) node->style.width = width;
+        return node;
+    };
+    auto image = [&](const std::wstring& src, float width, float height, float radius = 0.0f,
+                     Color color = Color{}) {
+        auto node = std::make_unique<Node>();
+        node->kind = Kind::Image;
+        node->src = src;
+        node->style.width = width;
+        node->style.height = height;
+        node->style.radius = radius;
+        if (color.visible()) node->style.color = color;
+        return node;
+    };
+    auto spacer = [&](float width, float height, bool grow_x = false) {
+        auto node = std::make_unique<Node>();
+        node->kind = Kind::Spacer;
+        node->style.width = width;
+        node->style.height = height;
+        node->style.grow_x = grow_x;
+        return node;
+    };
+    auto box = [&](Kind kind, float height = -1.0f, float gap = 0.0f) {
+        auto node = std::make_unique<Node>();
+        node->kind = kind;
+        node->style.height = height;
+        node->style.gap = gap;
+        return node;
+    };
+    auto card = [&]() {
+        auto node = box(Kind::Column, -1.0f, 0.0f);
+        node->style.bg = ui_token(L"surface");
+        node->style.border = true;
+        node->style.border_color = ui_token(L"border");
+        node->style.radius = 14.0f;
+        return node;
+    };
+    auto sep = [&]() {
+        auto node = spacer(0.0f, 1.0f);
+        node->style.bg = ui_token(L"borderSoft");
+        return node;
+    };
+    auto icon_tile = [&](const wchar_t* src, Color tint) {
+        auto tile = box(Kind::Row, 32.0f);
+        tile->style.width = 32.0f;
+        tile->style.radius = 8.0f;
+        tile->style.bg = ui_token(L"input");
+        tile->kids.push_back(spacer(0, 0, true));
+        tile->kids.push_back(image(asset(src), 16.0f, 16.0f, 0.0f, tint));
+        tile->kids.push_back(spacer(0, 0, true));
+        return tile;
+    };
+    auto row = [&](const wchar_t* icon, const std::wstring& title, const std::wstring& desc,
+                   std::unique_ptr<Node> control) {
+        auto node = box(Kind::Row, -1.0f, 12.0f);
+        node->style.pad_l = node->style.pad_r = 16.0f;
+        node->style.pad_t = node->style.pad_b = 12.0f;
+        node->kids.push_back(icon_tile(icon, ui_token(L"accent")));
+        auto info = box(Kind::Column, -1.0f, 2.0f);
+        info->style.grow_x = true;
+        info->kids.push_back(text(title, 12.0f, 600, ui_token(L"text")));
+        if (!desc.empty())
+            info->kids.push_back(text(desc, 10.0f, 400, ui_token(L"faint"), -1.0f, false, true));
+        node->kids.push_back(std::move(info));
+        if (control) node->kids.push_back(std::move(control));
+        return node;
+    };
+    auto section = [&](const std::wstring& title, const std::wstring& hint,
+                       const std::wstring& action_icon = L"", const std::wstring& action = L"") {
+        auto node = box(Kind::Row, 24.0f, 8.0f);
+        node->style.pad_l = node->style.pad_r = 4.0f;
+        node->kids.push_back(text(title, 13.0f, 700, ui_token(L"text")));
+        if (!hint.empty()) node->kids.push_back(text(hint, 10.0f, 400, ui_token(L"label")));
+        node->kids.push_back(spacer(0, 0, true));
+        if (!action_icon.empty()) {
+            auto button = box(Kind::Row, 26.0f);
+            button->style.width = 26.0f;
+            button->style.radius = 7.0f;
+            button->style.bg = ui_token(L"input");
+            button->style.border = true;
+            button->style.border_color = ui_token(L"border");
+            button->action = action;
+            button->kids.push_back(spacer(0, 0, true));
+            button->kids.push_back(image(asset(action_icon), 13.0f, 13.0f, 0.0f,
+                                          ui_token(L"label")));
+            button->kids.push_back(spacer(0, 0, true));
+            node->kids.push_back(std::move(button));
+        }
+        root->kids.push_back(std::move(node));
+    };
+    auto toggle = [&](bool on, const std::wstring& action) {
+        auto node = box(Kind::Row, 22.0f);
+        node->style.width = 40.0f;
+        node->style.radius = 11.0f;
+        node->style.bg = on ? ui_token(L"accent") : ui_token(L"input");
+        if (!on) {
+            node->style.border = true;
+            node->style.border_color = ui_token(L"border");
+        }
+        node->style.pad_l = node->style.pad_r = 2.0f;
+        node->action = action;
+        auto knob = spacer(18.0f, 18.0f);
+        knob->style.radius = 9.0f;
+        knob->style.bg = on ? Color::rgb(0xFFFFFF) : ui_token(L"label");
+        if (on) {
+            node->kids.push_back(spacer(0, 0, true));
+            node->kids.push_back(std::move(knob));
+        } else {
+            node->kids.push_back(std::move(knob));
+            node->kids.push_back(spacer(0, 0, true));
+        }
+        return node;
+    };
+    auto button = [&](const std::wstring& label, const std::wstring& action, bool primary,
+                      const wchar_t* icon = L"", float height = 28.0f) {
+        auto node = box(Kind::Row, height, 5.0f);
+        node->style.pad_l = node->style.pad_r = 10.0f;
+        node->style.radius = 8.0f;
+        node->style.bg = primary ? ui_token(L"accent") : ui_token(L"input");
+        if (!primary) {
+            node->style.border = true;
+            node->style.border_color = ui_token(L"border");
+        }
+        node->action = action;
+        if (icon[0]) {
+            node->kids.push_back(image(asset(icon), 12.0f, 12.0f, 0.0f,
+                                       primary ? ui_token(L"ink") : ui_token(L"label")));
+        }
+        node->kids.push_back(text(label, 10.0f, 700, primary ? ui_token(L"ink")
+                                                              : ui_token(L"label")));
+        return node;
+    };
+    auto chip = [&](const std::wstring& label) {
+        auto node = box(Kind::Row, 18.0f);
+        node->style.pad_l = node->style.pad_r = 6.0f;
+        node->style.radius = 5.0f;
+        node->style.bg = ui_token(L"input");
+        node->kids.push_back(text(label, 9.0f, 700, ui_token(L"label")));
+        return node;
+    };
+
+    const std::wstring version = L"2.0.0";
+    std::wstring platform_key = runtime_platform();
+    std::wstring platform_arch = platform_key == L"windows-arm64"
+                                     ? L"Windows arm64"
+                                     : platform_key == L"windows-x86" ? L"Windows x86"
+                                                                      : L"Windows x64";
+    int java_installed = 0;
+    unsigned long long java_bytes = 0;
+    for (const auto& rt : java_state_.managed)
+        if (rt.installed) { ++java_installed; java_bytes += rt.bytes; }
+    for (const auto& rt : java_state_.zulu) { ++java_installed; java_bytes += rt.bytes; }
+
+    // ---- Giao diện -------------------------------------------------------
+    section(L"Giao diện", L"áp dụng ngay");
+    auto appearance = card();
+    {
+        auto language = box(Kind::Row, 30.0f, 2.0f);
+        language->style.pad_l = language->style.pad_r = 2.0f;
+        language->style.radius = 8.0f;
+        language->style.bg = ui_token(L"input");
+        language->style.border = true;
+        language->style.border_color = ui_token(L"border");
+        auto option = [&](const std::wstring& label, bool active, const std::wstring& action) {
+            auto opt = box(Kind::Row, 26.0f);
+            opt->style.pad_l = opt->style.pad_r = 12.0f;
+            opt->style.radius = 6.0f;
+            if (active) opt->style.bg = ui_token(L"surface");
+            opt->action = action;
+            opt->kids.push_back(text(label, 11.0f, 600,
+                                     active ? ui_token(L"accent") : ui_token(L"label")));
+            return opt;
+        };
+        language->kids.push_back(option(L"Tiếng Việt", !settings_lang_en_, L"settings:lang-vi"));
+        language->kids.push_back(option(L"English", settings_lang_en_, L"settings:lang-en"));
+        appearance->kids.push_back(row(L"assets/icons/translate.svg", L"Ngôn ngữ", L"",
+                                       std::move(language)));
+        appearance->kids.push_back(sep());
+
+        auto theme_switch = box(Kind::Row, 30.0f);
+        theme_switch->id = L"theme-switch";
+        theme_switch->style.width = 74.0f;
+        theme_switch->style.radius = 15.0f;
+        theme_switch->action = L"toggle:theme";
+        appearance->kids.push_back(row(
+            dark_ ? L"assets/icons/moon-stars.svg" : L"assets/icons/sun.svg", L"Giao diện",
+            L"Bật/tắt chế độ tối", std::move(theme_switch)));
+        appearance->kids.push_back(sep());
+
+        appearance->kids.push_back(row(L"assets/icons/sparkle.svg", L"Hiệu ứng chuyển cảnh",
+                                       L"Bật hiệu ứng khi mở instance và khi quay lại",
+                                       toggle(effects_enabled_, L"settings:effects")));
+    }
+    root->kids.push_back(std::move(appearance));
+
+    auto backgrounds = card();
+    {
+        auto head = box(Kind::Column, -1.0f, 3.0f);
+        head->style.pad_l = head->style.pad_r = 16.0f;
+        head->style.pad_t = 14.0f;
+        head->style.pad_b = 10.0f;
+        auto title_row = box(Kind::Row, 18.0f, 8.0f);
+        title_row->kids.push_back(text(L"Ảnh nền", 12.0f, 600, ui_token(L"text")));
+        title_row->kids.push_back(spacer(0, 0, true));
+        if (!settings_error_.empty())
+            title_row->kids.push_back(text(settings_error_, 10.0f, 500, ui_token(L"bad")));
+        head->kids.push_back(std::move(title_row));
+        head->kids.push_back(text(L"Ảnh mặc định có sẵn; ảnh khác cần tải về rồi mới áp dụng được.",
+                                  10.0f, 400, ui_token(L"faint"), -1.0f, false, true));
+        backgrounds->kids.push_back(std::move(head));
+
+        auto make_tile = [&](bool theme_tile, const BgItem* item) {
+            bool active = theme_tile ? background_id_.empty() || background_id_ == L"theme"
+                                     : background_id_ == item->id;
+            auto tile = box(Kind::Column, 96.0f, 0.0f);
+            tile->style.grow_x = true;
+            tile->style.radius = 12.0f;
+            tile->style.bg = ui_token(L"input");
+            tile->style.border = true;
+            tile->style.border_color = active ? ui_token(L"accent") : ui_token(L"border");
+
+            auto preview = box(Kind::Row, 56.0f);
+            preview->style.grow_x = true;
+            preview->style.radius = 11.0f;
+            if (theme_tile) {
+                preview->kids.push_back(spacer(0, 0, true));
+                preview->kids.push_back(text(L"Sáng / Tối", 10.0f, 500, ui_token(L"faint")));
+                preview->kids.push_back(spacer(0, 0, true));
+            } else if (item->ready) {
+                preview->style.bg_image = item->file;
+            } else {
+                preview->kids.push_back(spacer(0, 0, true));
+                preview->kids.push_back(text(L"Chưa tải", 10.0f, 500, ui_token(L"faint")));
+                preview->kids.push_back(spacer(0, 0, true));
+            }
+            tile->kids.push_back(std::move(preview));
+
+            auto bottom = box(Kind::Row, 40.0f, 6.0f);
+            bottom->style.pad_l = bottom->style.pad_r = 8.0f;
+            bottom->style.pad_t = bottom->style.pad_b = 6.0f;
+            bottom->style.grow_x = true;
+            auto name = text(theme_tile ? L"Theo giao diện" : item->name, 10.0f, 600,
+                             ui_token(L"text"));
+            name->style.grow_x = true;
+            bottom->kids.push_back(std::move(name));
+            if (active) {
+                bottom->kids.push_back(text(L"Đang dùng", 9.0f, 700, ui_token(L"accent")));
+            } else if (theme_tile) {
+                bottom->kids.push_back(button(L"Áp dụng", L"settings:bg-theme", false, L"", 22.0f));
+            } else if (item->ready) {
+                bottom->kids.push_back(button(L"Áp dụng", L"settings:bg-apply:" + item->id,
+                                              false, L"", 22.0f));
+            } else {
+                bool busy = bg_busy_ == item->id;
+                bottom->kids.push_back(button(busy ? L"Đang tải…" : L"Tải về",
+                                              L"settings:bg-download:" + item->id, true,
+                                              L"assets/icons/download-simple.svg", 22.0f));
+            }
+            tile->kids.push_back(std::move(bottom));
+            return tile;
+        };
+
+        size_t index = 0;
+        auto add_grid_row = [&]() {
+            auto grid = box(Kind::Row, 96.0f, 10.0f);
+            grid->style.pad_l = grid->style.pad_r = 14.0f;
+            for (int slot = 0; slot < 3; ++slot) {
+                if (index == 0) {
+                    grid->kids.push_back(make_tile(true, nullptr));
+                    ++index;
+                } else if (index - 1 < bg_items_.size()) {
+                    grid->kids.push_back(make_tile(false, &bg_items_[index - 1]));
+                    ++index;
+                } else {
+                    auto filler = spacer(0, 0, true);
+                    grid->kids.push_back(std::move(filler));
+                }
+            }
+            backgrounds->kids.push_back(std::move(grid));
+            backgrounds->kids.push_back(spacer(0, 10));
+        };
+        add_grid_row();
+        add_grid_row();
+        add_grid_row();
+    }
+    root->kids.push_back(std::move(backgrounds));
+
+    // ---- Trò chơi --------------------------------------------------------
+    section(L"Trò chơi", hide_on_launch_ ? L"đang bật" : L"đang tắt");
+    auto game = card();
+    game->kids.push_back(row(
+        L"assets/icons/tray.svg", L"Tự động ẩn launcher khi chơi game",
+        L"Launcher tự ẩn khi game bắt đầu chạy và tự hiện lại khi game đóng. Mở lại bằng biểu "
+        L"tượng XyoLauncher ở khay hệ thống (tray).",
+        toggle(hide_on_launch_, L"settings:hide-launch")));
+    root->kids.push_back(std::move(game));
+
+    // ---- Discord ---------------------------------------------------------
+    section(L"Discord",
+            rich_presence_ ? L"chờ Discord" : L"đang tắt");
+    auto discord_card = card();
+    discord_card->kids.push_back(row(
+        L"assets/img/discord-logo.png", L"Rich Presence",
+        rich_presence_ ? L"Chưa mở Discord — launcher sẽ tự kết nối khi Discord chạy"
+                       : L"Đang tắt — bật để hiện hoạt động cho bạn bè",
+        toggle(rich_presence_, L"settings:rpc")));
+    discord_card->kids.push_back(sep());
+    discord_card->kids.push_back(row(
+        L"assets/img/discord-logo.png", L"Cộng đồng XyoLauncher",
+        discord_invite_,
+        button(L"Tham gia Discord", L"settings:discord-join", true,
+               L"assets/img/discord-logo.png")));
+    discord_card->kids.push_back(sep());
+    discord_card->kids.push_back(row(
+        L"assets/img/discord-logo.png", L"Đang hiển thị",
+        L"Tên phiên bản, Minecraft + trình tải, thời gian đã chơi",
+        text(L"chưa có hoạt động", 10.0f, 500, ui_token(L"label"), 220.0f, true)));
+    root->kids.push_back(std::move(discord_card));
+
+    // ---- Java ------------------------------------------------------------
+    std::wstring java_hint = java_state_.managed.empty() && java_state_.zulu.empty()
+                                 ? (java_loading_ ? L"đang quét…" : L"chưa tải bản nào")
+                                 : std::to_wstring(java_installed) + L" bản · " +
+                                       format_bytes(java_bytes);
+    section(L"Java", java_hint, L"assets/icons/arrows-clockwise.svg", L"settings:java-refresh");
+
+    auto java_card = card();
+    if (java_state_.managed.empty() && java_loading_) {
+        auto loading = box(Kind::Column, -1.0f, 6.0f);
+        loading->style.pad_l = loading->style.pad_r = 16.0f;
+        loading->style.pad_t = loading->style.pad_b = 16.0f;
+        loading->kids.push_back(text(L"Đang đọc danh sách Java runtime…", 11.0f, 400,
+                                     ui_token(L"label")));
+        java_card->kids.push_back(std::move(loading));
+    } else if (java_state_.managed.empty()) {
+        auto empty = box(Kind::Column, -1.0f, 0.0f);
+        empty->style.pad_l = empty->style.pad_r = 16.0f;
+        empty->style.pad_t = empty->style.pad_b = 20.0f;
+        empty->kids.push_back(text(L"Không có bản Java nào cho nền tảng này.", 11.0f, 400,
+                                   ui_token(L"label")));
+        java_card->kids.push_back(std::move(empty));
+    } else {
+        static const struct { const wchar_t* component; const wchar_t* target; } targets[] = {
+            { L"java-runtime-epsilon", L"26.x" },
+            { L"java-runtime-delta", L"1.20.5 – 1.21.x" },
+            { L"java-runtime-beta", L"1.18 – 1.20.4" },
+            { L"java-runtime-gamma", L"1.18 – 1.20.4" },
+            { L"jre-legacy", L"≤ 1.16.5" },
+        };
+        auto target_of = [&](const std::wstring& component) -> std::wstring {
+            for (const auto& t : targets)
+                if (component == t.component) return t.target;
+            return L"";
+        };
+        for (size_t i = 0; i < java_state_.managed.size(); ++i) {
+            const ManagedJava& rt = java_state_.managed[i];
+            if (i > 0) java_card->kids.push_back(sep());
+            auto jr = box(Kind::Row, 48.0f, 10.0f);
+            jr->style.pad_l = jr->style.pad_r = 16.0f;
+            jr->kids.push_back(image(asset(L"assets/icons/coffee.svg"), 15.0f, 15.0f, 0.0f,
+                                     rt.installed ? Color::rgb(0x22C55E) : ui_token(L"faint")));
+            auto info = box(Kind::Column, -1.0f, 2.0f);
+            info->style.grow_x = true;
+            auto title = box(Kind::Row, 18.0f, 8.0f);
+            title->kids.push_back(text(L"Java " + (rt.major ? std::to_wstring(rt.major) : L"?"),
+                                       11.0f, 600, ui_token(L"text")));
+            if (!rt.name.empty())
+                title->kids.push_back(text(rt.name, 10.0f, 400, ui_token(L"faint"), -1.0f, true));
+            std::wstring target = target_of(rt.component);
+            if (!target.empty()) title->kids.push_back(chip(target));
+            info->kids.push_back(std::move(title));
+            std::wstring sub = rt.component;
+            if (rt.installed) sub = format_bytes(rt.bytes) + L" · " + sub;
+            info->kids.push_back(text(sub, 9.5f, 400, ui_token(L"faint"), -1.0f, true));
+            jr->kids.push_back(std::move(info));
+            if (rt.installed) {
+                jr->kids.push_back(text(L"đã có", 10.0f, 700, Color::rgb(0x22C55E)));
+            } else {
+                jr->kids.push_back(text(L"chưa tải", 10.0f, 400, ui_token(L"faint")));
+            }
+            if (java_confirm_ == rt.component) {
+                auto confirm = box(Kind::Row, 28.0f, 6.0f);
+                confirm->kids.push_back(button(L"Huỷ", L"settings:java-cancel", false, L"", 26.0f));
+                confirm->kids.push_back(button(L"Xoá", L"settings:java-delete:" + rt.component,
+                                               false, L"", 26.0f));
+                jr->kids.push_back(std::move(confirm));
+            } else if (rt.installed) {
+                auto del = box(Kind::Row, 26.0f);
+                del->style.width = 26.0f;
+                del->style.radius = 7.0f;
+                del->style.bg = ui_token(L"input");
+                del->style.border = true;
+                del->style.border_color = ui_token(L"border");
+                del->action = L"settings:java-ask:" + rt.component;
+                del->kids.push_back(spacer(0, 0, true));
+                del->kids.push_back(image(asset(L"assets/icons/trash.svg"), 13.0f, 13.0f, 0.0f,
+                                          Color::rgb(0xEF4444)));
+                del->kids.push_back(spacer(0, 0, true));
+                jr->kids.push_back(std::move(del));
+            } else {
+                jr->kids.push_back(button(L"Tải", L"settings:java-install:" + rt.component,
+                                          true, L"assets/icons/download-simple.svg"));
+            }
+            java_card->kids.push_back(std::move(jr));
+        }
+    }
+    root->kids.push_back(std::move(java_card));
+
+    auto zulu_card = card();
+    {
+        auto zulu_row = box(Kind::Row, -1.0f, 10.0f);
+        zulu_row->style.pad_l = zulu_row->style.pad_r = 16.0f;
+        zulu_row->style.pad_t = zulu_row->style.pad_b = 12.0f;
+        zulu_row->kids.push_back(icon_tile(L"assets/icons/coffee.svg", ui_token(L"accent")));
+        auto info = box(Kind::Column, -1.0f, 2.0f);
+        info->style.grow_x = true;
+        info->kids.push_back(text(L"Tải Java từ Azul Zulu", 12.0f, 600, ui_token(L"text")));
+        info->kids.push_back(text(L"Zulu là bản OpenJDK miễn phí của Azul — chọn phiên bản rồi tải "
+                                  L"thẳng vào thư mục runtime của launcher.",
+                                  10.0f, 400, ui_token(L"faint"), -1.0f, false, true));
+        zulu_row->kids.push_back(std::move(info));
+        auto pick = [&](const std::wstring& label, const std::wstring& action) {
+            auto node = box(Kind::Row, 28.0f, 6.0f);
+            node->style.width = 82.0f;
+            node->style.pad_l = node->style.pad_r = 10.0f;
+            node->style.radius = 8.0f;
+            node->style.bg = ui_token(L"input");
+            node->style.border = true;
+            node->style.border_color = ui_token(L"border");
+            node->action = action;
+            node->kids.push_back(text(label, 10.0f, 600, ui_token(L"label")));
+            node->kids.push_back(spacer(0, 0, true));
+            node->kids.push_back(image(asset(L"assets/icons/caret-right.svg"), 10.0f, 10.0f, 0.0f,
+                                       ui_token(L"faint")));
+            return node;
+        };
+        zulu_row->kids.push_back(pick(L"Java " + zulu_major_, L"settings:zulu-major"));
+        zulu_row->kids.push_back(pick(zulu_kind_ == L"jdk" ? L"JDK" : L"JRE",
+                                      L"settings:zulu-kind"));
+        zulu_row->kids.push_back(button(L"Tải", L"settings:zulu-download", true,
+                                        L"assets/icons/download-simple.svg"));
+        zulu_card->kids.push_back(std::move(zulu_row));
+        for (size_t i = 0; i < java_state_.zulu.size(); ++i) {
+            const ZuluJava& z = java_state_.zulu[i];
+            zulu_card->kids.push_back(sep());
+            auto zr = box(Kind::Row, 48.0f, 10.0f);
+            zr->style.pad_l = zr->style.pad_r = 16.0f;
+            zr->kids.push_back(image(asset(L"assets/icons/coffee.svg"), 15.0f, 15.0f, 0.0f,
+                                     Color::rgb(0x22C55E)));
+            auto info = box(Kind::Column, -1.0f, 2.0f);
+            info->style.grow_x = true;
+            auto title = box(Kind::Row, 18.0f, 8.0f);
+            title->kids.push_back(text(z.name, 11.0f, 600, ui_token(L"text")));
+            title->kids.push_back(chip(L"Zulu"));
+            info->kids.push_back(std::move(title));
+            info->kids.push_back(text(format_bytes(z.bytes) + L" · " + z.java_path, 9.5f, 400,
+                                      ui_token(L"faint"), -1.0f, true));
+            zr->kids.push_back(std::move(info));
+            if (!java_path_.empty() && _wcsicmp(java_path_.c_str(), z.java_path.c_str()) == 0) {
+                zr->kids.push_back(text(L"đang dùng", 10.0f, 700, ui_token(L"accent")));
+            } else {
+                zr->kids.push_back(button(L"Dùng", L"settings:java-use-z:" + std::to_wstring(i),
+                                          false, L"", 26.0f));
+            }
+            if (zulu_confirm_ == z.java_path) {
+                auto confirm = box(Kind::Row, 28.0f, 6.0f);
+                confirm->kids.push_back(button(L"Huỷ", L"settings:zulu-cancel", false, L"", 26.0f));
+                confirm->kids.push_back(button(L"Xoá", L"settings:zulu-delete:" + std::to_wstring(i),
+                                               false, L"", 26.0f));
+                zr->kids.push_back(std::move(confirm));
+            } else {
+                auto del = box(Kind::Row, 26.0f);
+                del->style.width = 26.0f;
+                del->style.radius = 7.0f;
+                del->style.bg = ui_token(L"input");
+                del->style.border = true;
+                del->style.border_color = ui_token(L"border");
+                del->action = L"settings:zulu-ask:" + std::to_wstring(i);
+                del->kids.push_back(spacer(0, 0, true));
+                del->kids.push_back(image(asset(L"assets/icons/trash.svg"), 13.0f, 13.0f, 0.0f,
+                                          Color::rgb(0xEF4444)));
+                del->kids.push_back(spacer(0, 0, true));
+                zr->kids.push_back(std::move(del));
+            }
+            zulu_card->kids.push_back(std::move(zr));
+        }
+        if (!java_state_.external.empty()) {
+            zulu_card->kids.push_back(sep());
+            auto head = box(Kind::Row, 26.0f);
+            head->style.pad_l = head->style.pad_r = 16.0f;
+            head->kids.push_back(text(L"Java khác trên máy", 10.0f, 500, ui_token(L"faint")));
+            zulu_card->kids.push_back(std::move(head));
+        }
+        for (size_t i = 0; i < java_state_.external.size(); ++i) {
+            const ExternalJava& ext = java_state_.external[i];
+            zulu_card->kids.push_back(sep());
+            auto er = box(Kind::Row, 44.0f, 10.0f);
+            er->style.pad_l = er->style.pad_r = 16.0f;
+            er->kids.push_back(image(asset(L"assets/icons/coffee.svg"), 15.0f, 15.0f, 0.0f,
+                                     ui_token(L"label")));
+            auto info = box(Kind::Column, -1.0f, 2.0f);
+            info->style.grow_x = true;
+            auto title = box(Kind::Row, 18.0f, 8.0f);
+            title->kids.push_back(text(ext.major ? L"Java " + std::to_wstring(ext.major) : ext.name,
+                                       11.0f, 600, ui_token(L"text")));
+            title->kids.push_back(chip(L"có sẵn"));
+            info->kids.push_back(std::move(title));
+            info->kids.push_back(text(ext.java_path, 9.5f, 400, ui_token(L"faint"), -1.0f, true));
+            er->kids.push_back(std::move(info));
+            if (!java_path_.empty() && _wcsicmp(java_path_.c_str(), ext.java_path.c_str()) == 0) {
+                er->kids.push_back(text(L"đang dùng", 10.0f, 700, ui_token(L"accent")));
+            } else {
+                er->kids.push_back(button(L"Dùng", L"settings:java-use-e:" + std::to_wstring(i),
+                                          false, L"", 26.0f));
+            }
+            zulu_card->kids.push_back(std::move(er));
+        }
+    }
+    root->kids.push_back(std::move(zulu_card));
+
+    auto override_card = card();
+    {
+        auto orow = box(Kind::Row, -1.0f, 12.0f);
+        orow->style.pad_l = orow->style.pad_r = 16.0f;
+        orow->style.pad_t = orow->style.pad_b = 12.0f;
+        orow->kids.push_back(icon_tile(L"assets/icons/hard-drive.svg", ui_token(L"accent")));
+        auto info = box(Kind::Column, -1.0f, 2.0f);
+        info->style.grow_x = true;
+        info->kids.push_back(text(L"Ghi đè Java (nâng cao)", 12.0f, 600, ui_token(L"text")));
+        info->kids.push_back(text(java_path_.empty() ? L"Để trống = dùng Java tải kèm ở trên"
+                                                     : java_path_,
+                                  10.0f, 400, ui_token(L"faint"), -1.0f, false, true));
+        orow->kids.push_back(std::move(info));
+        auto field = box(Kind::Row, 28.0f);
+        field->style.width = 200.0f;
+        field->style.pad_l = field->style.pad_r = 10.0f;
+        field->style.radius = 8.0f;
+        field->style.bg = ui_token(L"input");
+        field->style.border = true;
+        field->style.border_color = ui_token(L"border");
+        field->action = L"settings:java-browse";
+        field->kids.push_back(text(java_path_.empty() ? L"Tự động phát hiện" : java_path_, 10.0f,
+                                   400, ui_token(L"label"), 180.0f, true));
+        orow->kids.push_back(std::move(field));
+        orow->kids.push_back(button(L"Chọn", L"settings:java-browse", false));
+        if (!java_path_.empty())
+            orow->kids.push_back(button(L"Xoá", L"settings:java-clear", false));
+        override_card->kids.push_back(std::move(orow));
+    }
+    root->kids.push_back(std::move(override_card));
+
+    // ---- Cập nhật --------------------------------------------------------
+    section(L"Cập nhật", L"v" + version);
+    auto updates = card();
+    updates->kids.push_back(row(
+        L"assets/icons/arrows-clockwise.svg", L"Tự động cập nhật",
+        L"Tự kiểm tra bản mới trên GitHub, tải sẵn và tự cài khi bạn thoát launcher.",
+        toggle(auto_update_, L"settings:auto-update")));
+    updates->kids.push_back(sep());
+    updates->kids.push_back(row(
+        L"assets/icons/sparkle.svg", L"Có gì mới trong bản này",
+        L"Xem lại ghi chú phát hành của phiên bản đang chạy (tự hiện một lần sau khi cập nhật).",
+        button(L"Xem", L"settings:whats-new", false)));
+    updates->kids.push_back(sep());
+    updates->kids.push_back(row(
+        L"assets/icons/download-simple.svg", L"Phiên bản launcher", L"Chưa kiểm tra.",
+        button(L"Kiểm tra", L"settings:update-check", false,
+               L"assets/icons/arrows-clockwise.svg")));
+    root->kids.push_back(std::move(updates));
+
+    // ---- Máy tính --------------------------------------------------------
+    section(L"Máy tính", platform_arch);
+    auto machine_row = box(Kind::Row, -1.0f, 12.0f);
+    auto meter_card = card();
+    meter_card->style.grow_x = true;
+    {
+        auto inner = box(Kind::Column, -1.0f, 12.0f);
+        inner->style.pad_l = inner->style.pad_r = 16.0f;
+        inner->style.pad_t = inner->style.pad_b = 16.0f;
+        auto meter = [&](const std::wstring& label, unsigned long long used,
+                         unsigned long long total, Color color) {
+            auto col = box(Kind::Column, -1.0f, 6.0f);
+            auto head = box(Kind::Row, 16.0f);
+            head->kids.push_back(text(label, 11.0f, 600, ui_token(L"text")));
+            head->kids.push_back(spacer(0, 0, true));
+            float pct = total ? float(double(used) / double(total)) : 0.0f;
+            wchar_t value[96];
+            swprintf(value, 96, L"%ls / %ls · %d%%", format_bytes(used).c_str(),
+                     format_bytes(total).c_str(), int(pct * 100.0f + 0.5f));
+            head->kids.push_back(text(value, 9.5f, 400, ui_token(L"faint"), -1.0f, true));
+            col->kids.push_back(std::move(head));
+            auto track = box(Kind::Row, 6.0f);
+            track->style.radius = 3.0f;
+            track->style.bg = ui_token(L"input");
+            if (pct > 0.001f) {
+                auto fill = spacer(std::max(6.0f, 300.0f * pct), 6.0f);
+                fill->style.radius = 3.0f;
+                fill->style.bg = color;
+                track->kids.push_back(std::move(fill));
+            }
+            track->kids.push_back(spacer(0, 0, true));
+            col->kids.push_back(std::move(track));
+            return col;
+        };
+        if (system_info_.ok) {
+            unsigned long long ram_used =
+                system_info_.total_mem > system_info_.free_mem
+                    ? system_info_.total_mem - system_info_.free_mem
+                    : 0;
+            unsigned long long disk_used =
+                system_info_.disk_total > system_info_.disk_free
+                    ? system_info_.disk_total - system_info_.disk_free
+                    : 0;
+            inner->kids.push_back(meter(L"RAM", ram_used, system_info_.total_mem,
+                                        ui_token(L"accent")));
+            inner->kids.push_back(meter(L"Ổ đĩa", disk_used, system_info_.disk_total,
+                                        Color::rgb(0x22C55E)));
+        } else {
+            inner->kids.push_back(text(L"Đang đọc thông tin hệ thống…", 10.0f, 400,
+                                       ui_token(L"faint")));
+        }
+        meter_card->kids.push_back(std::move(inner));
+    }
+    machine_row->kids.push_back(std::move(meter_card));
+
+    auto facts_card = card();
+    facts_card->style.grow_x = true;
+    {
+        auto inner = box(Kind::Column, -1.0f, 9.0f);
+        inner->style.pad_l = inner->style.pad_r = 16.0f;
+        inner->style.pad_t = inner->style.pad_b = 16.0f;
+        auto fact = [&](const std::wstring& label, const std::wstring& value, bool mono = false) {
+            auto line = box(Kind::Row, 16.0f);
+            line->kids.push_back(text(label, 10.0f, 400, ui_token(L"faint")));
+            line->kids.push_back(spacer(0, 0, true));
+            line->kids.push_back(text(value, 10.0f, 500, ui_token(L"label"), -1.0f, mono));
+            return line;
+        };
+        if (system_info_.ok) {
+            inner->kids.push_back(fact(L"CPU", std::to_wstring(system_info_.cpu_threads) +
+                                                  L" nhân"));
+            inner->kids.push_back(fact(L"Nền tảng", platform_arch));
+            inner->kids.push_back(fact(L"Dung lượng RAM",
+                                       format_bytes(system_info_.total_mem), true));
+            inner->kids.push_back(fact(L"Ổ đĩa trống", format_bytes(system_info_.disk_free),
+                                       true));
+            inner->kids.push_back(fact(L"Tài nguyên đã tải",
+                                       format_bytes(system_info_.assets_bytes), true));
+            inner->kids.push_back(fact(L"Java tải kèm",
+                                       std::to_wstring(java_installed) + L" bản · " +
+                                           format_bytes(java_bytes), true));
+        } else {
+            inner->kids.push_back(text(L"Đang đọc thông tin hệ thống…", 10.0f, 400,
+                                       ui_token(L"faint")));
+        }
+        facts_card->kids.push_back(std::move(inner));
+    }
+    machine_row->kids.push_back(std::move(facts_card));
+    root->kids.push_back(std::move(machine_row));
+
+    // ---- Về XyoLauncher --------------------------------------------------
+    section(L"Về XyoLauncher", L"v" + version);
+    auto about = card();
+    {
+        auto inner = box(Kind::Column, -1.0f, 9.0f);
+        inner->style.pad_l = inner->style.pad_r = 16.0f;
+        inner->style.pad_t = inner->style.pad_b = 16.0f;
+        auto fact = [&](const std::wstring& label, const std::wstring& value, bool mono = true) {
+            auto line = box(Kind::Row, 16.0f);
+            line->kids.push_back(text(label, 10.0f, 400, ui_token(L"faint")));
+            line->kids.push_back(spacer(0, 0, true));
+            line->kids.push_back(text(value, 10.0f, 500, ui_token(L"label"), -1.0f, mono));
+            return line;
+        };
+        inner->kids.push_back(fact(L"Phiên bản launcher", L"v" + version));
+        inner->kids.push_back(fact(L"Nền tảng", platform_arch, false));
+        inner->kids.push_back(fact(L"Nhà phát triển", L"XyoLauncher", false));
+        inner->kids.push_back(sep());
+        inner->kids.push_back(text(
+            L"Java được tải tự động theo phiên bản game và dùng chung cho mọi phiên bản cùng "
+            L"nhóm. Vào tab Phiên bản để tạo phiên bản mới.",
+            10.0f, 400, ui_token(L"faint"), -1.0f, false, true));
+        about->kids.push_back(std::move(inner));
+    }
+    root->kids.push_back(std::move(about));
+    root->kids.push_back(spacer(0, 20));
+
+    settings_ = std::move(root);
+    hovered_ = nullptr;
+}
+
 // Fixed sidebar perspective pose (no depth animation).
 static constexpr float kSidebarDepth = 0.155f;
 
@@ -3300,6 +4575,11 @@ Node* App::hit_test(float x, float y) {
     if (page_ == L"home" && home_ && x >= home_slot_rect_.left &&
         x <= home_slot_rect_.right && y >= home_slot_rect_.top && y <= home_slot_rect_.bottom) {
         if (Node* home_hit = ui_hit(home_.get(), x, y)) return home_hit;
+    }
+    if (page_ == L"settings" && settings_ && x >= settings_slot_rect_.left &&
+        x <= settings_slot_rect_.right && y >= settings_slot_rect_.top &&
+        y <= settings_slot_rect_.bottom) {
+        if (Node* settings_hit = ui_hit(settings_.get(), x, y)) return settings_hit;
     }
     ui_set_skip_id(sidebar3d_active_ ? L"sidebar" : L"");
     Node* hit = ui_hit(ui_.get(), x, y);
@@ -3382,12 +4662,113 @@ void App::do_action(const std::wstring& action) {
         notify(L"Tải tệp", L"Tính năng chọn tệp PNG đang được hoàn thiện.", L"info");
     } else if (action == L"skin:add-account") {
         notify(L"Tài khoản", L"Chức năng thêm tài khoản đang được hoàn thiện.", L"info");
-    } else if (action == L"window:minimize") {
-        ShowWindow(hwnd_, SW_MINIMIZE);
-    } else if (action == L"window:maximize") {
-        ShowWindow(hwnd_, IsZoomed(hwnd_) ? SW_RESTORE : SW_MAXIMIZE);
-    } else if (action == L"window:close") {
-        PostMessageW(hwnd_, WM_CLOSE, 0, 0);
+    } else if (action.rfind(L"window:", 0) == 0) {
+        if (action == L"window:minimize")
+            ShowWindow(hwnd_, SW_MINIMIZE);
+        else if (action == L"window:maximize")
+            ShowWindow(hwnd_, IsZoomed(hwnd_) ? SW_RESTORE : SW_MAXIMIZE);
+        else
+            PostMessageW(hwnd_, WM_CLOSE, 0, 0);
+    } else if (action == L"settings:save") {
+        save_user_setting("javaPath", Json::string(wide_to_utf8(java_path_)));
+        notify(L"Cài đặt", L"Đã lưu cài đặt.", L"success");
+    } else if (action == L"settings:lang-vi") {
+        settings_lang_en_ = false;
+        rebuild_settings();
+    } else if (action == L"settings:lang-en") {
+        notify(L"Ngôn ngữ", L"Engine hiện chỉ hỗ trợ tiếng Việt.", L"info");
+    } else if (action == L"settings:effects") {
+        effects_enabled_ = !effects_enabled_;
+        save_user_setting("effects", Json::boolean(effects_enabled_));
+        rebuild_settings();
+    } else if (action == L"settings:hide-launch") {
+        hide_on_launch_ = !hide_on_launch_;
+        save_user_setting("hideOnLaunch", Json::boolean(hide_on_launch_));
+        rebuild_settings();
+    } else if (action == L"settings:rpc") {
+        rich_presence_ = !rich_presence_;
+        save_user_setting("discordRpc", Json::boolean(rich_presence_));
+        rebuild_settings();
+    } else if (action == L"settings:auto-update") {
+        auto_update_ = !auto_update_;
+        save_user_setting("autoUpdate", Json::boolean(auto_update_));
+        rebuild_settings();
+    } else if (action == L"settings:discord-join") {
+        ShellExecuteW(nullptr, L"open", discord_invite_.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    } else if (action == L"settings:bg-theme") {
+        apply_background(L"theme");
+    } else if (action.rfind(L"settings:bg-apply:", 0) == 0) {
+        apply_background(action.substr(18));
+    } else if (action.rfind(L"settings:bg-download:", 0) == 0) {
+        start_background_download(action.substr(21));
+    } else if (action == L"settings:java-refresh") {
+        java_state_ = JavaState{};
+        load_java_state_async(true);
+    } else if (action == L"settings:java-browse") {
+        browse_java_exe();
+    } else if (action == L"settings:java-clear") {
+        java_path_.clear();
+        save_user_setting("javaPath", Json::string(""));
+        rebuild_settings();
+    } else if (action.rfind(L"settings:java-use-z:", 0) == 0) {
+        size_t index = size_t(std::stoul(action.substr(19)));
+        if (index < java_state_.zulu.size()) {
+            java_path_ = java_state_.zulu[index].java_path;
+            save_user_setting("javaPath", Json::string(wide_to_utf8(java_path_)));
+            rebuild_settings();
+        }
+    } else if (action.rfind(L"settings:java-use-e:", 0) == 0) {
+        size_t index = size_t(std::stoul(action.substr(19)));
+        if (index < java_state_.external.size()) {
+            java_path_ = java_state_.external[index].java_path;
+            save_user_setting("javaPath", Json::string(wide_to_utf8(java_path_)));
+            rebuild_settings();
+        }
+    } else if (action.rfind(L"settings:java-ask:", 0) == 0) {
+        java_confirm_ = action.substr(17);
+        rebuild_settings();
+    } else if (action == L"settings:java-cancel") {
+        java_confirm_.clear();
+        rebuild_settings();
+    } else if (action.rfind(L"settings:java-delete:", 0) == 0) {
+        std::wstring component = action.substr(20);
+        for (const auto& rt : java_state_.managed)
+            if (rt.component == component) { remove_java_dir(rt.dir); break; }
+        java_confirm_.clear();
+        rebuild_settings();
+    } else if (action.rfind(L"settings:java-install:", 0) == 0) {
+        notify(L"Java", L"Tính năng tải Java runtime sẽ được port sau.", L"info");
+    } else if (action == L"settings:zulu-major") {
+        static const wchar_t* values[] = { L"8", L"11", L"17", L"21", L"25" };
+        int index = 0;
+        for (int i = 0; i < 5; ++i)
+            if (zulu_major_ == values[i]) index = i;
+        zulu_major_ = values[(index + 1) % 5];
+        rebuild_settings();
+    } else if (action == L"settings:zulu-kind") {
+        zulu_kind_ = zulu_kind_ == L"jre" ? L"jdk" : L"jre";
+        rebuild_settings();
+    } else if (action == L"settings:zulu-download") {
+        notify(L"Azul Zulu", L"Tính năng tải Java Zulu sẽ được port sau.", L"info");
+    } else if (action.rfind(L"settings:zulu-ask:", 0) == 0) {
+        size_t index = size_t(std::stoul(action.substr(17)));
+        if (index < java_state_.zulu.size()) {
+            zulu_confirm_ = java_state_.zulu[index].java_path;
+            rebuild_settings();
+        }
+    } else if (action == L"settings:zulu-cancel") {
+        zulu_confirm_.clear();
+        rebuild_settings();
+    } else if (action.rfind(L"settings:zulu-delete:", 0) == 0) {
+        size_t index = size_t(std::stoul(action.substr(20)));
+        if (index < java_state_.zulu.size()) remove_java_dir(java_state_.zulu[index].dir);
+        zulu_confirm_.clear();
+        rebuild_settings();
+    } else if (action == L"settings:update-check") {
+        notify(L"Cập nhật", L"Bạn đang dùng bản mới nhất (v2.0.0).", L"success");
+    } else if (action == L"settings:whats-new") {
+        notify(L"XyoLauncher+ 2.0.0",
+               L"Engine native: sidebar 3D, tài khoản, trang chủ và hệ thống đầy đủ.", L"info");
     } else if (action.rfind(L"nav:", 0) == 0) {
         page_ = action.substr(4);
         close_account_menu();
@@ -3660,6 +5041,11 @@ void App::paint() {
         layout_home();
         renderer_.clip_push(home_slot_rect_);
         ui_draw(home_.get(), renderer_, hovered_);
+        renderer_.clip_pop();
+    } else if (page_ == L"settings" && settings_) {
+        layout_settings();
+        renderer_.clip_push(settings_slot_rect_);
+        ui_draw(settings_.get(), renderer_, hovered_);
         renderer_.clip_pop();
     }
     bool main_ok = renderer_.end_main();
@@ -4288,6 +5674,15 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         case WM_APP + 11:
             if (app) app->handle_system_msg(lp);
+            return 0;
+        case WM_APP + 13:
+            if (app) app->handle_java_state(lp);
+            return 0;
+        case WM_APP + 14:
+            if (app) app->handle_background_result(lp);
+            return 0;
+        case WM_APP + 15:
+            if (app) app->handle_java_removed();
             return 0;
         case WM_MOUSEWHEEL: {
             if (app) {
