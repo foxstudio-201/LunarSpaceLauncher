@@ -687,10 +687,7 @@ void Renderer::project_item_quad(const D2D1_RECT_F& item, const D2D1_RECT_F& sid
     float w = item.right - item.left;
     float h = item.bottom - item.top;
     const float depth = 900.0f;
-    float base = std::fabs(angle_degrees) * 3.14159265358979f / 180.0f;
-    // The tile hinges out of the sidebar on its left edge: as it rises, it
-    // turns toward the viewer, so its foreshortening relaxes.
-    float radians = base * (1.0f - 0.34f * std::clamp(lift, 0.0f, 1.0f));
+    float radians = std::fabs(angle_degrees) * 3.14159265358979f / 180.0f;
     float cs = std::cos(radians);
     float sn = std::fabs(std::sin(radians));
     float side_left = sidebar.left;
@@ -714,6 +711,19 @@ void Renderer::project_item_quad(const D2D1_RECT_F& item, const D2D1_RECT_F& sid
         v[2] = uv[i][0];
         v[3] = uv[i][1];
         v[4] = 1.0f / s;
+    }
+
+    if (lift > 0.0001f) {
+        // Rise toward the viewer: grow and drift right, expanding away from
+        // the sidebar's horizontal centre line.
+        float cx = (verts[0] + verts[5] + verts[10] + verts[15]) * 0.25f;
+        float scale = 1.0f + 0.07f * lift;
+        float dx = 4.0f * lift;
+        for (int i = 0; i < 4; ++i) {
+            float* v = verts + i * 5;
+            v[0] = cx + (v[0] - cx) * scale + dx;
+            v[1] = center_y + (v[1] - center_y) * scale;
+        }
     }
 }
 
