@@ -6,24 +6,203 @@ const isDev = process.env.NODE_ENV === 'development'
 
 // Giữ mức RAM của launcher thấp: chặn heap V8 phình to và gắn AppUserModelId đúng tên mới.
 app.commandLine.appendSwitch('js-flags', '--max-old-space-size=512')
+// Splash dùng canvas 2D một lần lúc khởi động; tắt tăng tốc 2D canvas trả lại
+// ~30MB bộ nhớ GPU mà Chromium vẫn giữ sau khi splash đóng.
+app.commandLine.appendSwitch('disable-accelerated-2d-canvas')
 if (process.platform === 'win32') app.setAppUserModelId('com.xyolauncher.launcher')
 
-// Đổi tên sản phẩm làm thư mục userData đổi theo => chép dữ liệu từ bản LunarSpace cũ
-// sang một lần để người dùng không mất danh sách instance/cài đặt.
-function migrateLegacyUserData() {
+// Đổi tên sản phẩm làm thư mục userData đổi theo => dữ liệu cũ nằm ở
+// %APPDATA%\LunarSpace Launcher. Lần cập nhật đầu tiên launcher hiện modal hỏi
+// người dùng đồng bộ sang %APPDATA%\xyolauncher hay xoá dữ liệu cũ.
+const LEGACY_DIR_NAMES = [
+  'LunarSpace Launcher',
+  'LunarSpaceLauncher',
+  'lunarspace-launcher',
+  'lunaspace-launcher',
+  'lunarspacelauncher',
+]
+
+// Chỉ bỏ qua hạ tầng Chromium/Electron của bản cũ — toàn bộ dữ liệu người dùng
+// (instances, settings, tài khoản, shared, skin, background, cache…) đều được chép.
+const LEGACY_SKIP = new Set([
+  'Cache', 'Code Cache', 'GPUCache', 'GPUPersistentCache', 'DawnGraphiteCache',
+  'DawnWebGPUCache', 'GrShaderCache', 'ShaderCache', 'VideoDecodeStats', 'DIPS',
+  'Local Storage', 'Session Storage', 'blob_storage', 'Network', 'shared_proto_db',
+  'Crashpad', 'Crash Reports', 'BrowserMetrics', 'Local State', 'Preferences',
+  'Network Persistent State', 'TransportSecurity', 'Trust Tokens', 'Trust Tokens-journal',
+  'SingletonLock', 'SingletonCookie', 'SingletonSocket', 'lockfile', 'LOG', 'LOG.old',
+  '.updaterId', 'declarative_performance_observer.db', 'declarative_performance_observer.db-journal',
+  'component_crx_cache', 'extensions_crx_cache', 'Feature Engagement Tracker',
+  'optimization_guide_model_store', 'Safe Browsing', 'Segmentation Platform',
+  'PersistentOriginTrials', 'OriginTrials', 'AutofillStrikeDatabase', 'GCM Store',
+  'EventTrace', 'WebRTCVideoCapture', 'webrtc_event_logs', 'Sessions', 'Sdk',
+  'Top Sites', 'Visited Links', 'Favicons', 'History', 'History-journal',
+  'Cookies', 'Cookies-journal', 'QuotaManager', 'QuotaManager-journal',
+  'Platform Notifications',
+])
+
+const LEGACY_DATA_MARKS = [
+  'instances.json', 'settings.json', 'auth.json', 'tokens.json', 'shared',
+  'backgrounds', 'skin-cache', 'icon-cache', 'map-cache', 'world-icons',
+  'use-brand', 'servertest', 'links', 'tools', 'release-notes',
+]
+
+let legacyJob = null
+
+const legacyCandidates = () => LEGACY_DIR_NAMES.map((name) => path.join(app.getPath('appData'), name))
+const samePath = (a, b) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase()
+
+function legacyDataScore(dir) {
+  return LEGACY_DATA_MARKS.reduce((n, name) => n + (fs.existsSync(path.join(dir, name)) ? 1 : 0), 0)
+}
+
+function legacyDataDir() {
+  const target = app.getPath('userData')
+  for (const dir of legacyCandidates()) {
+    if (samePath(dir, target)) continue
+    try {
+      if (fs.statSync(dir).isDirectory() && legacyDataScore(dir) > 0) return dir
+    } catch {}
+  }
+  return ''
+}
+
+function legacyPendingDir() {
+  const marker = readSettings().legacySync
+  if (marker && marker.done) return ''
+  return legacyDataDir()
+}
+
+function readJsonFile(file) {
   try {
-    const target = app.getPath('userData')
-    const legacy = path.join(app.getPath('appData'), 'LunarSpace Launcher')
-    if (legacy === target) return
-    if (!fs.existsSync(legacy)) return
-    if (fs.existsSync(path.join(target, 'instances.json')) || fs.existsSync(path.join(target, 'settings.json'))) return
-    fs.mkdirSync(target, { recursive: true })
-    fs.cpSync(legacy, target, { recursive: true, force: true })
+    return JSON.parse(fs.readFileSync(file, 'utf8'))
   } catch {
-    // bỏ qua: launcher vẫn chạy với dữ liệu mới
+    return null
   }
 }
-migrateLegacyUserData()
+
+function rewriteLegacyPaths(value, legacyRoot, targetRoot) {
+  if (typeof value === 'string') {
+    return value.toLowerCase().startsWith(legacyRoot.toLowerCase())
+      ? targetRoot + value.slice(legacyRoot.length)
+      : value
+  }
+  if (Array.isArray(value)) return value.map((item) => rewriteLegacyPaths(item, legacyRoot, targetRoot))
+  if (value && typeof value === 'object') {
+    const out = {}
+    for (const [key, item] of Object.entries(value)) out[key] = rewriteLegacyPaths(item, legacyRoot, targetRoot)
+    return out
+  }
+  return value
+}
+
+function mergeLegacySettings(legacy, current) {
+  const merged = { ...(legacy || {}) }
+  for (const [key, value] of Object.entries(current || {})) {
+    if (value === null || value === undefined || value === '') continue
+    merged[key] = value
+  }
+  const accounts = []
+  const seen = new Set()
+  for (const account of [...(current?.accounts || []), ...(legacy?.accounts || [])]) {
+    if (!account?.id || seen.has(account.id)) continue
+    seen.add(account.id)
+    accounts.push(account)
+  }
+  if (accounts.length) merged.accounts = accounts
+  merged.activeAccountId = current?.activeAccountId || legacy?.activeAccountId || null
+  merged.secrets = { ...(legacy?.secrets || {}), ...(current?.secrets || {}) }
+  delete merged.legacySync
+  return merged
+}
+
+function mergeLegacyInstances(legacy, current, legacyRoot, targetRoot) {
+  const out = Array.isArray(current) ? current.map((entry) => ({ ...entry })) : []
+  const index = new Map(out.map((entry, i) => [entry?.id, i]).filter(([id]) => id))
+  for (const entry of Array.isArray(legacy) ? legacy : []) {
+    if (!entry?.id) continue
+    const fixed = rewriteLegacyPaths(entry, legacyRoot, targetRoot)
+    if (index.has(entry.id)) out[index.get(entry.id)] = { ...fixed, ...out[index.get(entry.id)] }
+    else {
+      out.push(fixed)
+      index.set(entry.id, out.length - 1)
+    }
+  }
+  return out
+}
+
+async function legacyWalk(root, job, onProgress) {
+  let files = 0
+  let bytes = 0
+  const stack = ['']
+  while (stack.length) {
+    if (job?.cancelled) return { files, bytes, cancelled: true }
+    const rel = stack.pop()
+    let entries = []
+    try {
+      entries = await fs.promises.readdir(path.join(root, rel), { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      if (!rel && LEGACY_SKIP.has(entry.name)) continue
+      const childRel = rel ? path.join(rel, entry.name) : entry.name
+      if (entry.isDirectory()) {
+        stack.push(childRel)
+      } else if (entry.isFile()) {
+        files += 1
+        try {
+          bytes += (await fs.promises.stat(path.join(root, childRel))).size
+        } catch {}
+        if (files % 250 === 0) await new Promise((resolve) => setImmediate(resolve))
+      }
+    }
+    onProgress?.({ files, bytes })
+  }
+  return { files, bytes, cancelled: false }
+}
+
+async function legacyCopyTree(root, target, job, onProgress) {
+  let done = 0
+  let lastReport = 0
+  const stack = ['']
+  while (stack.length) {
+    if (job?.cancelled) return { copied: done, cancelled: true }
+    const rel = stack.pop()
+    let entries = []
+    try {
+      entries = await fs.promises.readdir(path.join(root, rel), { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      if (job?.cancelled) return { copied: done, cancelled: true }
+      if (!rel && LEGACY_SKIP.has(entry.name)) continue
+      // instances.json/settings.json được gộp riêng để không đè dữ liệu mới.
+      if (!rel && (entry.name === 'instances.json' || entry.name === 'settings.json')) continue
+      const childRel = rel ? path.join(rel, entry.name) : entry.name
+      const src = path.join(root, childRel)
+      const dst = path.join(target, childRel)
+      if (entry.isDirectory()) {
+        await fs.promises.mkdir(dst, { recursive: true }).catch(() => {})
+        stack.push(childRel)
+      } else if (entry.isFile()) {
+        await fs.promises.mkdir(path.dirname(dst), { recursive: true }).catch(() => {})
+        try {
+          await fs.promises.copyFile(src, dst)
+        } catch {}
+        done += 1
+        const now = Date.now()
+        if (now - lastReport > 80) {
+          lastReport = now
+          onProgress?.({ done, file: childRel })
+        }
+      }
+    }
+  }
+  onProgress?.({ done, file: '' })
+  return { copied: done, cancelled: false }
+}
 
 let mainWindow = null
 let settingsCache = null
@@ -463,12 +642,109 @@ launcher.setBroadcast(emitLauncher)
 launcher.serverLocalStart()
 
 function registerIpc() {
+  ipcMain.handle('splash:frame', (_e, index) => {
+    const n = Number(index)
+    if (!Number.isInteger(n) || n < 1 || n > 156) return null
+    const file = `frame_${String(n).padStart(3, '0')}.jpg`
+    for (const base of [
+      path.join(__dirname, '..', 'dist', 'splash'),
+      path.join(__dirname, '..', 'public', 'splash'),
+    ]) {
+      try {
+        return fs.readFileSync(path.join(base, file))
+      } catch {}
+    }
+    return null
+  })
   ipcMain.handle('settings:get', () => readSettings())
   ipcMain.handle('settings:set', (_e, patch) => {
     const next = writeSettings(patch || {})
     presence.configure(next)
     updater.configure(next)
     return next
+  })
+
+  ipcMain.handle('legacy:status', () => {
+    const dir = legacyPendingDir()
+    const marker = readSettings().legacySync
+    if (!dir) return { ok: true, pending: false, done: Boolean(marker?.done) }
+    return {
+      ok: true,
+      pending: true,
+      legacyPath: dir,
+      legacyName: path.basename(dir),
+      targetPath: app.getPath('userData'),
+    }
+  })
+
+  ipcMain.handle('legacy:sync', async (event) => {
+    const dir = legacyPendingDir()
+    if (!dir) return { ok: false, error: 'Không tìm thấy dữ liệu LunarSpace Launcher.' }
+    if (legacyJob) return { ok: false, error: 'Đang đồng bộ dữ liệu.' }
+    const job = { cancelled: false }
+    legacyJob = job
+    const target = app.getPath('userData')
+    const send = (payload) => {
+      try {
+        if (!event.sender.isDestroyed()) event.sender.send('legacy:progress', payload)
+      } catch {}
+    }
+    try {
+      fs.mkdirSync(target, { recursive: true })
+      send({ phase: 'scan', files: 0, bytes: 0 })
+      const scan = await legacyWalk(dir, job, (info) => {
+        if (!job.cancelled) send({ phase: 'scan', files: info.files, bytes: info.bytes })
+      })
+      if (job.cancelled || scan.cancelled) return { ok: true, cancelled: true }
+      const total = scan.files
+      send({ phase: 'copy', done: 0, total })
+      const copy = await legacyCopyTree(dir, target, job, (info) => {
+        if (!job.cancelled) send({ phase: 'copy', done: info.done, total, file: info.file })
+      })
+      if (job.cancelled || copy.cancelled) return { ok: true, cancelled: true }
+
+      const legacySettings = rewriteLegacyPaths(readJsonFile(path.join(dir, 'settings.json')) || {}, dir, target)
+      const mergedSettings = mergeLegacySettings(legacySettings, readSettings())
+      settingsCache = mergedSettings
+      writeSettings({ legacySync: { done: true, mode: 'synced', at: new Date().toISOString() } })
+      presence.configure(settingsCache)
+      updater.configure(settingsCache)
+
+      const legacyInstances = readJsonFile(path.join(dir, 'instances.json'))
+      const currentInstances = readJsonFile(path.join(target, 'instances.json'))
+      if (Array.isArray(legacyInstances) || Array.isArray(currentInstances)) {
+        const merged = mergeLegacyInstances(legacyInstances || [], currentInstances || [], dir, target)
+        fs.writeFileSync(path.join(target, 'instances.json'), JSON.stringify(merged, null, 2), 'utf8')
+      }
+
+      send({ phase: 'done', files: copy.copied, total })
+      return { ok: true, files: copy.copied, total, legacyPath: dir }
+    } catch (err) {
+      return { ok: false, error: err?.message || 'Đồng bộ thất bại.' }
+    } finally {
+      legacyJob = null
+    }
+  })
+
+  ipcMain.handle('legacy:cancel', () => {
+    if (legacyJob) legacyJob.cancelled = true
+    return { ok: true }
+  })
+
+  ipcMain.handle('legacy:decline', () => {
+    const target = app.getPath('userData')
+    const removed = []
+    for (const dir of legacyCandidates()) {
+      if (samePath(dir, target)) continue
+      try {
+        if (fs.statSync(dir).isDirectory() && legacyDataScore(dir) > 0) {
+          fs.rmSync(dir, { recursive: true, force: true })
+          removed.push(dir)
+        }
+      } catch {}
+    }
+    writeSettings({ legacySync: { done: true, mode: 'declined', at: new Date().toISOString() } })
+    return { ok: true, removed }
   })
 
   ipcMain.handle('update:status', () => ({ ok: true, ...updater.status() }))

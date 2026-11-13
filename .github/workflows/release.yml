@@ -90,56 +90,34 @@ jobs:
           draft: false
           make_latest: ${{ steps.latest.outputs.make_latest }}
           body: |
-            # XyoLauncher 2.0
+            # XyoLauncher 2.0.1
 
-            Bản cập nhật lớn: đổi tên, đổi giao diện, đổi cách khởi động và toàn bộ hiệu ứng mới.
+            Bản cập nhật tập trung vào trải nghiệm mở launcher lần đầu, đồng bộ dữ liệu từ LunarSpace Launcher và luồng khởi động mới.
 
-            ![Loading mới](https://raw.githubusercontent.com/foxstudio-201/LunarSpaceLauncher/main/docs/screenshots/console.png)
+            ![Đăng nhập lần đầu](https://raw.githubusercontent.com/foxstudio-201/LunarSpaceLauncher/main/docs/screenshots/onboarding.png)
 
-            ## Khởi động
-            - Logo Xyo mới, titlebar tự vẽ (logo + tên + thu nhỏ/phóng to/đóng).
-            - Splash 156 khung hình 30fps, chuyển sang màn hình loading bằng hiệu ứng tách đôi.
-            - Màn loading mới: đếm % + thanh tiến trình + **hiệu ứng hạt tạo chữ** (XyoLauncher / Almost ready / Minecraft), tự chuyển chữ mỗi 5.2 giây.
-            - Cửa sổ khởi tạo 1180×760 (tối thiểu 980×640), cho phép thu nhỏ/phóng to.
+            ## Đăng nhập lần đầu
+            - Màn hình đăng nhập riêng sau splash với nền cảnh đêm thuật toán: sao nhấp nháy, dải Ngân Hà, mặt trăng, mây trôi, núi và mặt biển động.
+            - 4 cách đăng nhập: **Ngoại tuyến**, **Microsoft**, **ely.by**, **Discord** — dùng icon thương hiệu thật.
+            - Hiệu ứng chuyển loại tài khoản, head skin cập nhật khi gõ tên, trạng thái chờ xác minh và màn chào khi hoàn tất.
+            - Chưa có tài khoản: màn đăng nhập luôn hiện lại mỗi lần mở (kể cả đã bỏ qua). Đã đăng nhập: không hiện nữa.
 
-            ## Tham số đã loại bỏ
-            - Bỏ hoàn toàn cờ `-XX:MaxGCPauseMillis` khỏi JVM mặc định.
-            - JVM mặc định rút gọn còn `-XX:+UseG1GC -XX:+DisableExplicitGC`.
-            - Launcher tự lọc các cờ cũ (`MaxGCPauseMillis`, `AlwaysPreTouch`) nếu còn trong cấu hình cũ.
-            - Xoá mục "Tối ưu" (boost) trong cài đặt instance.
+            ## Chào mừng trở lại
+            - Khi đã có tài khoản, launcher hiện toast **Đăng nhập thành công** kèm head skin thật và lời chào.
 
-            ## Ảnh nền
-            - Thêm mục **Ảnh nền** trong Cài đặt hệ thống.
-            - Mặc định dùng sẵn ảnh `1123121` (đóng gói trong app).
-            - 5 ảnh còn lại (984658, 1224149, 1265740, 1373816, 1402908) hiển thị dạng "Chưa tải", chỉ áp dụng được sau khi bấm **Tải về** (tải từ GitHub, lưu vào userData).
-            - Chế độ "Theo giao diện": tắt ảnh nền, quay về nền đặc theo sáng/tối.
+            ![Toast chào mừng](https://raw.githubusercontent.com/foxstudio-201/LunarSpaceLauncher/main/docs/screenshots/welcome-toast.png)
 
-            ![Chế độ nền ảnh](https://raw.githubusercontent.com/foxstudio-201/LunarSpaceLauncher/main/docs/screenshots/glass-mode.png)
+            ## Đồng bộ dữ liệu LunarSpace Launcher
+            - Phát hiện dữ liệu launcher cũ và hỏi một lần: **Đồng bộ** (chép instances, skins, cấu hình, shared…) hoặc **Không đồng bộ** (xoá dữ liệu cũ).
+            - Hiệu ứng quỹ đạo hành tinh, tiến trình đếm tệp, huỷ giữa chừng và đồng bộ lại.
 
-            ## Hiệu ứng mới
-            - **Pixel dissolve khối cỏ** (xanh lá + nâu đất) khi **vào/ra instance**; chuyển qua lại giữa 4 trang chính thì không có hiệu ứng.
-            - Công tắc **Hiệu ứng chuyển cảnh** trong Cài đặt để bật/tắt.
-            - **Toast xếp chồng**: toast mới nổi lên trước, toast cũ lùi sau và thu nhỏ; rê chuột để bung thành danh sách; vuốt ngang để xoá; toast "đang tải" xoay rồi chuyển thành "xong".
-            - Chế độ nền ảnh: panel/sidebar/card là **kính mờ**, ảnh nền **nét**, modal/tooltip/toast/menu **đục hoàn toàn**, không phụ thuộc sáng/tối.
-            - Console khi chưa có log: hiệu ứng hạt tạo chữ (XyoLauncher / Almost ready / No log yet) thay cho chữ tĩnh.
+            ![Đồng bộ dữ liệu cũ](https://raw.githubusercontent.com/foxstudio-201/LunarSpaceLauncher/main/docs/screenshots/legacy-sync.png)
 
-            ## Giao diện mới
-            - Sidebar kiểu Rust: rail 200 ↔ 76px, pill trượt, nút thu gọn, thẻ tài khoản.
-            - Gộp Cài đặt + Tài khoản vào menu thả xuống của thẻ tài khoản (bám đúng vị trí nút, không bị cắt).
+            ## Khởi động mượt, không lộ màn hình chính
+            - Splash → loading (%) → đăng nhập (nếu cần) → **tối dần** → **tách màn** chạy sau cùng.
+            - Chữ và thanh loading ẩn hẳn trước khi tách màn; không còn khung hình lộ giao diện chính giữa các bước.
+            - Áp dụng cho cả đăng nhập, bỏ qua và trường hợp đã có tài khoản.
 
-            ![Menu tài khoản](https://raw.githubusercontent.com/foxstudio-201/LunarSpaceLauncher/main/docs/screenshots/account-menu.png)
-
-            - Titlebar/PageHeader tối giản, font nhỏ hơn mặc định.
-            - Công tắc **sáng/tối** kiểu trời/đêm (ThemeSwitch).
-            - Tooltip custom dùng chung một kiểu: nền đục, không blur, hoạt động cả khi sidebar thu gọn.
-
-            ![Tooltip khi sidebar thu gọn](https://raw.githubusercontent.com/foxstudio-201/LunarSpaceLauncher/main/docs/screenshots/tooltip-rail.png)
-
-            - Toàn bộ icon, logo, favicon, ảnh nền installer được thay bằng bộ nhận diện XyoLauncher.
-
-            ## Loại bỏ kiểu cũ
-            - Bỏ giao diện pixel (khung viền pixel, font pixel).
-            - Bỏ hiệu ứng wipe toàn màn hình cũ (`themeWipe.js`).
-            - Bỏ mục "Tối ưu"/boost và file `boost.cjs`.
-            - Bỏ cờ JVM `-XX:MaxGCPauseMillis`, `-XX:+AlwaysPreTouch`.
-            - Bỏ toast kiểu cũ (thanh ngắn ở góc màn hình) — thay bằng toast xếp chồng.
+            ## Khác
+            - Logo XyoLauncher cho màn đăng nhập; viền focus ô nhập trung tính.
+            - Nâng phiên bản lên 2.0.1.

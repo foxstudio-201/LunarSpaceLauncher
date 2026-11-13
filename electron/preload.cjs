@@ -19,6 +19,7 @@ const localEvent = (type, map) => (callback) => {
 }
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  splashFrame: (index) => ipcRenderer.invoke('splash:frame', index),
   getSettings: () => ipcRenderer.invoke('settings:get'),
   saveSettings: (patch) => ipcRenderer.invoke('settings:set', patch),
   setSecret: (name, value) => ipcRenderer.invoke('secret:set', { name, value }),
@@ -131,6 +132,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   releaseNotes: (opts) => ipcRenderer.invoke('update:release-notes', opts),
   whatsNew: () => ipcRenderer.invoke('update:whats-new'),
   whatsNewSeen: (opts) => ipcRenderer.invoke('update:whats-new-seen', opts),
+  legacyStatus: () => ipcRenderer.invoke('legacy:status'),
+  legacySync: () => ipcRenderer.invoke('legacy:sync'),
+  legacyCancel: () => ipcRenderer.invoke('legacy:cancel'),
+  legacyDecline: () => ipcRenderer.invoke('legacy:decline'),
+  onLegacyProgress: on('legacy:progress'),
   contentSearch: (opts) => ipcRenderer.invoke('launcher:content-search', opts),
   instanceModEnvs: (opts) => ipcRenderer.invoke('launcher:instance-mod-env', opts),
   hostStatus: (opts) => ipcRenderer.invoke('launcher:host-status', opts),

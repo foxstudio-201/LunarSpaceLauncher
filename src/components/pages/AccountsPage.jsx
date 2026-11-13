@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { User, Plus, Check, Trash, Copy, Warning, Info, ArrowsClockwise, DiscordLogo, X } from '@phosphor-icons/react'
 import { t } from '../../i18n/translations'
 import { palette } from '../../lib/palette'
@@ -6,8 +6,10 @@ import PageHeader from '../ui/PageHeader'
 import HeadSkin from '../ui/HeadSkin'
 import AddAccountModal from '../accounts/AddAccountModal.jsx'
 import DiscordLinkModal from '../accounts/DiscordLinkModal.jsx'
-import SkinTab from '../accounts/SkinTab.jsx'
 import * as api from '../../api/client.js'
+
+// three.js của skin viewer chỉ được tải khi mở tab Skin.
+const SkinTab = lazy(() => import('../accounts/SkinTab.jsx'))
 
 const TYPE_LABELS = {
   offline: 'accounts.kind.offline',
@@ -196,19 +198,23 @@ export default function AccountsPage({ theme, lang, accounts, activeAccountId, o
       </div>
       )}
 
-      <div className={tab === 'skin' ? 'flex-1 min-h-0 flex flex-col overflow-hidden' : 'hidden'}>
-        <SkinTab
-          theme={theme}
-          lang={lang}
-          accounts={list}
-          activeAccountId={activeAccountId}
-          heads={heads}
-          notify={notify}
-          visible={tab === 'skin'}
-          onClose={() => setTab('list')}
-          onChanged={() => setHeadsVersion((value) => value + 1)}
-        />
-      </div>
+      {tab === 'skin' && (
+        <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+          <Suspense fallback={<div className="flex-1" />}>
+            <SkinTab
+              theme={theme}
+              lang={lang}
+              accounts={list}
+              activeAccountId={activeAccountId}
+              heads={heads}
+              notify={notify}
+              visible
+              onClose={() => setTab('list')}
+              onChanged={() => setHeadsVersion((value) => value + 1)}
+            />
+          </Suspense>
+        </div>
+      )}
 
       <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4" style={{ display: tab === 'list' ? 'block' : 'none' }}>
         <div className="max-w-3xl mx-auto flex flex-col gap-3">

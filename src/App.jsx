@@ -1,25 +1,32 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react'
 import { AppProvider, useApp } from './i18n/AppContext'
 import TitleBar from './components/TitleBar'
 import { setBackgroundMode } from './lib/palette'
 import Sidebar, { RAIL_W, RAIL_W_COLLAPSED } from './components/Sidebar'
 import SplashScreen from './components/SplashScreen'
+import SplitReveal from './components/onboarding/SplitReveal'
 import PixelDissolve from './components/PixelDissolve'
 import TooltipProvider from './components/ui/TooltipProvider'
 import CrashModal from './components/ui/CrashModal'
 import { ToastProvider, useToast } from './components/ui/Toast'
 import ReleaseNotesModal from './components/ui/ReleaseNotesModal.jsx'
+import LegacySyncModal from './components/ui/LegacySyncModal.jsx'
+import OnboardingScreen from './components/onboarding/OnboardingScreen.jsx'
+import HeadSkin from './components/ui/HeadSkin'
 import { progressLabel, progressPercent } from './components/ui/ProgressBar'
-import HomePage from './components/pages/HomePage'
-import VersionsPage from './components/pages/VersionsPage'
-import ModpackPage from './components/pages/ModpackPage'
-import HostPage from './components/pages/HostPage'
-import ServerLocalHostPage from './components/pages/ServerLocalHostPage'
-import AccountsPage from './components/pages/AccountsPage'
-import SettingsPage from './components/pages/SettingsPage'
-import InstancePanel from './components/instance/InstancePanel'
 import { launchBannerLines } from './lib/asciiLogo'
 import * as api from './api/client.js'
+
+// Trang nặng (three.js, xterm, danh sách lớn) được tách chunk và chỉ nạp khi mở
+// để giảm dung lượng JS phải parse/giữ trong RAM lúc khởi động.
+const HomePage = lazy(() => import('./components/pages/HomePage'))
+const VersionsPage = lazy(() => import('./components/pages/VersionsPage'))
+const ModpackPage = lazy(() => import('./components/pages/ModpackPage'))
+const HostPage = lazy(() => import('./components/pages/HostPage'))
+const ServerLocalHostPage = lazy(() => import('./components/pages/ServerLocalHostPage'))
+const AccountsPage = lazy(() => import('./components/pages/AccountsPage'))
+const SettingsPage = lazy(() => import('./components/pages/SettingsPage'))
+const InstancePanel = lazy(() => import('./components/instance/InstancePanel'))
 
 // Splash: 156 frame @30fps (5.2s) rồi preloader đếm % tự quyết định thời điểm đóng.
 const SPLASH_GUARD_MS = 30000
@@ -68,6 +75,11 @@ function AppContent() {
   const [update, setUpdate] = useState({ phase: 'idle', current: '' })
   const [openCrash, setOpenCrash] = useState(null)
   const [whatsNew, setWhatsNew] = useState(null)
+  const [legacy, setLegacy] = useState(null)
+  const [legacyChecked, setLegacyChecked] = useState(false)
+  const [onboarding, setOnboarding] = useState(false)
+  const [accountsReady, setAccountsReady] = useState(false)
+  const [startupAccount, setStartupAccount] = useState(null)
 
   const [boot, setBoot] = useState('splash')
   const [dissolve, setDissolve] = useState(null)
@@ -84,6 +96,10 @@ function AppContent() {
   const langRef = useRef(lang)
   const bootRef = useRef(boot)
   const packsRef = useRef(new Set())
+  const onboardingRef = useRef(false)
+  const onboardingChecked = useRef(false)
+  const startupShown = useRef(false)
+  const pendingWelcomeRef = useRef(null)
 
   const refreshInstances = useCallback(async () => {
     try {
@@ -127,6 +143,10 @@ function AppContent() {
   }, [boot])
 
   useEffect(() => {
+    onboardingRef.current = onboarding
+  }, [onboarding])
+
+  useEffect(() => {
     const inst = selectedInstance
     api
       .discordSelect(inst ? { name: inst.name, version: inst.version, loader: inst.loader, loaderVersion: inst.loaderVersion || null } : null)
@@ -165,7 +185,7 @@ function AppContent() {
         setAccounts(res.accounts || [])
         setActiveAccountId(res.activeAccountId || null)
       }
-    }).catch(() => {})
+    }).catch(() => {}).finally(() => setAccountsReady(true))
     refreshInstances()
     loadVersions(false, true)
   }, [refreshInstances, loadVersions])
@@ -409,7 +429,9 @@ function AppContent() {
     update.phase === 'ready' ||
     update.phase === 'installing'
 
-  const finishBoot = useCallback(() => setBoot('done'), [])
+  const finishBoot = useCallback(() => {
+    setBoot(onboardingRef.current ? 'onboarding' : 'done')
+  }, [])
 
   useEffect(() => {
     api.updateStatus().then((res) => {
@@ -524,6 +546,86 @@ function AppContent() {
     if (target?.version) api.whatsNewSeen({ version: target.version }).catch(() => {})
   }, [whatsNew])
 
+  useEffect(() => {
+    let alive = true
+    api
+      .legacyStatus()
+      .then((res) => {
+        if (alive && res?.pending) setLegacy(res)
+      })
+      .catch(() => {})
+      .finally(() => { if (alive) setLegacyChecked(true) })
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  const refreshAfterLegacy = useCallback(() => {
+    refreshInstances()
+    api.storage().then((s) => { if (s?.ok) setStorage(s) }).catch(() => {})
+    api.listAccounts().then((res) => {
+      if (!res?.ok) return
+      setAccounts(res.accounts || [])
+      setActiveAccountId(res.activeAccountId || null)
+    }).catch(() => {})
+  }, [refreshInstances])
+
+  const markOnboardingSeen = useCallback(() => {
+    window.electronAPI?.saveSettings?.({ onboardingSeen: true })?.catch?.(() => {})
+  }, [])
+
+  const welcomeToast = useCallback((account, back = false) => ({
+    tone: 'ok',
+    title: vn(langRef.current, 'Đăng nhập thành công', 'Signed in'),
+    message: back
+      ? vn(langRef.current, `Chào mừng trở lại, ${account.name}!`, `Welcome back, ${account.name}!`)
+      : vn(langRef.current, `Chào mừng bạn, ${account.name}!`, `Welcome, ${account.name}!`),
+    avatar: <HeadSkin name={account.name} uuid={account.uuid} type={account.type} size={36} radius={12} theme={theme} />,
+    duration: 7000,
+  }), [theme])
+
+  // Chưa có tài khoản thì màn đăng nhập luôn hiện lại mỗi lần mở (kể cả đã bỏ
+  // qua trước đó); chỉ khi đã đăng nhập mới không hiện nữa.
+  useEffect(() => {
+    if (!accountsReady || !legacyChecked || legacy) return
+    if (onboardingChecked.current) return
+    onboardingChecked.current = true
+    const active = accounts.find((a) => a.id === activeAccountId) || accounts[0] || null
+    if (active) {
+      markOnboardingSeen()
+      setStartupAccount(active)
+      return
+    }
+    setOnboarding(true)
+    if (bootRef.current === 'done') setBoot('onboarding')
+  }, [accountsReady, legacyChecked, legacy, accounts, activeAccountId, markOnboardingSeen])
+
+  useEffect(() => {
+    if (boot !== 'done' || !startupAccount || startupShown.current) return
+    startupShown.current = true
+    toast.notify(welcomeToast(startupAccount, true))
+  }, [boot, startupAccount, toast, welcomeToast])
+
+  const finishOnboarding = useCallback((result) => {
+    markOnboardingSeen()
+    if (result?.accounts) setAccounts(result.accounts)
+    if (result?.activeAccountId) setActiveAccountId(result.activeAccountId)
+    pendingWelcomeRef.current = result?.account || null
+    setBoot('revealing')
+  }, [markOnboardingSeen])
+
+  const completeReveal = useCallback(() => {
+    setBoot('done')
+    const account = pendingWelcomeRef.current
+    pendingWelcomeRef.current = null
+    if (account) toast.notify(welcomeToast(account, false))
+  }, [toast, welcomeToast])
+
+  const skipOnboarding = useCallback(() => {
+    pendingWelcomeRef.current = null
+    setBoot('revealing')
+  }, [])
+
   const handleSelectInstance = useCallback((inst) => {
     setShowDropdown(false)
     runDissolve(() => {
@@ -542,6 +644,14 @@ function AppContent() {
     const off = api.onDiscordEvent((ev) => {
       if (!ev) return
       if (ev.type === 'linked') {
+        if (onboardingRef.current) {
+          api.listAccounts().then((res) => {
+            if (!res?.ok) return
+            setAccounts(res.accounts || [])
+            setActiveAccountId(res.activeAccountId || null)
+          }).catch(() => {})
+          return
+        }
         navigateTo('accounts')
         api.listAccounts().then((res) => {
           if (!res?.ok) return
@@ -557,6 +667,7 @@ function AppContent() {
         return
       }
       if (ev.type === 'failed' && ev.error) {
+        if (onboardingRef.current) return
         toast.notify({
           tone: 'warn',
           title: vn(langRef.current, 'Liên kết Discord thất bại', 'Discord link failed'),
@@ -742,6 +853,7 @@ function AppContent() {
           style={{ marginLeft: railW + 8, transition: 'margin-left 320ms cubic-bezier(0.33, 1, 0.68, 1)' }}
         >
           <div className={`h-full ${transitionClass}`}>
+            <Suspense fallback={<div className="h-full w-full" />}>
             {displayPage === 'home' && (
               <HomePage
                 {...shared}
@@ -813,6 +925,7 @@ function AppContent() {
                 }}
               />
             )}
+            </Suspense>
           </div>
         </div>
       </div>
@@ -821,11 +934,35 @@ function AppContent() {
         <PixelDissolve key={dissolve.id} onMid={handleDissolveMid} onDone={finishDissolve} />
       )}
 
-      {boot !== 'done' && (
-        <SplashScreen theme={theme} lang={lang} onComplete={finishBoot} />
+      {boot === 'splash' && (
+        <SplashScreen theme={theme} lang={lang} hold={onboarding} onComplete={finishBoot} />
       )}
 
-      {whatsNew && (
+      {boot === 'onboarding' && onboarding && (
+        <OnboardingScreen
+          theme={theme}
+          lang={lang}
+          version={version}
+          onDone={finishOnboarding}
+          onSkip={skipOnboarding}
+        />
+      )}
+
+      {boot === 'revealing' && (
+        <SplitReveal onComplete={completeReveal} />
+      )}
+
+      {boot === 'done' && legacy && (
+        <LegacySyncModal
+          theme={theme}
+          lang={lang}
+          info={legacy}
+          onSynced={refreshAfterLegacy}
+          onClose={() => { setLegacy(null); refreshAfterLegacy() }}
+        />
+      )}
+
+      {whatsNew && !legacy && !onboarding && (
         <ReleaseNotesModal theme={theme} lang={lang} version={whatsNew.version || version} onClose={closeWhatsNew} />
       )}
 

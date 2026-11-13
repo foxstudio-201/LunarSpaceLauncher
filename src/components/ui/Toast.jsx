@@ -106,6 +106,7 @@ export function ToastProvider({ children }) {
       tone: opts.tone || 'info',
       title: opts.title || '',
       message: opts.message || '',
+      avatar: opts.avatar || null,
       delay: stagger(),
       finished: true,
       state: 'in',
@@ -256,6 +257,8 @@ function ToastHost({ api, storeRef, tick }) {
 .u070-t.back>*{opacity:0}
 .u070-ic{width:36px;height:36px;flex:none;border-radius:12px;display:grid;place-items:center;background:color-mix(in srgb,var(--c) 15%,transparent);color:var(--c)}
 .u070-ic svg{width:18px;height:18px}
+.u070-ic.u070-avatar{background:none;padding:0;overflow:hidden;border-radius:12px}
+.u070-ic.u070-avatar>span{width:100%!important;height:100%!important}
 .u070-ic i{width:18px;height:18px;border-radius:50%;border:2.5px solid currentColor;border-right-color:transparent;animation:u070-spin .7s linear infinite}
 @keyframes u070-spin{to{transform:rotate(360deg)}}
 .u070-tx{flex:1;min-width:0}
@@ -416,9 +419,13 @@ function ToastCard({ item, index, y, s, o, stacked, exiting, c, lang, barRefs, o
       onPointerEnter={onEnter}
       onPointerLeave={onLeave}
     >
-      <span className="u070-ic" aria-hidden="true">
-        {spinning ? <i /> : <Icon size={18} weight="bold" />}
-      </span>
+      {item.avatar ? (
+        <span className="u070-ic u070-avatar" aria-hidden="true">{item.avatar}</span>
+      ) : (
+        <span className="u070-ic" aria-hidden="true">
+          {spinning ? <i /> : <Icon size={18} weight="bold" />}
+        </span>
+      )}
       <span className="u070-tx">
         <b title={item.title}>{item.title}</b>
         {detail ? <small title={detail}>{detail}</small> : null}

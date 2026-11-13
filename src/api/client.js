@@ -723,6 +723,31 @@ export async function whatsNewSeen(opts) {
   return { ok: true }
 }
 
+export async function legacyStatus() {
+  if (bridge?.legacyStatus) return bridge.legacyStatus()
+  return { ok: true, pending: false }
+}
+
+export async function legacySync() {
+  if (bridge?.legacySync) return bridge.legacySync()
+  return { ok: false, error: NEEDS_APP }
+}
+
+export async function legacyCancel() {
+  if (bridge?.legacyCancel) return bridge.legacyCancel()
+  return { ok: true }
+}
+
+export async function legacyDecline() {
+  if (bridge?.legacyDecline) return bridge.legacyDecline()
+  return { ok: false, error: NEEDS_APP }
+}
+
+export function onLegacyProgress(callback) {
+  if (bridge?.onLegacyProgress) return bridge.onLegacyProgress(callback)
+  return () => {}
+}
+
 export async function exportProfile(opts = {}) {
   if (bridge?.exportProfile) return bridge.exportProfile(opts)
   return { ok: false, error: NEEDS_APP }
